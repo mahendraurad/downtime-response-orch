@@ -1,0 +1,2 @@
+cwd=c:\Users\shivani.d.waghmare\Downloads\learning_memory_agent
+LOAD_DATA_COMPLETED

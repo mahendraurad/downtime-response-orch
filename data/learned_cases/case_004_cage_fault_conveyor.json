@@ -1,0 +1,12 @@
+{
+  "case_id": "CASE_004",
+  "asset_type": "conveyor",
+  "bearing_type": "SKF22212",
+  "fault_mode": "cage_fault",
+  "root_cause": "lubrication failure and contamination",
+  "action_taken": "bearing replacement and lubrication system inspection",
+  "result": "successful repair",
+  "lessons_learned": "Cage fault on SKF22212 conveyor bearing shows FTF dominant frequency with irregular BSF spacing. Kurtosis above 4.5 confirms cage damage. RUL at Stage 3 is approximately 4 days - urgent replacement required. Root cause was grease contamination from external dust ingress through damaged seal. Seal replaced as part of repair.",
+  "valid_until": "2028-09-22",
+  "created_by": "seed_data"
+}

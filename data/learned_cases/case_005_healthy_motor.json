@@ -1,0 +1,12 @@
+{
+  "case_id": "CASE_005",
+  "asset_type": "motor",
+  "bearing_type": "SKF6310",
+  "fault_mode": "healthy",
+  "root_cause": "no fault found",
+  "action_taken": "grease top-up only",
+  "result": "preventive maintenance completed",
+  "lessons_learned": "AST_MTR_002 healthy baseline: 1.8 to 2.0 mm/s vib, 51 to 54C temp. Any reading above 2.5 mm/s or above 60C warrants increased monitoring. Healthy preventive checks provide the most reliable baseline calibration data for the Monitoring Agent. Post-lubrication baseline: 1.7 mm/s vib, 51C temp.",
+  "valid_until": "2028-02-14",
+  "created_by": "seed_data"
+}

@@ -1,0 +1,207 @@
+{
+  "contract_name": "Learning & Memory Agent — Input Contract",
+  "contract_version": "1.1",
+  "description": "JSON structure that upstream DRO agents send to the Learning & Memory Agent (Agent 6.8). Consumed by run_pipeline_demo() and create_learned_case() entry points.",
+  "last_updated": "2026-07-14",
+  "agent": {
+    "name": "Learning & Memory Agent",
+    "id": "agent_6_8",
+    "role": "receiver"
+  },
+  "upstream_producers": [
+    { "id": "agent_1_data_foundation",          "provides": ["asset_id", "asset_type", "bearing_type"] },
+    { "id": "agent_2_monitoring",               "provides": ["vib_rms_mm_s", "kurtosis", "temp_c", "bpfo_energy", "bpfi_energy", "signal_quality_score", "shaft_offset_mm", "anomaly_score"] },
+    { "id": "agent_3_predictive_risk",          "provides": ["risk_level", "failure_probability", "rul_days_min", "rul_days_max", "expected_post_vib_max", "expected_post_temp_max", "expected_post_kurtosis_max", "qa_window"] },
+    { "id": "agent_4_failure_intelligence",     "provides": ["fault_mode", "fault_stage", "diagnosis_confidence", "diagnosis_reasoning"] },
+    { "id": "agent_5_knowledge",                "provides": ["sop_reference"] },
+    { "id": "agent_6_prescriptive_optimisation","provides": ["recommended_action", "parts_required", "estimated_duration_hr"] },
+    { "id": "agent_7_executor",                 "provides": ["case_id", "work_order_id", "work_order_priority", "action_taken", "post_repair_vib_rms", "post_repair_temp_c", "post_repair_result", "technician_notes", "root_cause", "lessons_learned"] }
+  ],
+  "entry_points": {
+    "run_pipeline_demo": {
+      "purpose": "Automated pipeline invocation from upstream orchestrator",
+      "location": "api/streamlit_api.py",
+      "signature": "run_pipeline_demo(feedback: dict, run_id: str = None) -> dict",
+      "return_shape": "LangGraph state dict with keys: knowledge_state, path_taken, processing_log, dimension_assessments, covered_dimensions, missing_dimensions, gap_summary, coverage_reasoning, best_similarity, retrieved_case_id, retrieved_summary, generated_case_content, stored_case_id, final_message, pipeline_duration_ms"
+    },
+    "create_learned_case": {
+      "purpose": "Manual case injection for historical incidents (Add Case UI or direct call)",
+      "location": "api/streamlit_api.py",
+      "signature": "create_learned_case(case_id, asset_type, bearing_type, fault_mode, root_cause, action_taken, result, lessons_learned, valid_until, created_by='streamlit_user') -> Tuple[bool, str]",
+      "return_shape": "Tuple of (success_boolean, message_string). Success: (True, 'Case X stored successfully.'). Failure: (False, 'error message')."
+    }
+  },
+  "required_fields": {
+    "case_id": {
+      "type": "string",
+      "description": "Unique case identifier",
+      "provided_by": "agent_7_executor OR minted by this agent if absent",
+      "format_pattern": "CASE_<YYYYMMDD>_<NNN>",
+      "example": "CASE_20260714_001"
+    },
+    "fault_mode": {
+      "type": "string",
+      "description": "Canonical fault mode",
+      "provided_by": "agent_4_failure_intelligence",
+      "allowed_values": [
+        "outer_race_fault",
+        "inner_race_fault",
+        "cage_fault",
+        "lubrication_issue",
+        "misalignment",
+        "imbalance",
+        "looseness",
+        "sensor_fault",
+        "healthy"
+      ],
+      "example": "outer_race_fault"
+    },
+    "asset_type": {
+      "type": "string",
+      "description": "Canonical asset category",
+      "provided_by": "agent_1_data_foundation",
+      "allowed_values": ["motor", "pump", "conveyor", "gearbox", "fan", "compressor"],
+      "example": "motor"
+    },
+    "bearing_type": {
+      "type": "string",
+      "description": "Bearing model designation (SKF convention preferred; no validation)",
+      "provided_by": "agent_1_data_foundation",
+      "example": "SKF6310"
+    }
+  },
+  "optional_fields": {
+    "asset_identity": {
+      "asset_id": { "type": "string", "provided_by": "agent_1_data_foundation", "example": "AST_MTR_042" }
+    },
+    "signal_signature": {
+      "provided_by": "agent_2_monitoring",
+      "fields": {
+        "vib_rms_mm_s":        { "type": "float", "unit": "mm/s",       "example": 7.5 },
+        "kurtosis":            { "type": "float",                        "example": 7.2 },
+        "temp_c":              { "type": "float", "unit": "celsius",     "example": 81.0 },
+        "bpfo_energy":         { "type": "float", "description": "Ball Pass Frequency Outer race energy", "example": 3.8 },
+        "bpfi_energy":         { "type": "float", "description": "Ball Pass Frequency Inner race energy", "example": 2.1 },
+        "signal_quality_score":{ "type": "float", "range": "0.0 to 1.0","example": 0.99 },
+        "shaft_offset_mm":     { "type": "float", "unit": "mm", "used_for": "misalignment scenarios", "example": 0.45 },
+        "anomaly_score":       { "type": "float", "range": "0.0 to 1.0","example": 0.81 }
+      }
+    },
+    "fault_diagnosis": {
+      "provided_by": "agent_4_failure_intelligence",
+      "fields": {
+        "fault_stage":          { "type": "int",   "range": "0 to 3",   "example": 3 },
+        "diagnosis_confidence": { "type": "float", "range": "0.0 to 1.0","example": 0.87 },
+        "diagnosis_reasoning":  { "type": "string",                     "example": "BPFO energy dominant with kurtosis > 6" }
+      }
+    },
+    "risk_assessment": {
+      "provided_by": "agent_3_predictive_risk",
+      "fields": {
+        "risk_level":          { "type": "string", "allowed_values": ["NONE", "LOW", "MEDIUM", "HIGH"], "example": "HIGH" },
+        "failure_probability": { "type": "float",  "range": "0.0 to 1.0", "example": 0.72 },
+        "rul_days_min":        { "type": "int",    "description": "Remaining Useful Life lower bound in days", "example": 5 },
+        "rul_days_max":        { "type": "int",    "description": "Remaining Useful Life upper bound in days", "example": 10 }
+      }
+    },
+    "prescription": {
+      "provided_by": "agent_6_prescriptive_optimisation",
+      "fields": {
+        "recommended_action":   { "type": "string",                          "example": "bearing_replacement" },
+        "sop_reference":        { "type": "string",                          "example": "SOP-001" },
+        "parts_required":       { "type": "list<string> OR string",          "example": ["SKF6310 bearing", "housing seal"] },
+        "estimated_duration_hr":{ "type": "int",                             "example": 4 }
+      }
+    },
+    "execution_outcome": {
+      "provided_by": "agent_7_executor",
+      "fields": {
+        "work_order_id":       { "type": "string",                                                        "example": "WO-2026-1234" },
+        "work_order_priority": { "type": "string", "allowed_values": ["LOW", "MEDIUM", "HIGH"], "default": "MEDIUM", "example": "HIGH" },
+        "action_taken":        { "type": "string",                                                        "example": "Replaced outer race bearing SKF6310" },
+        "post_repair_vib_rms": { "type": "float",  "unit": "mm/s",                                       "example": 1.2 },
+        "post_repair_temp_c":  { "type": "float",  "unit": "celsius",                                    "example": 52.0 },
+        "post_repair_result":  { "type": "string", "allowed_values": ["successful", "partial", "failed"],"example": "successful" },
+        "technician_notes":    { "type": "string",                                                        "example": "Bearing showed heavy contamination" },
+        "root_cause":          { "type": "string",                                                        "example": "Seal degradation allowed contamination ingress" },
+        "lessons_learned":     { "type": "string",                                                        "example": "Replace seal at every bearing change" }
+      }
+    },
+    "qa_gates": {
+      "provided_by": "agent_3_predictive_risk",
+      "purpose": "Acceptance thresholds for verifying repair success",
+      "fields": {
+        "expected_post_vib_max":     { "type": "float", "unit": "mm/s",    "example": 2.5 },
+        "expected_post_temp_max":    { "type": "float", "unit": "celsius", "example": 65.0 },
+        "expected_post_kurtosis_max":{ "type": "float",                    "example": 3.5 },
+        "qa_window":                 { "type": "string", "description": "Time window for post-repair QA", "example": "48h" }
+      }
+    },
+    "control_flags": {
+      "fields": {
+        "_nl_assessment_only": {
+          "type": "boolean",
+          "description": "Suppress KB write; use for read-only NL assessment via chatbot",
+          "example": false
+        },
+        "source": {
+          "type": "string",
+          "allowed_values": ["upstream_pipeline", "discovery_demo", "user_generated"],
+          "example": "upstream_pipeline"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "ISO-8601 UTC datetime",
+          "example": "2026-07-14T09:23:00Z"
+        },
+        "run_id": {
+          "type": "string",
+          "description": "Correlation ID for Langfuse trace grouping",
+          "example": "run_a1b2c3d4"
+        }
+      }
+    }
+  },
+  "complete_example": {
+    "case_id": "CASE_20260714_001",
+    "fault_mode": "outer_race_fault",
+    "asset_type": "motor",
+    "asset_id": "AST_MTR_042",
+    "bearing_type": "SKF6310",
+    "fault_stage": 3,
+    "vib_rms_mm_s": 7.5,
+    "kurtosis": 7.2,
+    "temp_c": 81.0,
+    "bpfo_energy": 3.8,
+    "signal_quality_score": 0.99,
+    "anomaly_score": 0.81,
+    "diagnosis_confidence": 0.87,
+    "diagnosis_reasoning": "BPFO energy dominant at 3.8 with kurtosis > 6",
+    "risk_level": "HIGH",
+    "failure_probability": 0.72,
+    "rul_days_min": 5,
+    "rul_days_max": 10,
+    "recommended_action": "bearing_replacement",
+    "sop_reference": "SOP-001",
+    "parts_required": ["SKF6310 bearing", "housing seal"],
+    "estimated_duration_hr": 4,
+    "work_order_id": "WO-2026-1234",
+    "work_order_priority": "HIGH",
+    "action_taken": "Replaced outer race bearing SKF6310",
+    "post_repair_vib_rms": 1.2,
+    "post_repair_temp_c": 52.0,
+    "post_repair_result": "successful",
+    "root_cause": "Seal degradation allowed contamination ingress",
+    "lessons_learned": "Replace seal at every bearing change",
+    "source": "upstream_pipeline",
+    "created_at": "2026-07-14T09:23:00Z",
+    "run_id": "run_a1b2c3d4"
+  },
+  "assumptions": [
+    "Timestamps sent as ISO-8601 UTC. No timezone conversion happens in this agent.",
+    "case_id if provided must not collide with existing cases; if absent, agent mints one.",
+    "fault_mode outside the allowed_values list is not currently validated by the code — the LLM prompt lists the 9 canonical values but arbitrary strings pass through; upstream should send canonical values.",
+    "Missing optional fields are handled gracefully — pipeline uses defaults or skips affected features.",
+    "risk_level NONE is used for healthy assets (stage 0 scenarios)."
+  ]
+}

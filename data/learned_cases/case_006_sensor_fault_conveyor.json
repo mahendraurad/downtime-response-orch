@@ -1,0 +1,12 @@
+{
+  "case_id": "CASE_006",
+  "asset_type": "conveyor",
+  "bearing_type": "SKF22212",
+  "fault_mode": "sensor_fault",
+  "root_cause": "loose terminal connector at junction box J-301",
+  "action_taken": "cable re-termination and torque to 6Nm",
+  "result": "signal quality restored",
+  "lessons_learned": "Burst-pattern dropouts with 2 to 4 consecutive null readings indicate a physical connection problem not a bearing fault. Terminal tightening torque must be 5 to 6 Nm using calibrated torque screwdriver. Hand-tightening is the root cause of recurring faults. LOTO permit must be current before any work - expired permit caused 1 day delay on bottleneck asset.",
+  "valid_until": "2028-09-22",
+  "created_by": "seed_data"
+}

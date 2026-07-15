@@ -1,0 +1,12 @@
+{
+  "case_id": "CASE_003",
+  "asset_type": "motor",
+  "bearing_type": "SKF6310",
+  "fault_mode": "inner_race_fault",
+  "root_cause": "overload and misalignment",
+  "action_taken": "bearing replacement and shaft realignment",
+  "result": "successful repair",
+  "lessons_learned": "Inner race fault on SKF6310 motor confirmed by BPFI energy dominant over BPFO. Shaft alignment must be checked and corrected before fitting new bearing. Fitting new bearing on misaligned shaft will cause rapid re-failure. Post-repair baseline: 2.0 mm/s vib, 57C temp.",
+  "valid_until": "2028-01-10",
+  "created_by": "seed_data"
+}

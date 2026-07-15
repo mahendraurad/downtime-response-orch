@@ -1,0 +1,27 @@
+.env
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.py[cod]
+logs/
+*.log
+.DS_Store
+data/faiss_index/
+*.zip
+
+# Runtime logs (created by Streamlit at startup - do not commit)
+# *.log and logs/ above already cover .log files; this catches .txt variants
+startup_log*.txt
+
+
+# Added pre-push cleanup (2026-07-14)
+archive/
+.claude/
+streamlit_debug.log
+streamlit_live.log
+streamlit_run.log
+streamlit_run_err.log
+streamlit_stderr.log
+streamlit_stdout.log

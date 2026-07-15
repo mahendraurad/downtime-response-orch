@@ -1,0 +1,36 @@
+{
+    "retrieval":  {
+                      "similarity_threshold":  0.70,
+                      "fault_mode_mismatch_penalty":  -0.08,
+                      "top_k":  3
+                  },
+    "add_case":  {
+                     "duplicate_similarity_threshold":  0.55,
+                     "min_text_length_for_hash":  15
+                 },
+    "chatbot":  {
+                    "evidence_similarity_threshold":  0.55,
+                    "max_conversation_turns":  10
+                },
+    "paths":  {
+                  "data_dir":  "data/learned_cases",
+                  "faiss_index_dir":  "data/faiss_index",
+                  "memory_log":  "logs/memory.log",
+                  "decision_log":  "logs/agent_decisions.log",
+                  "fault_tracker":  "logs/fault_tracker.json"
+              },
+    "azure_openai":  {
+                         "api_version":  "2024-08-01-preview",
+                         "default_deployment":  "gpt-4o-mini",
+                         "temperature":  0.3,
+                         "max_tokens":  1500
+                     },
+    "langfuse":  {
+                     "enabled":  true,
+                     "flush_on_shutdown":  true
+                 },
+    "case_generation":  {
+                            "default_estimated_duration_hours":  4,
+                            "default_priority":  "MEDIUM"
+                        }
+}

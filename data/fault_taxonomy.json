@@ -1,0 +1,95 @@
+[
+  {
+    "fault_id": "FT_001",
+    "fault_mode": "outer_race_fault",
+    "component": "bearing_outer_race",
+    "signature": "BPFO band",
+    "kurtosis_threshold": 5.0,
+    "stage_1_vib_multiple": 1.5,
+    "stage_2": 2.5,
+    "stage_3": 3.5,
+    "rul_stage_1": 90,
+    "rul_stage_2": 30,
+    "rul_stage_3": 7,
+    "typical_causes": ["contamination", "fatigue"],
+    "curve": "exponential"
+  },
+  {
+    "fault_id": "FT_002",
+    "fault_mode": "inner_race_fault",
+    "component": "bearing_inner_race",
+    "signature": "BPFI band",
+    "kurtosis": 5.5,
+    "rul_stage_1": 80,
+    "rul_stage_2": 25,
+    "rul_stage_3": 5,
+    "typical_causes": ["overload", "misalignment"],
+    "curve": "exponential"
+  },
+  {
+    "fault_id": "FT_003",
+    "fault_mode": "lubrication_issue",
+    "component": "lubrication_system",
+    "signature": "broadband",
+    "kurtosis": 3.5,
+    "stage_1": 1.3,
+    "stage_2": 2.0,
+    "stage_3": 3.0,
+    "rul_stage_1": 60,
+    "rul_stage_2": 20,
+    "rul_stage_3": 5,
+    "typical_causes": ["low_oil", "contamination", "overdue_lube"],
+    "curve": "linear"
+  },
+  {
+    "fault_id": "FT_004",
+    "fault_mode": "imbalance",
+    "component": "rotor",
+    "signature": "1X_rpm",
+    "kurtosis": 2.0,
+    "curve": "linear",
+    "rul_stage_1": 120,
+    "rul_stage_2": 60,
+    "rul_stage_3": 15
+  },
+  {
+    "fault_id": "FT_005",
+    "fault_mode": "misalignment",
+    "component": "shaft",
+    "signature": "2X_rpm",
+    "kurtosis": 3.0,
+    "curve": "linear",
+    "rul_stage_1": 100,
+    "rul_stage_2": 40,
+    "rul_stage_3": 10
+  },
+  {
+    "fault_id": "FT_006",
+    "fault_mode": "cage_fault",
+    "component": "bearing_cage",
+    "signature": "FTF band",
+    "kurtosis": 4.5,
+    "rul_stage_1": 75,
+    "rul_stage_2": 20,
+    "rul_stage_3": 4,
+    "typical_causes": ["lubrication_failure", "contamination"],
+    "curve": "exponential"
+  },
+  {
+    "fault_id": "FT_007",
+    "fault_mode": "sensor_fault",
+    "component": "vibration_channel",
+    "signature": "signal_quality",
+    "kurtosis": "N/A",
+    "typical_causes": ["loose_connector", "cable_damage", "sensor_failure"],
+    "note": "Not a bearing fault - data quality event from Data Foundation Agent"
+  },
+  {
+    "fault_id": "FT_008",
+    "fault_mode": "healthy",
+    "component": "none",
+    "signature": "none",
+    "kurtosis": "N/A",
+    "note": "Confirmed healthy state from routine preventive check"
+  }
+]

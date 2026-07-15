@@ -1,0 +1,228 @@
+{
+  "contract_name": "Learning & Memory Agent → Executor Agent — Enrichment Handoff Contract",
+  "contract_version": "1.1",
+  "last_updated": "2026-07-14",
+  "description": "JSON envelope sent from Learning & Memory Agent (6.8) to Executor Agent (7) requesting human approval to merge an enrichment proposal into an existing knowledge base case. Fires when the pipeline routes to PATH_C (partial knowledge match).",
+  "implementation_status": {
+    "envelope_schema": "designed",
+    "payload_generator": "implemented (_generate_enrichment_preview in streamlit_app_v3.py)",
+    "langgraph_state_producer": "implemented (partial_knowledge_node in orchestrator/langgraph_flow.py)",
+    "transport_mechanism": "not_yet_implemented — see gap_for_production section"
+  },
+  "agent_flow": {
+    "sender": "agent_6_8_learning_memory",
+    "receiver": "agent_7_executor",
+    "trigger": "Pipeline routes to PATH_C after coverage assessment scores >=1 dimension as PARTIAL or MISSING with an existing case identity match",
+    "pipeline_path": "C"
+  },
+  "envelope_structure": {
+    "envelope_type":   { "type": "string", "fixed_value": "enrichment_approval_request" },
+    "envelope_version":{ "type": "string", "fixed_value": "1.0" },
+    "run_id":          { "type": "string", "description": "Correlation ID from the pipeline run", "example": "run_a1b2c3d4" },
+    "created_at":      { "type": "string", "format": "ISO-8601 UTC datetime", "example": "2026-07-14T09:14:00Z" },
+    "source_agent":    { "type": "string", "fixed_value": "learning_memory_agent" },
+    "target_agent":    { "type": "string", "fixed_value": "executor_agent" },
+    "action_required": { "type": "string", "fixed_value": "approve_enrichment" },
+    "incoming_case": {
+      "type": "object",
+      "description": "The case that triggered PATH_C — full feedback dict per the input contract",
+      "reference": "See docs/learning_memory_agent_input_contract.json"
+    },
+    "matched_existing_case": {
+      "type": "object",
+      "description": "The existing knowledge base case being proposed for enrichment",
+      "fields": {
+        "case_id":        { "type": "string", "example": "CASE_001" },
+        "similarity_score":{ "type": "float", "range": "0.0 to 1.0", "example": 0.65 },
+        "coverage_state": { "type": "string", "fixed_value": "PARTIAL" },
+        "case_document":  { "type": "object", "description": "Full case JSON from data/learned_cases/<case_id>_<source>.json" }
+      }
+    },
+    "gap_details": {
+      "type": "object",
+      "description": "Coverage assessment output identifying what's covered vs missing",
+      "fields": {
+        "covered_dimensions":{ "type": "list<string>", "example": ["signal_signature", "diagnosis_and_reasoning"] },
+        "missing_dimensions":{ "type": "list<string>", "example": ["action_and_outcome", "root_cause_and_factors", "lessons_and_future_reference"] },
+        "gap_summary":       { "type": "string", "example": "New evidence adds action, root cause, and lessons" },
+        "coverage_reasoning":{ "type": "string", "description": "Full LLM assessment reasoning text" }
+      }
+    },
+    "enrichment_proposal": {
+      "type": "object",
+      "description": "Structured enrichment data produced by _generate_enrichment_preview(). Only MISSING and PARTIAL dimensions appear — COMPLETE dimensions are omitted.",
+      "fields": {
+        "dims": {
+          "type": "object",
+          "possible_dimension_keys": {
+            "signal_signature": {
+              "vibration_rms":  { "type": "string", "example": "6.4 mm/s" },
+              "kurtosis":       { "type": "string", "example": "5.8" },
+              "temp_c":         { "type": "string", "example": "72.0 °C" },
+              "bpfo_energy":    { "type": "string", "example": "2.1" },
+              "signal_quality": { "type": "string", "example": "good" }
+            },
+            "diagnosis_and_reasoning": {
+              "primary_diagnosis": { "type": "string", "example": "outer race fault, stage 3" },
+              "confidence":        { "type": "string", "example": "high" },
+              "reasoning":         { "type": "string", "example": "BPFO energy elevated with kurtosis > 5" }
+            },
+            "action_and_outcome": {
+              "recommended_action": { "type": "string", "example": "bearing replacement" },
+              "sop_reference":      { "type": "string", "example": "SOP-001" },
+              "parts_required":     { "type": "string", "example": "SKF6310 bearing, housing seal" },
+              "est_duration":       { "type": "string", "example": "4 hours" }
+            },
+            "root_cause_and_factors": {
+              "primary_cause":        { "type": "string", "example": "seal degradation" },
+              "contributing_factors": { "type": "string", "example": "contamination ingress, missed inspection" }
+            },
+            "lessons_and_future_reference": {
+              "key_lesson": { "type": "string", "example": "seal is a wear item; replace at every bearing change" },
+              "prevention":  { "type": "string", "example": "add seal to bearing-change parts kit" }
+            }
+          }
+        },
+        "empty_reason": { "type": "string OR null", "description": "null if generation succeeded; diagnostic string if LLM could not generate a preview" }
+      }
+    },
+    "approval_metadata": {
+      "type": "object",
+      "fields": {
+        "reviewer_role_required": { "type": "string", "example": "maintenance_engineer" },
+        "urgency":                { "type": "string", "allowed_values": ["low", "normal", "high"], "example": "normal" },
+        "expires_at":             { "type": "string", "format": "ISO-8601 UTC datetime", "example": "2026-07-21T09:14:00Z" }
+      }
+    }
+  },
+  "expected_response": {
+    "envelope_type":       { "type": "string", "fixed_value": "enrichment_approval_response" },
+    "envelope_version":    { "type": "string", "fixed_value": "1.0" },
+    "run_id":              { "type": "string", "description": "Must match the run_id from the request" },
+    "response_to_case_id": { "type": "string", "description": "case_id of the matched_existing_case", "example": "CASE_001" },
+    "reviewed_at":         { "type": "string", "format": "ISO-8601 UTC datetime", "example": "2026-07-14T11:22:00Z" },
+    "reviewer_id":         { "type": "string", "example": "user_042" },
+    "decision":            { "type": "string", "allowed_values": ["approved", "approved_with_edits", "rejected"], "example": "approved" },
+    "reviewer_notes":      { "type": "string", "example": "Confirmed — merge as-is" },
+    "field_edits":         { "type": "object OR null", "description": "If decision is approved_with_edits, contains modified dimension values in the same 'dims' shape as the original proposal. null otherwise.", "example": null }
+  },
+  "complete_example_request": {
+    "envelope_type": "enrichment_approval_request",
+    "envelope_version": "1.0",
+    "run_id": "run_a1b2c3d4",
+    "created_at": "2026-07-14T09:14:00Z",
+    "source_agent": "learning_memory_agent",
+    "target_agent": "executor_agent",
+    "action_required": "approve_enrichment",
+    "incoming_case": {
+      "case_id": "CASE_20260714_003",
+      "fault_mode": "outer_race_fault",
+      "asset_type": "motor",
+      "asset_id": "AST_MTR_042",
+      "bearing_type": "SKF6310",
+      "fault_stage": 3,
+      "vib_rms_mm_s": 6.4,
+      "kurtosis": 5.8,
+      "temp_c": 72.0,
+      "recommended_action": "bearing_replacement",
+      "action_taken": "Replaced outer race bearing SKF6310",
+      "root_cause": "Seal degradation allowed contamination ingress",
+      "lessons_learned": "Replace seal at every bearing change",
+      "source": "upstream_pipeline",
+      "created_at": "2026-07-14T09:12:00Z"
+    },
+    "matched_existing_case": {
+      "case_id": "CASE_001",
+      "similarity_score": 0.65,
+      "coverage_state": "PARTIAL",
+      "case_document": {
+        "case_id": "CASE_001",
+        "fault_mode": "outer_race_fault",
+        "asset_type": "motor",
+        "bearing_type": "SKF6310",
+        "signal_signature": {
+          "vibration_rms": 7.2,
+          "kurtosis": 6.1,
+          "temperature_c": 78.0
+        },
+        "diagnosis": "Stage 3 outer race fault confirmed",
+        "action_taken": null,
+        "root_cause": null,
+        "lessons_learned": null
+      }
+    },
+    "gap_details": {
+      "covered_dimensions": ["signal_signature", "diagnosis_and_reasoning"],
+      "missing_dimensions": ["action_and_outcome", "root_cause_and_factors", "lessons_and_future_reference"],
+      "gap_summary": "New evidence adds action, root cause, and lessons",
+      "coverage_reasoning": "Signal and diagnosis match existing case; incoming case adds prescription and post-repair outcomes not previously documented."
+    },
+    "enrichment_proposal": {
+      "dims": {
+        "action_and_outcome": {
+          "recommended_action": "bearing replacement",
+          "sop_reference": "SOP-001",
+          "parts_required": "SKF6310 bearing, housing seal",
+          "est_duration": "4 hours"
+        },
+        "root_cause_and_factors": {
+          "primary_cause": "seal degradation",
+          "contributing_factors": "contamination ingress, missed inspection"
+        },
+        "lessons_and_future_reference": {
+          "key_lesson": "seal is a wear item; replace at every bearing change",
+          "prevention": "add seal to bearing-change parts kit"
+        }
+      },
+      "empty_reason": null
+    },
+    "approval_metadata": {
+      "reviewer_role_required": "maintenance_engineer",
+      "urgency": "normal",
+      "expires_at": "2026-07-21T09:14:00Z"
+    }
+  },
+  "complete_example_response": {
+    "envelope_type": "enrichment_approval_response",
+    "envelope_version": "1.0",
+    "run_id": "run_a1b2c3d4",
+    "response_to_case_id": "CASE_001",
+    "reviewed_at": "2026-07-14T11:22:00Z",
+    "reviewer_id": "user_042",
+    "decision": "approved",
+    "reviewer_notes": "Confirmed — merge as-is",
+    "field_edits": null
+  },
+  "gap_for_production": {
+    "note": "The envelope schema is finalized. The transport mechanism to actually send this envelope to Executor Agent is not yet implemented.",
+    "pieces_to_build": [
+      {
+        "id": 1,
+        "component": "UI submit button",
+        "description": "Submit for Approval button on the PATH_C amber panel",
+        "location": "streamlit_app_v3.py Section 9 (ENRICHMENT PREVIEW)"
+      },
+      {
+        "id": 2,
+        "component": "Envelope serializer",
+        "description": "Function that assembles the envelope from feedback + matched case + gap details + enrichment proposal"
+      },
+      {
+        "id": 3,
+        "component": "Transport",
+        "description": "HTTP POST to Executor Agent endpoint OR event bus publish. Endpoint URL should be configurable via config.json (executor.approval_endpoint)"
+      },
+      {
+        "id": 4,
+        "component": "Response handler",
+        "description": "Callback endpoint or polling logic that receives executor's approval response and applies the KB write if approved. Rejection is logged; no write occurs."
+      },
+      {
+        "id": 5,
+        "component": "Pending approval persistence",
+        "description": "State file at data/pending_approvals/<run_id>.json so the flow survives app restarts"
+      }
+    ],
+    "estimated_effort": "2 to 3 weeks including Executor Agent's side of the contract and end-to-end testing"
+  }
+}

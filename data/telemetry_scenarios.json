@@ -1,0 +1,45 @@
+{
+  "healthy": [
+    {"asset_id": "AST_MTR_002", "bearing_id": "BRG_003", "vib_rms": 1.9, "kurtosis": 2.2, "temp": 53},
+    {"asset_id": "AST_MTR_002", "bearing_id": "BRG_003", "vib_rms": 1.8, "kurtosis": 2.1, "temp": 52},
+    {"asset_id": "AST_MTR_002", "bearing_id": "BRG_003", "vib_rms": 2.0, "kurtosis": 2.3, "temp": 54},
+    {"asset_id": "AST_MTR_002", "bearing_id": "BRG_003", "vib_rms": 1.9, "kurtosis": 2.2, "temp": 53}
+  ],
+  "outer_race_fault": [
+    {"asset_id": "AST_MTR_001", "bearing_id": "BRG_001", "vib_rms": 3.2, "kurtosis": 3.5, "bpfo_energy": 1.5},
+    {"asset_id": "AST_MTR_001", "bearing_id": "BRG_001", "vib_rms": 4.6, "kurtosis": 4.8, "bpfo_energy": 2.4},
+    {"asset_id": "AST_MTR_001", "bearing_id": "BRG_001", "vib_rms": 6.1, "kurtosis": 6.3, "bpfo_energy": 4.8},
+    {"asset_id": "AST_MTR_001", "bearing_id": "BRG_001", "vib_rms": 7.0, "kurtosis": 6.9, "bpfo_energy": 5.6},
+    {"asset_id": "AST_MTR_001", "bearing_id": "BRG_001", "vib_rms": 7.5, "kurtosis": 7.2, "bpfo_energy": 5.9}
+  ],
+  "inner_race_fault": [
+    {"asset_id": "AST_MTR_001", "bearing_id": "BRG_002", "vib_rms": 2.5, "kurtosis": 3.1, "bpfi_energy": 1.2},
+    {"asset_id": "AST_MTR_001", "bearing_id": "BRG_002", "vib_rms": 3.1, "kurtosis": 4.0, "bpfi_energy": 2.7},
+    {"asset_id": "AST_MTR_001", "bearing_id": "BRG_002", "vib_rms": 4.0, "kurtosis": 4.9, "bpfi_energy": 3.8},
+    {"asset_id": "AST_MTR_001", "bearing_id": "BRG_002", "vib_rms": 5.1, "kurtosis": 5.6, "bpfi_energy": 5.0},
+    {"asset_id": "AST_MTR_001", "bearing_id": "BRG_002", "vib_rms": 6.2, "kurtosis": 6.5, "bpfi_energy": 6.2}
+  ],
+  "lubrication_issue": [
+    {"asset_id": "AST_PMP_001", "bearing_id": "BRG_005", "vib_rms": 3.5, "kurtosis": 3.8, "temp": 65},
+    {"asset_id": "AST_PMP_001", "bearing_id": "BRG_005", "vib_rms": 4.0, "kurtosis": 4.0, "temp": 70},
+    {"asset_id": "AST_PMP_001", "bearing_id": "BRG_005", "vib_rms": 4.5, "kurtosis": 4.5, "temp": 75},
+    {"asset_id": "AST_PMP_001", "bearing_id": "BRG_005", "vib_rms": 5.1, "kurtosis": 4.9, "temp": 80}
+  ],
+  "signal_dropout": [
+    {"asset_id": "AST_CON_001", "bearing_id": "BRG_009", "channel": "CH_31B", "vib_rms": null, "signal_quality_score": 0.98},
+    {"asset_id": "AST_CON_001", "bearing_id": "BRG_009", "channel": "CH_31B", "vib_rms": null, "signal_quality_score": 0.12},
+    {"asset_id": "AST_CON_001", "bearing_id": "BRG_009", "channel": "CH_31B", "vib_rms": null, "signal_quality_score": 0.15},
+    {"asset_id": "AST_CON_001", "bearing_id": "BRG_009", "channel": "CH_31B", "vib_rms": 2.2, "signal_quality_score": 0.99}
+  ],
+  "unknown_asset": [
+    {"asset_id": "AST_UNKNOWN_001", "bearing_id": "BRG_UNKNOWN", "vib_rms": 4.5, "kurtosis": 4.0, "temp": 65, "anomaly_score": 0.80}
+  ],
+  "startup_filter": [
+    {"asset_id": "AST_MTR_001", "bearing_id": "BRG_001", "startup_shutdown_flag": true, "vib_rms": 9.8, "kurtosis": 7.0}
+  ],
+  "gearbox_fault": [
+    {"asset_id": "AST_GBX_001", "bearing_id": "BRG_011", "vib_rms": 5.8, "kurtosis": 5.5},
+    {"asset_id": "AST_GBX_001", "bearing_id": "BRG_011", "vib_rms": 6.5, "kurtosis": 6.2},
+    {"asset_id": "AST_GBX_001", "bearing_id": "BRG_011", "vib_rms": 7.2, "kurtosis": 7.0}
+  ]
+}

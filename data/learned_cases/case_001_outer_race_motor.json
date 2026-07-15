@@ -1,0 +1,12 @@
+{
+  "case_id": "CASE_001",
+  "asset_type": "motor",
+  "bearing_type": "SKF6310",
+  "fault_mode": "outer_race_fault",
+  "root_cause": "contamination ingress",
+  "action_taken": "bearing replacement",
+  "result": "successful repair",
+  "lessons_learned": "Housing end cover seal must be inspected and replaced at every bearing change. Failure to replace seal allowed contamination re-entry. Post-repair baseline: 1.8 mm/s vib, 55C temp.",
+  "valid_until": "2028-01-10",
+  "created_by": "seed_data"
+}

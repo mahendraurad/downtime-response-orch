@@ -1,0 +1,12 @@
+{
+  "case_id": "CASE_002",
+  "asset_type": "pump",
+  "bearing_type": "SKF6208",
+  "fault_mode": "lubrication_issue",
+  "root_cause": "lube interval exceeded",
+  "action_taken": "oil service and refill",
+  "result": "successful repair",
+  "lessons_learned": "Lubrication issue on SKF6208 pump resolves without bearing replacement at 20 percent of replacement cost. Re-lube interval is 60 days not 90 days. Vibration improvement after oil service is not immediate - allow 24 hours for oil to distribute. Post-repair baseline: 2.2 mm/s vib, 60C temp.",
+  "valid_until": "2027-03-04",
+  "created_by": "seed_data"
+}
