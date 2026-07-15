@@ -1,0 +1,10 @@
+{
+  "_comment": "Agent 6.6 tunable parameters. Secrets (Azure/Langfuse) live in .env, not here. RAG settings live in rag/config.py. Values here are read at startup; if this file is missing or a key is absent, the code falls back to its built-in default.",
+  "thresholds": {
+    "min_reliable_confidence": 0.5,
+    "contributor_review_confidence": 0.6,
+    "monitor_appropriateness": 0.3,
+    "default_duration_hours": 2.0,
+    "semantic_classifier_threshold": 0.45
+  }
+}

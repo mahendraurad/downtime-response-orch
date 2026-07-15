@@ -1,0 +1,596 @@
+[
+  {
+    "source_file": "CASE_001_learned_case.pdf",
+    "doc_type": "CASE",
+    "page_number": 1,
+    "text": "DRO Synthetic Data Baseline  |  Page 1  |  CONFIDENTIAL — Internal Use Only\nStage 3 Outer Race Fault Successfully Replaced —\nConveyor Motor A\nAsset: AST_MTR_001 (Motor) | Bearing: BRG_001 (SKF6310)\nFault Mode: outer_race_fault | ISO Stage: Stage 3\nLearned Case — Knowledge Agent Retrieval Document | DRO Baseline\nCASE_001 | Outcome: SUCCESSFUL | Opened: 2026-04-10 | Closed: 2026-04-10\n1. Detection Summary\nDetection Date\n2026-04-10\nDetected By\nmonitoring_agent\nAnomaly Score\n0.81\nvib_rms_mm_s\n7.5 mm/s (baseline mean: 2.1 mm/s — z-score: 18σ)\nkurtosis\n7.2 (FT_001 threshold: 5.0 — exceeded, fault confirmed)\ntemp_c\n81°C (baseline mean: 58°C — rise: 23°C)\nbpfo_energy\n3.8× (stage_3_vib_multiple: 3.5× — Stage 3 confirmed)\nbpfi_energy\n0.9× (sub-threshold — inner race not"
+  },
+  {
+    "source_file": "CASE_001_learned_case.pdf",
+    "doc_type": "CASE",
+    "page_number": 1,
+    "text": "(baseline mean: 58°C — rise: 23°C)\nbpfo_energy\n3.8× (stage_3_vib_multiple: 3.5× — Stage 3 confirmed)\nbpfi_energy\n0.9× (sub-threshold — inner race not involved)\nsignal_quality_score\n0.99 (clean signal — not a sensor artefact)\nNDE Bearing (BRG_002)\nWithin baseline — fault confirmed as DE-only\n2. Agent Diagnosis\nPrimary Diagnosis\nouter_race_fault — Stage 3\nConfidence\n0.87\nReasoning\nkurtosis 7.2 > FT_001 threshold 5.0. bpfo_energy 3.8× > stage_3 multiple\n3.5×. Temperature rise 23°C consistent with outer race fault. BPFI\nsub-threshold.\nDifferential Considered\ninner_race_fault ruled out (bpfi_energy 0.9×, no shaft-frequency modulation).\nRUL Estimate\n5–9 days from Stage 3 detection (confirmed 7 days in this case)\n3. Action Taken\nRecommended Action\nUrgent bearing replacement — drive end bearing"
+  },
+  {
+    "source_file": "CASE_001_learned_case.pdf",
+    "doc_type": "CASE",
+    "page_number": 1,
+    "text": "mate\n5–9 days from Stage 3 detection (confirmed 7 days in this case)\n3. Action Taken\nRecommended Action\nUrgent bearing replacement — drive end bearing only\nWindow Selected\nCTX_001 — 2026-05-25 02:00 to 06:00 (4 hours, approved, LINE_001)\nParts Required\nPART_001 (SKF6310-ZZ, 1 unit, BIN_A1), PART_004 (Synthetic Grease)\nCrew Assigned\nT. Rodriguez (TECH_001, lead), Raj Kumar (TECH_003, assistant)\nLOTO Applied\nLOTO_001 — MCC-12, Valve-4 (is_current: true)\nWork Order\nWO_001 — priority HIGH\n4. Findings at Inspection / Teardown\nUpon removal of the SKF6310-ZZ bearing from the drive end shaft, outer race showed visible spalling on\napproximately 35% of the raceway surface, concentrated in a 40mm arc in the loaded zone. Grease was darkened\nwith metallic contamination. Bearing cage was intact. Inner"
+  },
+  {
+    "source_file": "CASE_001_learned_case.pdf",
+    "doc_type": "CASE",
+    "page_number": 1,
+    "text": "of the raceway surface, concentrated in a 40mm arc in the loaded zone. Grease was darkened\nwith metallic contamination. Bearing cage was intact. Inner race and rolling elements showed no significant surface\ndamage — fault was localised to the outer race as diagnosed. Shaft journal and housing bore were within tolerance. A"
+  },
+  {
+    "source_file": "CASE_001_learned_case.pdf",
+    "doc_type": "CASE",
+    "page_number": 2,
+    "text": "DRO Synthetic Data Baseline  |  Page 2  |  CONFIDENTIAL — Internal Use Only\nsmall crack was found in the bearing housing end cover seal — this had allowed fine process dust ingress over time.\nSeal was replaced as part of this repair.\n5. Outcome\nPost-Repair vib_rms\n1.8 mm/s (QA pass: ≤ 2.5 mm/s) ✓\nPost-Repair temp_c\n55°C (QA pass: ≤ 60°C) ✓\nKurtosis at 24h\n2.1 (QA pass: ≤ 2.8) ✓\nBPFO Energy at 24h\n0.9× (QA pass: ≤ 1.2×) ✓\nQA Result\nPASS — all criteria met at 1h and 24h\nActual Duration\n7 hours (estimated 6h — extra time for seal replacement)\nActual Cost\nINR 18,500\nRecommendation Followed\nYes\n6. Root Cause Confirmed\nRoot Cause\ncontamination_ingress\nContributing Factors\nHousing end cover seal degraded (age + thermal cycling). Allowed fine\nprocess dust entry over approximately 4–6 months.\n7."
+  },
+  {
+    "source_file": "CASE_001_learned_case.pdf",
+    "doc_type": "CASE",
+    "page_number": 2,
+    "text": "ngress\nContributing Factors\nHousing end cover seal degraded (age + thermal cycling). Allowed fine\nprocess dust entry over approximately 4–6 months.\n7. Lessons Learned\n Outer race fault on SKF6310 in this motor frame consistently shows kurtosis > 5.0 and BPFO > 3.5× at Stage 3.\nRUL from Stage 3 detection in this case: 7 days.\n Housing seal condition must be inspected at every bearing replacement — replacing only the bearing without\nchecking the seal allows re-contamination.\n NDE bearing (BRG_002) remained healthy throughout — DE and NDE should always be assessed\nindependently.\n Post-repair baseline established: 1.8 mm/s vib, 55°C. Use as expected healthy state for this motor frame."
+  },
+  {
+    "source_file": "CASE_002_learned_case.pdf",
+    "doc_type": "CASE",
+    "page_number": 1,
+    "text": "DRO Synthetic Data Baseline  |  Page 1  |  CONFIDENTIAL — Internal Use Only\nLubrication Degradation Resolved with Oil Service —\nCooling Pump A\nAsset: AST_PMP_001 (Pump) | Bearing: BRG_005 (SKF6208)\nFault Mode: lubrication_issue | ISO Stage: Stage 2\nLearned Case — Knowledge Agent Retrieval Document | DRO Baseline\nCASE_002 | Outcome: SUCCESSFUL | Opened: 2026-04-18 | Closed: 2026-04-19\n1. Detection Summary\nDetection Date\n2026-04-18\nDetected By\nmonitoring_agent\nAnomaly Score\n0.63 (moderate — not critical)\nvib_rms_mm_s\n4.2 mm/s (baseline mean: 2.5 mm/s — elevated, broadband)\nkurtosis\n3.9 (FT_001 threshold 5.0 — not crossed, fault not confirmed)\ntemp_c\n75°C (baseline mean: 61°C — rise: 14°C)\nbpfo_energy\n1.1× (stage_1 threshold 1.3× — sub-threshold)\nbsf_energy\n1.2× (mild — no dominant ball"
+  },
+  {
+    "source_file": "CASE_002_learned_case.pdf",
+    "doc_type": "CASE",
+    "page_number": 1,
+    "text": "med)\ntemp_c\n75°C (baseline mean: 61°C — rise: 14°C)\nbpfo_energy\n1.1× (stage_1 threshold 1.3× — sub-threshold)\nbsf_energy\n1.2× (mild — no dominant ball fault pattern)\nbroadband_pattern\ntrue (all bands rising — no single dominant frequency)\nlast_lubrication_date\n2026-01-10 — 98 days before detection, overdue by ~38 days\nsignal_quality_score\n0.99 (clean signal)\n2. Agent Diagnosis\nPrimary Diagnosis\nlubrication_issue — Stage 2\nConfidence\n0.74\nReasoning\nBroadband vibration increase with temperature rise of 14°C matches FT_003\npattern. No single band dominant. Kurtosis 3.9 below fault-confirmation\nthreshold. Lube overdue 38 days.\nDifferential\ncage_fault early (0.38 confidence) — BSF mildly elevated but no FTF\ndominance. Lubrication service is correct first action.\nNote\nIf kurtosis remains above"
+  },
+  {
+    "source_file": "CASE_002_learned_case.pdf",
+    "doc_type": "CASE",
+    "page_number": 1,
+    "text": "_fault early (0.38 confidence) — BSF mildly elevated but no FTF\ndominance. Lubrication service is correct first action.\nNote\nIf kurtosis remains above 3.5 after lubrication, escalate to bearing inspection.\n3. Action Taken\nRecommended Action\nLubrication service (drain and refill), 24h recheck\nWindow Selected\nCTX_002 — LINE_002, 3 hours, approved\nParts Required\nPART_005 (Industrial Oil ISO68, 200 mL, BIN_L2)\nCrew Assigned\nK. Mensah (TECH_002, lead)\nLOTO Applied\nLOTO_002 — Valve-7, PRV-02 (is_current: true)\nWork Order\nWO_002 — priority MEDIUM\n4. Findings at Inspection / Teardown"
+  },
+  {
+    "source_file": "CASE_002_learned_case.pdf",
+    "doc_type": "CASE",
+    "page_number": 2,
+    "text": "DRO Synthetic Data Baseline  |  Page 2  |  CONFIDENTIAL — Internal Use Only\nOil drained from the bearing housing was dark amber with a slightly acrid smell — consistent with oil that has oxidised\nand lost viscosity from extended service. A light suspension of fine ferrous particles was visible when the sample was\nheld against light, but no gross metallic debris. Quantity insufficient to indicate active bearing surface damage. Bearing\nhousing bore was clean with no scoring. Bearing remained in situ. Oil refilled with 200 mL fresh Industrial Oil ISO68.\n5. Outcome\nPost-Service vib_rms (30 min)\n2.8 mm/s (slight improvement — oil not yet distributed)\nPost-Service vib_rms (24h)\n2.2 mm/s (QA pass: ≤ 3.5 mm/s) ✓\nPost-Service temp_c (24h)\n60°C (QA pass: ≤ 65°C) ✓\nKurtosis at 24h\n2.8 (below"
+  },
+  {
+    "source_file": "CASE_002_learned_case.pdf",
+    "doc_type": "CASE",
+    "page_number": 2,
+    "text": "distributed)\nPost-Service vib_rms (24h)\n2.2 mm/s (QA pass: ≤ 3.5 mm/s) ✓\nPost-Service temp_c (24h)\n60°C (QA pass: ≤ 65°C) ✓\nKurtosis at 24h\n2.8 (below threshold 3.5) ✓\nQA Result\nPASS — lubrication service resolved condition\nActual Duration\n2.5 hours\nActual Cost\nINR 4,500\nRecommendation Followed\nYes\n6. Root Cause Confirmed\nRoot Cause\nlube_interval_exceeded\nContributing Factors\nLube re-interval set to 90 days in system but correct interval for this oil type\nand operating temperature is 60 days. System parameter was incorrect.\nUpdated to 60-day interval after this case.\n7. Lessons Learned\n lubrication_issue on SKF6208 pump bearings presents as broadband rise + temp rise with kurtosis below 5.0 —\nreliably distinguishable from outer_race_fault.\n First action is always lubrication service and"
+  },
+  {
+    "source_file": "CASE_002_learned_case.pdf",
+    "doc_type": "CASE",
+    "page_number": 2,
+    "text": "broadband rise + temp rise with kurtosis below 5.0 —\nreliably distinguishable from outer_race_fault.\n First action is always lubrication service and 24h recheck — not bearing replacement. This case resolved fully at\n~20% of bearing replacement cost.\n Re-lube interval parameters must be verified against OEM specification for the specific oil type. The system\ndefault of 90 days was wrong for this application; correct value is 60 days.\n Vibration improvement after oil service is not immediate — allow 24 hours for fresh oil to distribute. A 30-minute\nreading after service is for early warning only.\n Post-repair baseline at 24h: 2.2 mm/s vib, 60°C. Expected healthy state for AST_PMP_001 with fresh ISO68 oil."
+  },
+  {
+    "source_file": "CASE_003_learned_case.pdf",
+    "doc_type": "CASE",
+    "page_number": 1,
+    "text": "DRO Synthetic Data Baseline  |  Page 1  |  CONFIDENTIAL — Internal Use Only\nSensor Dropout on CH_31B Resolved — Conveyor\nAssembly, Loose Terminal at J-301\nAsset: AST_CON_001 (Conveyor) | Bearing: BRG_009 (SKF22212)\nFault Mode: sensor_fault | ISO Stage: No Stage (Healthy/Sensor)\nLearned Case — Knowledge Agent Retrieval Document | DRO Baseline\nCASE_003 | Outcome: SUCCESSFUL | Opened: 2026-05-02 | Closed: 2026-05-02\n1. Detection Summary\nDetection Date\n2026-05-02\nDetected By\ndata_foundation_agent (signal_quality_event)\nAnomaly Score\nn/a (data quality event, not a bearing fault)\nDropout Pattern\nBurst — 2 to 4 consecutive null readings, then recovery\nDropout Percentage\n3.2% of readings over 7-day monitoring window\nsignal_quality_score during\ndropout\n0.10 to 0.15 (healthy: ≥ 0.97)\nChannel"
+  },
+  {
+    "source_file": "CASE_003_learned_case.pdf",
+    "doc_type": "CASE",
+    "page_number": 1,
+    "text": "n recovery\nDropout Percentage\n3.2% of readings over 7-day monitoring window\nsignal_quality_score during\ndropout\n0.10 to 0.15 (healthy: ≥ 0.97)\nChannel Affected\nCH_31B (historian tag: PI:CON001.BRG9:VIB)\nBRG_010 (NON_DRIVE)\nClean signal — dropout was channel-specific, not asset-wide\nLOTO Status at Detection\nCRITICAL: LOTO_003 expired 2026-04-15 — work held pending renewal\n2. Agent Diagnosis\nPrimary Diagnosis\nsignal_fault — loose connector (intermittent burst pattern)\nBearing Diagnosis Confidence\nReduced to 71% (from typical 85%) — unreliable channel data\nReasoning\nBurst-pattern dropouts are characteristic of a loose terminal or damaged cable\nconnector. Random single-record dropouts indicate transient noise. Burst\npattern = intermittent physical connection.\nBearing Condition\nCould not be"
+  },
+  {
+    "source_file": "CASE_003_learned_case.pdf",
+    "doc_type": "CASE",
+    "page_number": 1,
+    "text": "le\nconnector. Random single-record dropouts indicate transient noise. Burst\npattern = intermittent physical connection.\nBearing Condition\nCould not be confirmed while CH_31B was unreliable\n3. Action Taken\nRecommended Action\nSensor inspection and cable repair at junction box J-301; visual bearing\ninspection while accessed\nLOTO Constraint\nNew LOTO_003 permit required before work could start — caused 1-day delay\nWindow Selected\nLINE_001 planned stop, same-day after permit renewal\nParts Required\nReplacement cable connector from OT instrument store\nCrew Assigned\nRaj Kumar (TECH_006, OT instrument specialist)\nWork Order\nWO_003 — priority HIGH (data integrity risk on bottleneck asset)\n4. Findings at Inspection / Teardown\nJunction box J-301 (non-drive end, conveyor frame) was opened. The cable"
+  },
+  {
+    "source_file": "CASE_003_learned_case.pdf",
+    "doc_type": "CASE",
+    "page_number": 1,
+    "text": "data integrity risk on bottleneck asset)\n4. Findings at Inspection / Teardown\nJunction box J-301 (non-drive end, conveyor frame) was opened. The cable termination for the CH_31B signal\nconductor was found with the terminal screw partially backed out — approximately half a turn loose. The terminal had\nbeen vibrating loose over time due to conveyor operating vibration. No cable damage was found. The terminal was\nre-terminated and tightened to 6 Nm with a calibrated torque screwdriver. Visual inspection of BRG_009 (DRIVE\nbearing) confirmed normal condition — no visible damage, grease leakage, or discolouration, consistent with"
+  },
+  {
+    "source_file": "CASE_003_learned_case.pdf",
+    "doc_type": "CASE",
+    "page_number": 2,
+    "text": "DRO Synthetic Data Baseline  |  Page 2  |  CONFIDENTIAL — Internal Use Only\nhealth_score 0.72. BRG_010 (NON_DRIVE) also appeared normal.\n5. Outcome\nSignal Quality Post-Repair\n0.98 (15 consecutive clean readings confirmed)\nNull Records in 4h Post-Repair\nZero\nBRG_009 Vibration (channel\nrestored)\n2.3 mm/s (within baseline)\nQA Result\nPASS — signal quality restored, no bearing fault found\nActual Duration\n3 hours (including permit renewal wait time)\nActual Cost\nINR 3,000\nRecommendation Followed\nYes\n6. Root Cause Confirmed\nRoot Cause\nloose_connector_J301\nContributing Factors\nTerminal screw not torqued to specification during original sensor installation.\nConveyor vibration gradually backed the screw out over approximately 6\nmonths.\n7. Lessons Learned\n Burst-pattern signal dropouts (consecutive"
+  },
+  {
+    "source_file": "CASE_003_learned_case.pdf",
+    "doc_type": "CASE",
+    "page_number": 2,
+    "text": "lation.\nConveyor vibration gradually backed the screw out over approximately 6\nmonths.\n7. Lessons Learned\n Burst-pattern signal dropouts (consecutive nulls in clusters) reliably indicate a physical connection problem — not\na bearing fault. Data Foundation Agent correctly classified this.\n Expired LOTO permits are a hard stop. The 1-day delay caused by LOTO_003 renewal is operationally significant\non a bottleneck asset — permits should be renewed proactively before expiry.\n Terminal tightening torque (5–6 Nm) must be verified at every sensor installation using a calibrated torque\nscrewdriver — not by feel.\n CH_31B (historian tag: PI:CON001.BRG9:VIB) must not be renamed — this ID is fixed in the telemetry schema.\nBRG_010 on CH_010 remained clean, confirming the dropout was"
+  },
+  {
+    "source_file": "CASE_003_learned_case.pdf",
+    "doc_type": "CASE",
+    "page_number": 2,
+    "text": "tag: PI:CON001.BRG9:VIB) must not be renamed — this ID is fixed in the telemetry schema.\nBRG_010 on CH_010 remained clean, confirming the dropout was channel-specific."
+  },
+  {
+    "source_file": "CASE_004_learned_case.pdf",
+    "doc_type": "CASE",
+    "page_number": 1,
+    "text": "DRO Synthetic Data Baseline  |  Page 1  |  CONFIDENTIAL — Internal Use Only\nStage 3 Outer Race Fault — Gearbox Bottleneck, Part\nShortage, Monitoring Active\nAsset: AST_GBX_001 (Gearbox) | Bearing: BRG_011 (SKF22318)\nFault Mode: outer_race_fault | ISO Stage: Stage 3\nLearned Case — Knowledge Agent Retrieval Document | DRO Baseline\nCASE_004 | Outcome: PENDING | Opened: 2026-05-15 | Closed: In Progress\n1. Detection Summary\nDetection Date\n2026-05-15\nDetected By\nmonitoring_agent\nAnomaly Score\n0.89 (high confidence)\nvib_rms_mm_s\n7.2 mm/s (baseline mean: 2.8 mm/s — z-score: 11σ)\nkurtosis\n7.0 (threshold: 5.0 — exceeded, fault confirmed)\ntemp_c\n86°C (baseline mean: 62°C — rise: 24°C)\nbpfo_energy\n3.5× (stage_3 boundary exactly — Stage 3 classified)\nsignal_quality_score\n0.96–0.97 (clean signal)\nAsset"
+  },
+  {
+    "source_file": "CASE_004_learned_case.pdf",
+    "doc_type": "CASE",
+    "page_number": 1,
+    "text": "baseline mean: 62°C — rise: 24°C)\nbpfo_energy\n3.5× (stage_3 boundary exactly — Stage 3 classified)\nsignal_quality_score\n0.96–0.97 (clean signal)\nAsset Context\ncriticality=high, is_bottleneck=true, downtime_cost=INR 18,000/hr, iso_zone=D\nFinancial Exposure\n0.85 × 8h × INR 18,000/hr = INR 122,400 if run to failure\n2. Agent Diagnosis\nPrimary Diagnosis\nouter_race_fault — Stage 3\nConfidence\n0.85\nReasoning\nkurtosis 7.0 > FT_001 threshold 5.0. bpfo_energy 3.5× at stage_3 boundary.\nTemperature rise 24°C consistent. Bottleneck asset — risk escalated.\nRUL Estimate\n5–9 days from Stage 3 detection (based on CASE_001 and other KB cases)\nRisk Level\nCRITICAL — bottleneck asset, high downtime cost, Zone D\n3. Action Taken\nInventory Check\nPART_003 (SKF22318-E) qty_on_hand = 0. Reserved = 0.\nLead Time"
+  },
+  {
+    "source_file": "CASE_004_learned_case.pdf",
+    "doc_type": "CASE",
+    "page_number": 1,
+    "text": "CRITICAL — bottleneck asset, high downtime cost, Zone D\n3. Action Taken\nInventory Check\nPART_003 (SKF22318-E) qty_on_hand = 0. Reserved = 0.\nLead Time Standard\n30 days (exceeds RUL — cannot wait for standard delivery)\nLead Time Expedited\n12 days (exceeds RUL lower bound of 5 days — risk window)\nRecommendation Changed To\nEmergency procurement + derate + 2-hour monitoring interval\nInterim Actions\nLoad reduced 15–20%. Monitoring at 2h intervals. Maintenance window\npre-booked Day 13.\nWork Order\nWO_004 — priority CRITICAL\nLOTO\nLOTO_004 — all shift supervisors briefed on Zone D (no approach without\nLOTO)\n4. Findings at Inspection / Teardown"
+  },
+  {
+    "source_file": "CASE_004_learned_case.pdf",
+    "doc_type": "CASE",
+    "page_number": 2,
+    "text": "DRO Synthetic Data Baseline  |  Page 2  |  CONFIDENTIAL — Internal Use Only\nGearbox not yet opened — awaiting PART_003 delivery (expected 2026-05-27). No teardown findings available.\nBearing is being monitored every 2 hours. Load derating of approximately 15% is in effect operationally. Procurement\norder placed with SKF India, expedited delivery. Repair window pre-booked for 2026-05-28.\n5. Outcome\nCurrent Status\nIN PROGRESS — monitoring active\nPost-Repair Measurements\nNot yet available\nQA Result\nPending\nActual Duration\nPending\nActual Cost\nINR 12,000 committed (estimated, excluding part cost)\nExpected Part Arrival\n2026-05-27 (expedited)\nExpected Repair Date\n2026-05-28\n6. Root Cause Confirmed\nRoot Cause\nPending teardown — outer race fault confirmed by telemetry\nPreliminary Contributing"
+  },
+  {
+    "source_file": "CASE_004_learned_case.pdf",
+    "doc_type": "CASE",
+    "page_number": 2,
+    "text": "Expected Repair Date\n2026-05-28\n6. Root Cause Confirmed\nRoot Cause\nPending teardown — outer race fault confirmed by telemetry\nPreliminary Contributing Factors\nRapid escalation pattern suggests possible contamination or fatigue loading.\nOil last changed 2026-02-01 — 108 days. To be confirmed at teardown.\n7. Lessons Learned\n When part lead time exceeds RUL lower bound, recommendation must change from 'schedule repair' to 'expedite\nprocurement + monitor + derate'. Prescriptive Agent handled this correctly.\n SKF22318-E is a long-lead item (30 days standard) on a critical bottleneck asset. Safety stock of at least 1 unit\nshould be maintained. Zero safety stock on critical spare is unacceptable risk.\n Zone D classification: no approach for any reason without LOTO_004 fully applied. All shift"
+  },
+  {
+    "source_file": "CASE_004_learned_case.pdf",
+    "doc_type": "CASE",
+    "page_number": 2,
+    "text": "ero safety stock on critical spare is unacceptable risk.\n Zone D classification: no approach for any reason without LOTO_004 fully applied. All shift supervisors must be\nbriefed at handover.\n Financial exposure at INR 122,400 potential loss justified emergency procurement premium over waiting for\nstandard delivery.\n Derate + increased monitoring is the correct holding strategy when part is unavailable — do not run full load on a\nStage 3 bearing."
+  },
+  {
+    "source_file": "CASE_005_learned_case.pdf",
+    "doc_type": "CASE",
+    "page_number": 1,
+    "text": "DRO Synthetic Data Baseline  |  Page 1  |  CONFIDENTIAL — Internal Use Only\nNo Fault Found — Routine Preventive Check,\nConveyor Motor B\nAsset: AST_MTR_002 (Motor) | Bearing: BRG_003 (SKF6310)\nFault Mode: healthy | ISO Stage: No Stage (Healthy/Sensor)\nLearned Case — Knowledge Agent Retrieval Document | DRO Baseline\nCASE_005 | Outcome: PREVENTIVE | Opened: 2026-05-10 | Closed: 2026-05-10\n1. Detection Summary\nDetection Date\n2026-05-10\nDetected By\nmonitoring_agent (routine cycle — no anomaly raised)\nAnomaly Score\n0.21 (below alert threshold)\nvib_rms_mm_s\n1.9 mm/s (baseline mean: 1.8 mm/s — within ±1σ)\nkurtosis\n2.1 (well below fault threshold 5.0)\ntemp_c\n52°C (baseline mean: 52°C — no deviation)\nbpfo_energy\n0.6× (well below stage_1 multiple 1.5×)\nsignal_quality_score\n1.00 (perfect"
+  },
+  {
+    "source_file": "CASE_005_learned_case.pdf",
+    "doc_type": "CASE",
+    "page_number": 1,
+    "text": "threshold 5.0)\ntemp_c\n52°C (baseline mean: 52°C — no deviation)\nbpfo_energy\n0.6× (well below stage_1 multiple 1.5×)\nsignal_quality_score\n1.00 (perfect signal)\nlast_lubrication_date\n2026-05-01 — 9 days before check, within interval\n2. Agent Diagnosis\nPrimary Diagnosis\nhealthy — no fault\nConfidence\n0.92 (high confidence of no fault)\nReasoning\nAll signals within ±1σ of baseline. No threshold crossed. No trend indicating\ndeveloping fault. Lubrication is current.\nDifferential\nNone required — healthy classification is unambiguous at this score.\n3. Action Taken\nRecommended Action\nRoutine preventive maintenance — grease top-up and inspection only\nWindow Selected\nNext available planned stop on LINE_001\nParts Required\nPART_004 (Synthetic Grease, small top-up quantity, BIN_L1)\nCrew Assigned\nK."
+  },
+  {
+    "source_file": "CASE_005_learned_case.pdf",
+    "doc_type": "CASE",
+    "page_number": 1,
+    "text": "nly\nWindow Selected\nNext available planned stop on LINE_001\nParts Required\nPART_004 (Synthetic Grease, small top-up quantity, BIN_L1)\nCrew Assigned\nK. Mensah (TECH_002)\nLOTO Applied\nLOTO_005 — MCC-13, Valve-5 (is_current: true)\nWork Order\nWO_005 — priority LOW\n4. Findings at Inspection / Teardown\nVisual inspection of motor exterior: clean, no leaks, fasteners tight. Grease nipple accessed for top-up. Existing grease\nat purge was light amber, clean, smooth texture — no contamination or discolouration. Added 35g PART_004. No\nbearing housing opened. No mechanical disassembly required. BRG_004 (NDE) was not accessed on this visit —\nvisual condition of motor exterior gave no indication of NDE bearing issues.\n5. Outcome"
+  },
+  {
+    "source_file": "CASE_005_learned_case.pdf",
+    "doc_type": "CASE",
+    "page_number": 2,
+    "text": "DRO Synthetic Data Baseline  |  Page 2  |  CONFIDENTIAL — Internal Use Only\nPost-Maintenance vib_rms\n1.7 mm/s (QA pass: ≤ 2.5 mm/s) ✓\nPost-Maintenance temp_c\n51°C (QA pass: ≤ 60°C) ✓\nKurtosis at 30 min\n2.1 (QA pass: ≤ 2.5) ✓\nQA Result\nPASS — healthy baseline confirmed\nActual Duration\n2 hours\nActual Cost\nINR 2,500\nRecommendation Followed\nYes\n6. Root Cause Confirmed\nRoot Cause\nno_fault_found\nNotes\nMotor is in healthy operating condition. No action beyond lubrication required.\n7. Lessons Learned\n AST_MTR_002 consistently shows stable signals: 1.8–2.0 mm/s vib and 51–54°C. Any reading above 2.5 mm/s\nor above 60°C warrants increased monitoring frequency.\n Healthy preventive checks provide the most reliable baseline data for the Monitoring Agent — stable readings\nfrom this check strengthened"
+  },
+  {
+    "source_file": "CASE_005_learned_case.pdf",
+    "doc_type": "CASE",
+    "page_number": 2,
+    "text": "frequency.\n Healthy preventive checks provide the most reliable baseline data for the Monitoring Agent — stable readings\nfrom this check strengthened the baseline for BRG_003.\n Post-lubrication baseline: 1.7 mm/s vib, 51°C. Use as reference for this motor.\n Note: LOTO_005 (new permit for AST_MTR_002) is the correct permit for this asset — not LOTO_001."
+  },
+  {
+    "source_file": "CASE_006_learned_case.pdf",
+    "doc_type": "CASE",
+    "page_number": 1,
+    "text": "DRO Synthetic Data Baseline  |  Page 1  |  CONFIDENTIAL — Internal Use Only\nHealthy Vibration Check Completed — Cooling Pump\nB\nAsset: AST_PMP_002 (Pump) | Bearing: BRG_007 (SKF6208)\nFault Mode: healthy | ISO Stage: No Stage (Healthy/Sensor)\nLearned Case — Knowledge Agent Retrieval Document | DRO Baseline\nCASE_006 | Outcome: SUCCESSFUL | Opened: 2026-05-08 | Closed: 2026-05-08\n1. Detection Summary\nDetection Date\n2026-05-08\nDetected By\nscheduled_inspection (operator-initiated)\nAnomaly Score\n0.18 (below alert threshold, well within normal range)\nvib_rms_mm_s\n2.0 mm/s (within normal range for this pump)\nkurtosis\n2.0 (well below fault threshold)\ntemp_c\n57°C (within normal range)\nbpfo_energy\n0.5× (sub-threshold, healthy)\nsignal_quality_score\n1.00\nlast_lubrication_date\n2026-05-05 — 3 days before"
+  },
+  {
+    "source_file": "CASE_006_learned_case.pdf",
+    "doc_type": "CASE",
+    "page_number": 1,
+    "text": "temp_c\n57°C (within normal range)\nbpfo_energy\n0.5× (sub-threshold, healthy)\nsignal_quality_score\n1.00\nlast_lubrication_date\n2026-05-05 — 3 days before check, very recent\n2. Agent Diagnosis\nPrimary Diagnosis\nhealthy — no fault\nConfidence\n0.94\nReasoning\nAll signals well within healthy range. No threshold crossed. Lubrication recently\ncompleted (3 days prior).\nDifferential\nNone required.\n3. Action Taken\nRecommended Action\nVibration inspection only — no mechanical work required\nLOTO Required\nNo — external vibration inspection, no panel access required\nCrew Assigned\nK. Mensah (TECH_002) — portable vibration meter walk-around\nWork Order\nWO_006 — priority LOW\n4. Findings at Inspection / Teardown\nExternal walk-around inspection. No mechanical disassembly. Portable vibration readings confirmed the"
+  },
+  {
+    "source_file": "CASE_006_learned_case.pdf",
+    "doc_type": "CASE",
+    "page_number": 1,
+    "text": "riority LOW\n4. Findings at Inspection / Teardown\nExternal walk-around inspection. No mechanical disassembly. Portable vibration readings confirmed the historian data\nat 2.0 mm/s. Bearing housing was cool to the touch. No visible leaks or abnormal sounds. BRG_008 (NDE) external\nsurface also inspected — no anomalies. Asset confirmed in normal condition. Pump B is in noticeably better condition\nthan Pump A (AST_PMP_001), which had a lubrication issue — Pump B's recent lube service (2026-05-05) has\nmaintained healthy condition.\n5. Outcome\nVibration Confirmed\n2.0 mm/s (healthy)\nTemperature Confirmed\n57°C (healthy)"
+  },
+  {
+    "source_file": "CASE_006_learned_case.pdf",
+    "doc_type": "CASE",
+    "page_number": 2,
+    "text": "DRO Synthetic Data Baseline  |  Page 2  |  CONFIDENTIAL — Internal Use Only\nQA Result\nPASS\nActual Duration\n1.2 hours\nActual Cost\nINR 1,800\nRecommendation Followed\nYes\n6. Root Cause Confirmed\nRoot Cause\nno_fault_found\nNotes\nAST_PMP_002 healthy baseline confirmed.\n7. Lessons Learned\n AST_PMP_002 healthy baseline: approximately 2.0–2.2 mm/s vib and 55–58°C. Any reading above 3.5 mm/s or\nabove 68°C warrants increased monitoring.\n For low-criticality Zone A assets, an external vibration inspection without LOTO is appropriate as a first check. If\nanomaly confirmed, full work order with LOTO (LOTO_006) is then raised.\n Pump B is in better condition than Pump A — Pump A's lube interval should be monitored more carefully to\nprevent recurrence of CASE_002.\n Note: LOTO_006 is the correct permit"
+  },
+  {
+    "source_file": "CASE_006_learned_case.pdf",
+    "doc_type": "CASE",
+    "page_number": 2,
+    "text": "tion than Pump A — Pump A's lube interval should be monitored more carefully to\nprevent recurrence of CASE_002.\n Note: LOTO_006 is the correct permit for AST_PMP_002 — separate from LOTO_002 which covers\nAST_PMP_001."
+  },
+  {
+    "source_file": "SOP_001_outer_race_motor_stage3.pdf",
+    "doc_type": "SOP",
+    "page_number": 1,
+    "text": "DRO Synthetic Data Baseline  |  Page 1  |  CONFIDENTIAL — Internal Use Only\nOuter Race Bearing Replacement\nElectric Motor — Stage 3 Outer Race Fault\nAssets: AST_MTR_001 (Conveyor Motor A) | Asset also covers AST_MTR_002 frame\nBearing Type: SKF6310 | Est. Duration: 6 h | Crew: 2 | Priority: HIGH/URGENT\nSOP_001 | v1.2 | Revised: 2026-03-10\n1. Purpose and Scope\nThis procedure covers planned replacement of a drive-end or non-drive-end deep groove ball bearing on\nmedium-to-large industrial electric motors where an outer race fault has been confirmed at ISO 13373-1 Stage 3 or\nabove. Stage 3 is defined as BPFO band energy exceeding 3.5× the established healthy baseline AND kurtosis\nexceeding 5.0. At Stage 3, bearing replacement is mandatory — lubrication or re-greasing will NOT"
+  },
+  {
+    "source_file": "SOP_001_outer_race_motor_stage3.pdf",
+    "doc_type": "SOP",
+    "page_number": 1,
+    "text": "g 3.5× the established healthy baseline AND kurtosis\nexceeding 5.0. At Stage 3, bearing replacement is mandatory — lubrication or re-greasing will NOT arrest\ndegradation. Applies to SKF6310-series bearings on Siemens SIM-MTR-400 (AST_MTR_001) and ABB\nABB-MTR-220 (AST_MTR_002) frames in the 45–75 kW range.\n2. Prerequisites\n Maintenance window approved and active in scheduling system (e.g. CTX_001 on LINE_001, 4 h minimum)\n Work order raised, approved, priority confirmed HIGH or URGENT\n PART_001 (SKF6310-ZZ bearing) confirmed available in BIN_A1, quantity at least 1\n PART_004 (Synthetic Grease) confirmed available in BIN_L1\n LOTO permit LOTO_001 confirmed current (is_current = true, expiry date not passed)\n For AST_MTR_002: LOTO_005 must be confirmed current\n Two technicians"
+  },
+  {
+    "source_file": "SOP_001_outer_race_motor_stage3.pdf",
+    "doc_type": "SOP",
+    "page_number": 1,
+    "text": "permit LOTO_001 confirmed current (is_current = true, expiry date not passed)\n For AST_MTR_002: LOTO_005 must be confirmed current\n Two technicians available, both LOTO_CERTIFIED\n At least one technician holding ISO_CAT_III or CBM_LEVEL_2 for post-repair validation\n Bearing puller, torque wrench, induction heater, and portable vibration meter on site\n3. Safety Requirements\n3.1 LOTO Isolation Procedure\nLOTO Permit\nLOTO_001 (AST_MTR_001) | LOTO_005 (AST_MTR_002)\nIsolation Points\nMCC-12, Valve-4 (AST_MTR_001) / MCC-13, Valve-5 (AST_MTR_002)\nEnergy Types\nElectrical\nIsolation Steps\nOpen and lock MCC. Apply personal danger tag. Open valve and apply lock.\nEach technician applies their own padlock.\nVerification\nAfter isolation, attempt to start motor at control panel. Confirm motor does"
+  },
+  {
+    "source_file": "SOP_001_outer_race_motor_stage3.pdf",
+    "doc_type": "SOP",
+    "page_number": 1,
+    "text": "e and apply lock.\nEach technician applies their own padlock.\nVerification\nAfter isolation, attempt to start motor at control panel. Confirm motor does not\nstart. Confirm zero voltage at terminals using approved voltage tester.\n3.2 PPE Requirements\nMandatory PPE\nElectrical insulation gloves (Class 00 minimum), safety helmet, steel-toed\nboots, vibration-damping gloves, safety glasses\n3.3 ISO 10816-3 Zone Check\nZone — AST_MTR_001\nC — Controlled approach permitted with standard PPE. Do not operate at\nelevated load until repair is complete.\nZone — AST_MTR_002\nA — Normal operating range; standard approach applies.\n4. Tools and Materials Required"
+  },
+  {
+    "source_file": "SOP_001_outer_race_motor_stage3.pdf",
+    "doc_type": "SOP",
+    "page_number": 2,
+    "text": "DRO Synthetic Data Baseline  |  Page 2  |  CONFIDENTIAL — Internal Use Only\nPart Number\nDescription\nQuantity\nBin Location\nPART_001\nSKF6310-ZZ Deep Groove\nBall Bearing\n1\nBIN_A1\nPART_004\nSynthetic Grease (Shell /\nequivalent)\n1 unit\nBIN_L1\n SKF bearing puller TMBS 30E or equivalent mechanical puller\n Torque wrench, calibrated, range 20–150 Nm\n Induction bearing heater (target 110°C for mounting)\n Infrared thermometer\n Portable vibration analyser — mm/s RMS capability\n Clean lint-free rags and bearing cleaning solvent\n Feeler gauge set for clearance check\n Bearing installation sleeve or press plates matching SKF6310 bore\n5. Step-by-Step Procedure\n1\nConfirm work order approved, maintenance window active, and parts on site before touching the machine.\n2\nIsolate the motor: apply LOTO per"
+  },
+  {
+    "source_file": "SOP_001_outer_race_motor_stage3.pdf",
+    "doc_type": "SOP",
+    "page_number": 2,
+    "text": "Procedure\n1\nConfirm work order approved, maintenance window active, and parts on site before touching the machine.\n2\nIsolate the motor: apply LOTO per Section 3.1. Each technician fits personal lock.\n3\nVerify zero energy: attempt start at control panel. Confirm zero voltage at motor terminals.\n4\nRemove motor end cover (drive end or non-drive end as applicable). Document cover bolt torques found.\n5\nUsing bearing puller TMBS 30E, extract the bearing from the shaft journal. Note resistance and any abnormal sounds\nduring removal.\n6\nInspect removed bearing: photograph spalling pattern, measure raceway damage extent, note grease condition\n(colour, smell, particle content). Record findings on work order.\n7\nInspect shaft journal OD and housing bore ID with feeler gauges. Confirm both within"
+  },
+  {
+    "source_file": "SOP_001_outer_race_motor_stage3.pdf",
+    "doc_type": "SOP",
+    "page_number": 2,
+    "text": "olour, smell, particle content). Record findings on work order.\n7\nInspect shaft journal OD and housing bore ID with feeler gauges. Confirm both within drawing tolerance. If out of\ntolerance, STOP and escalate.\n8\nInspect bearing housing end cover seal. If cracked or degraded, replace seal — failure to replace allows\nre-contamination.\n9\nClean housing bore and shaft journal with lint-free cloth and approved solvent. Remove all old grease and metallic\ndebris.\n10\nHeat new SKF6310-ZZ bearing in induction heater to 110°C. Do not exceed 125°C.\n11\nSlide heated bearing onto shaft journal smoothly — no hammering. Apply gentle press force only to inner ring. Allow to\ncool to ambient.\n12\nApply PART_004 Synthetic Grease to approximately 30–40% of bearing cavity volume. Do not over-grease.\n13\nRefit end"
+  },
+  {
+    "source_file": "SOP_001_outer_race_motor_stage3.pdf",
+    "doc_type": "SOP",
+    "page_number": 2,
+    "text": "ring. Allow to\ncool to ambient.\n12\nApply PART_004 Synthetic Grease to approximately 30–40% of bearing cavity volume. Do not over-grease.\n13\nRefit end cover. Torque cover bolts to 45 Nm in cross pattern.\n14\nRemove LOTO: each technician removes their own lock. Confirm all tools and rags removed from machine.\n15\nControlled restart: bring machine to operating speed at reduced load (50%) for first 30 minutes.\n16\nMeasure vibration RMS with portable meter at 30 minutes. Record reading on work order.\n17\nReturn to full operating load. Take second vibration and temperature reading at 1 hour.\n18\nQA check: confirm post-repair readings meet criteria in Section 7. Record all measurements.\n19\nFinal QA check at 24 hours post-restart: vibration, temperature, and kurtosis from historian.\n20\nClose work"
+  },
+  {
+    "source_file": "SOP_001_outer_race_motor_stage3.pdf",
+    "doc_type": "SOP",
+    "page_number": 2,
+    "text": "in Section 7. Record all measurements.\n19\nFinal QA check at 24 hours post-restart: vibration, temperature, and kurtosis from historian.\n20\nClose work order. Update bearing_master.last_lubrication_date and current_health_score.\n6. Critical Specifications\nTorque Specification\nEnd cover bolts: 45 Nm in cross pattern"
+  },
+  {
+    "source_file": "SOP_001_outer_race_motor_stage3.pdf",
+    "doc_type": "SOP",
+    "page_number": 3,
+    "text": "DRO Synthetic Data Baseline  |  Page 3  |  CONFIDENTIAL — Internal Use Only\nBearing Fit\nInterference fit on shaft journal — induction heating method required\nMounting Temperature\n110°C target, max 125°C\nLubricant Type\nPART_004 — Synthetic Grease (Shell Gadus S2 V220 or equivalent)\nLubricant Quantity\n30–40% of bearing cavity volume (approx. 45–60 g for SKF6310 frame)\nFill Level\nDo not exceed 50% — over-greasing causes churning and thermal rise\n7. Post-Repair Quality Acceptance Criteria\nAll values must be met at BOTH the 1-hour and 24-hour post-restart checks. If any criterion fails at 1 hour, do not\nproceed to full load — investigate immediately.\nParameter\nAcceptance Criterion\nFailure Action\nVibration RMS (at rated speed, full load)\n≤ 2.5 mm/s\nShut down, re-inspect bearing seating\nPeak"
+  },
+  {
+    "source_file": "SOP_001_outer_race_motor_stage3.pdf",
+    "doc_type": "SOP",
+    "page_number": 3,
+    "text": "diately.\nParameter\nAcceptance Criterion\nFailure Action\nVibration RMS (at rated speed, full load)\n≤ 2.5 mm/s\nShut down, re-inspect bearing seating\nPeak Vibration\n≤ 3.0 g\nShut down, re-inspect\nBearing Temperature\n≤ 60°C at 1 h | ≤ 55°C at 24 h\nCheck lubricant fill level; re-inspect if\ntemperature rising\nKurtosis (at 24 h)\n≤ 2.8\nRe-inspect bearing seating and shaft\nalignment\nBPFO Energy (normalised)\n≤ 1.2× baseline\nBearing seating suspect; escalate to\nmaintenance lead\nSignal Quality Score\n≥ 0.97\nCheck sensor cable and channel\nCH_001 / CH_002 connection\n8. Common Failure Modes and Troubleshooting\n If vibration does not fall below 2.5 mm/s after restart → bearing may be misseated; shut down, remove and\nre-press.\n If temperature rises above 70°C within 1 hour → excess grease causing churning;"
+  },
+  {
+    "source_file": "SOP_001_outer_race_motor_stage3.pdf",
+    "doc_type": "SOP",
+    "page_number": 3,
+    "text": "restart → bearing may be misseated; shut down, remove and\nre-press.\n If temperature rises above 70°C within 1 hour → excess grease causing churning; drain and re-pack to 35% fill.\n If kurtosis remains above 3.0 at 24 h → check bearing inner race for fit on shaft journal; may require shaft repair.\n If BPFO energy remains above 1.5× at 24 h → confirm correct bearing model was installed; wrong model\nproduces false signals.\n If housing end cover seal was not replaced and fault recurs within 90 days → contamination re-entry; replace seal\nand re-inspect.\n9. Related Documents\n SOP_006 — Post-Repair QA Procedure (all assets)\n LOTO_001 permit record — AST_MTR_001 (MCC-12, Valve-4)\n LOTO_005 permit record — AST_MTR_002 (MCC-13, Valve-5)\n SKF6310-ZZ installation guide (OEM bearing"
+  },
+  {
+    "source_file": "SOP_001_outer_race_motor_stage3.pdf",
+    "doc_type": "SOP",
+    "page_number": 3,
+    "text": "01 permit record — AST_MTR_001 (MCC-12, Valve-4)\n LOTO_005 permit record — AST_MTR_002 (MCC-13, Valve-5)\n SKF6310-ZZ installation guide (OEM bearing installation manual)\n CASE_001 learned case — Stage 3 outer race, AST_MTR_001, contamination confirmed"
+  },
+  {
+    "source_file": "SOP_002_preventive_motor_healthy.pdf",
+    "doc_type": "SOP",
+    "page_number": 1,
+    "text": "DRO Synthetic Data Baseline  |  Page 1  |  CONFIDENTIAL — Internal Use Only\nPreventive Maintenance — Electric Motor\nHealthy Bearing — Routine Inspection and Lubrication\nAssets: AST_MTR_001 (Conveyor Motor A), AST_MTR_002 (Conveyor Motor B)\nBearing Types: SKF6310 | Est. Duration: 2 h | Crew: 1–2 | Priority: LOW\nSOP_002 | v1.1 | Revised: 2026-03-01\n1. Purpose and Scope\nThis procedure covers routine preventive maintenance for electric motor bearings that are confirmed healthy by the\nMonitoring Agent (anomaly score below 0.30, all signals within ±2σ of baseline). Actions are limited to visual\ninspection, grease top-up, and vibration and temperature confirmation. No mechanical disassembly or bearing\nreplacement is performed under this SOP. If the inspection reveals unexpected findings, STOP"
+  },
+  {
+    "source_file": "SOP_002_preventive_motor_healthy.pdf",
+    "doc_type": "SOP",
+    "page_number": 1,
+    "text": "rature confirmation. No mechanical disassembly or bearing\nreplacement is performed under this SOP. If the inspection reveals unexpected findings, STOP and escalate to\nSOP_001. Applies to SKF6310 bearings on AST_MTR_001 and AST_MTR_002.\n2. Prerequisites\n Monitoring Agent anomaly score ≤ 0.30 — confirmed in latest monitoring record\n All vib, kurtosis, and temp signals within ±2σ of baseline_registry values\n Planned maintenance slot available — LOW priority, can be deferred to next planned stop\n PART_004 (Synthetic Grease) available in BIN_L1 for top-up if required\n LOTO_001 current (AST_MTR_001) or LOTO_005 current (AST_MTR_002) — required if accessing grease\nnipple\n One technician with LOTO_CERTIFIED credential\n Portable vibration meter and infrared thermometer\n3. Safety"
+  },
+  {
+    "source_file": "SOP_002_preventive_motor_healthy.pdf",
+    "doc_type": "SOP",
+    "page_number": 1,
+    "text": "2) — required if accessing grease\nnipple\n One technician with LOTO_CERTIFIED credential\n Portable vibration meter and infrared thermometer\n3. Safety Requirements\n3.1 LOTO Isolation Procedure\nLOTO Required\nYes — for grease nipple access (motor cover panel must be opened)\nPermit — AST_MTR_001\nLOTO_001 | Isolation: MCC-12, Valve-4\nPermit — AST_MTR_002\nLOTO_005 | Isolation: MCC-13, Valve-5\nEnergy Type\nElectrical\nVerification\nAttempt start after lock applied. Confirm motor does not start.\n3.2 PPE and Zone Requirements\nMandatory PPE\nElectrical insulation gloves, safety helmet, steel-toed boots\nZone — AST_MTR_001\nC — Controlled approach with standard PPE\nZone — AST_MTR_002\nA — Normal approach; standard PPE applies\n4. Tools and Materials Required\nPart Number\nDescription\nQuantity\nBin"
+  },
+  {
+    "source_file": "SOP_002_preventive_motor_healthy.pdf",
+    "doc_type": "SOP",
+    "page_number": 1,
+    "text": "ch with standard PPE\nZone — AST_MTR_002\nA — Normal approach; standard PPE applies\n4. Tools and Materials Required\nPart Number\nDescription\nQuantity\nBin Location\nPART_004\nSynthetic Grease — for\ntop-up only if due\nAs required (approx. 30–40\ng)\nBIN_L1\n Grease gun loaded with PART_004\n Infrared thermometer\n Portable vibration meter (mm/s RMS, handheld)\n Torque screwdriver (for panel fasteners if applicable)"
+  },
+  {
+    "source_file": "SOP_002_preventive_motor_healthy.pdf",
+    "doc_type": "SOP",
+    "page_number": 2,
+    "text": "DRO Synthetic Data Baseline  |  Page 2  |  CONFIDENTIAL — Internal Use Only\n Clean lint-free cloth for external surface inspection\n5. Step-by-Step Procedure\n1\nConfirm anomaly score ≤ 0.30 from latest monitoring record before proceeding.\n2\nApply LOTO per Section 3.1. Verify zero energy.\n3\nInspect motor exterior: check for oil or grease leaks, loose fasteners, unusual surface temperatures, or physical\ndamage. Record findings.\n4\nInspect grease nipple and purge point for correct seating and no signs of contamination entry.\n5\nDispense grease slowly. Observe purge point — when fresh grease appears at purge, stop dispensing. Do not exceed\n40 g total.\n6\nInspect purged grease on lint-free cloth: light amber, clean, smooth texture = acceptable. Dark, gritty, metallic\nparticles, or burnt smell ="
+  },
+  {
+    "source_file": "SOP_002_preventive_motor_healthy.pdf",
+    "doc_type": "SOP",
+    "page_number": 2,
+    "text": "total.\n6\nInspect purged grease on lint-free cloth: light amber, clean, smooth texture = acceptable. Dark, gritty, metallic\nparticles, or burnt smell = STOP and escalate to SOP_001.\n7\nRemove LOTO. Controlled restart.\n8\nTake vibration reading at 30 minutes: record vib_rms_mm_s and temp_c.\n9\nCompare readings against baseline (BRG_001/BRG_002 baseline mean: ~2.0 mm/s, ~57°C; BRG_003/BRG_004:\n~1.8 mm/s, ~52°C).\n10\nIf readings within ±1σ of baseline: QA PASS. Record on work order and close.\n11\nIf readings above ±2σ: escalate to SOP_001 for full inspection.\n12\nUpdate bearing_master.last_lubrication_date and confirm current_health_score in system.\n6. Critical Specifications\nLubricant Type\nPART_004 — Synthetic Grease (Shell Gadus S2 V220 or equivalent)\nTop-up Quantity\nApproximately 30–40 g"
+  },
+  {
+    "source_file": "SOP_002_preventive_motor_healthy.pdf",
+    "doc_type": "SOP",
+    "page_number": 2,
+    "text": "ystem.\n6. Critical Specifications\nLubricant Type\nPART_004 — Synthetic Grease (Shell Gadus S2 V220 or equivalent)\nTop-up Quantity\nApproximately 30–40 g maximum. Stop when fresh grease appears at purge.\nRe-lube Interval\nEvery 60 days under normal operating conditions\nGrease Condition Rejection\nCriterion\nDark colour, metallic particles, acrid smell, or gritty texture → reject, escalate to\nSOP_001\n7. Post-Maintenance Acceptance Criteria\nParameter\nAST_MTR_001\n(BRG_001/002)\nAST_MTR_002\n(BRG_003/004)\nFailure Action\nVibration RMS (at 30 min)\n≤ 2.5 mm/s\n≤ 2.2 mm/s\nEscalate to SOP_001\nBearing Temperature\n≤ 62°C\n≤ 55°C\nCheck grease fill; re-inspect\nKurtosis (historian, 30 min)\n≤ 2.8\n≤ 2.5\nEscalate to SOP_001\nSignal Quality Score\n≥ 0.97\n≥ 0.97\nCheck CH_001/002 or\nCH_003/004\n8. Common Issues and"
+  },
+  {
+    "source_file": "SOP_002_preventive_motor_healthy.pdf",
+    "doc_type": "SOP",
+    "page_number": 2,
+    "text": "ct\nKurtosis (historian, 30 min)\n≤ 2.8\n≤ 2.5\nEscalate to SOP_001\nSignal Quality Score\n≥ 0.97\n≥ 0.97\nCheck CH_001/002 or\nCH_003/004\n8. Common Issues and Troubleshooting\n If purged grease is contaminated → immediate escalation to SOP_001; bearing must be inspected for internal\ndamage.\n If vibration rises after re-greasing → excess grease; allow 30 min of operation for grease to distribute before\nre-measuring.\n If grease does not appear at purge after 40 g dispensed → purge path blocked; do not over-pump. Open for\ninspection.\n If kurtosis above 2.5 at 30 min → not a lubrication-only issue; escalate for full fault assessment."
+  },
+  {
+    "source_file": "SOP_002_preventive_motor_healthy.pdf",
+    "doc_type": "SOP",
+    "page_number": 3,
+    "text": "DRO Synthetic Data Baseline  |  Page 3  |  CONFIDENTIAL — Internal Use Only\n9. Related Documents\n SOP_001 — Outer Race Bearing Replacement (escalation target)\n SOP_006 — Post-Repair QA Procedure\n CASE_005 — Healthy check, AST_MTR_002, BRG_003, no fault found\n CASE_007 — Preventive check, AST_MTR_001, BRG_002 (NDE), no fault found\n CASE_008 — Preventive check, AST_MTR_002, BRG_004 (NDE), no fault found"
+  },
+  {
+    "source_file": "SOP_003_lubrication_pump_stage2.pdf",
+    "doc_type": "SOP",
+    "page_number": 1,
+    "text": "DRO Synthetic Data Baseline  |  Page 1  |  CONFIDENTIAL — Internal Use Only\nLubrication Service — Centrifugal Pump\nLubrication Issue — Stage 2 Broadband Pattern\nAssets: AST_PMP_001 (Cooling Pump A), AST_PMP_002 (Cooling Pump B) | LINE_002\nBearing Type: SKF6208 | Est. Duration: 3 h | Crew: 1–2 | Priority: MEDIUM\nSOP_003 | v1.1 | Revised: 2026-03-15\n1. Purpose and Scope\nThis procedure covers the oil drain, inspection, and refill service for centrifugal pump bearings where the Failure\nIntelligence Agent has classified a lubrication_issue — Stage 2. Stage 2 lubrication issue presents as broadband\nvibration increase (1.3–2.0× baseline) and temperature rise (10–20°C above baseline), WITHOUT a dominant single\nfrequency band and WITHOUT kurtosis exceeding 5.0. This pattern indicates oil"
+  },
+  {
+    "source_file": "SOP_003_lubrication_pump_stage2.pdf",
+    "doc_type": "SOP",
+    "page_number": 1,
+    "text": "and temperature rise (10–20°C above baseline), WITHOUT a dominant single\nfrequency band and WITHOUT kurtosis exceeding 5.0. This pattern indicates oil degradation or insufficient oil volume,\nnot bearing surface damage. First action is always oil service + 24h recheck. If kurtosis exceeds 5.0 after service,\nescalate to bearing replacement. Applies to SKF6208 bearings on AST_PMP_001 and AST_PMP_002 on LINE_002.\n2. Prerequisites\n Failure Intelligence diagnosis confirmed: lubrication_issue, Stage 2 — NOT outer_race_fault\n Kurtosis at detection: below 5.0 (if above, escalate to bearing replacement, not lubrication service)\n PART_005 (Industrial Oil ISO68) available in BIN_L2 — minimum 200 mL\n LOTO_002 current (AST_PMP_001) or LOTO_006 current (AST_PMP_002)\n Operations context confirms"
+  },
+  {
+    "source_file": "SOP_003_lubrication_pump_stage2.pdf",
+    "doc_type": "SOP",
+    "page_number": 1,
+    "text": "trial Oil ISO68) available in BIN_L2 — minimum 200 mL\n LOTO_002 current (AST_PMP_001) or LOTO_006 current (AST_PMP_002)\n Operations context confirms pump can be taken offline: LINE_002 contingency LINE_001\n Oil sampling kit for drain oil condition assessment\n Approved 3-hour maintenance window (CTX_002 or CTX_010)\n3. Safety Requirements\n3.1 LOTO Isolation Procedure\nPermit — AST_PMP_001\nLOTO_002 | Isolation: Valve-7, PRV-02\nPermit — AST_PMP_002\nLOTO_006 | Isolation: Valve-8, PRV-03\nEnergy Types\nHydraulic, Electrical\nIsolation Steps\nIsolate hydraulic supply at valve. Open PRV to release line pressure.\nDe-energise motor at MCC. Apply padlocks. Verify zero pressure at gauge.\nVerification\nConfirm zero pressure on line gauge. Confirm motor does not start. Confirm no\nhydraulic flow at drain"
+  },
+  {
+    "source_file": "SOP_003_lubrication_pump_stage2.pdf",
+    "doc_type": "SOP",
+    "page_number": 1,
+    "text": "cks. Verify zero pressure at gauge.\nVerification\nConfirm zero pressure on line gauge. Confirm motor does not start. Confirm no\nhydraulic flow at drain point.\n3.2 PPE and Zone Requirements\nMandatory PPE\nChemical splash goggles, nitrile gloves, face shield for oil drain step, safety\nboots\nZone — AST_PMP_001\nB — Unrestricted approach; standard PPE sufficient\nZone — AST_PMP_002\nA — Normal approach; standard PPE applies\nOil Spill Risk\nPlace drip tray under bearing housing before opening drain plug\n4. Tools and Materials Required\nPart Number\nDescription\nQuantity\nBin Location\nPART_005\nIndustrial Oil ISO68 (Castrol /\nequivalent)\n200 mL\nBIN_L2"
+  },
+  {
+    "source_file": "SOP_003_lubrication_pump_stage2.pdf",
+    "doc_type": "SOP",
+    "page_number": 2,
+    "text": "DRO Synthetic Data Baseline  |  Page 2  |  CONFIDENTIAL — Internal Use Only\n Oil drain container (minimum 500 mL)\n Oil sample vial and label for drain oil condition record\n Oil fill syringe or squeeze bottle — 200 mL capacity\n Infrared thermometer\n Portable vibration meter\n Clean lint-free rags\n Torque screwdriver for drain/fill plugs\n5. Step-by-Step Procedure\n1\nConfirm diagnosis is lubrication_issue (Stage 2) and kurtosis is below 5.0 before starting.\n2\nApply LOTO per Section 3.1. Verify zero hydraulic pressure and zero electrical energy.\n3\nPosition drip tray under bearing housing.\n4\nRemove drain plug from bearing housing. Drain oil completely into drain container.\n5\nCollect 5 mL oil sample in labelled vial for condition record: note colour, smell, particle content, and"
+  },
+  {
+    "source_file": "SOP_003_lubrication_pump_stage2.pdf",
+    "doc_type": "SOP",
+    "page_number": 2,
+    "text": "Drain oil completely into drain container.\n5\nCollect 5 mL oil sample in labelled vial for condition record: note colour, smell, particle content, and viscosity\nimpression.\n6\nInspect drained oil: clear amber = normal degradation. Dark or black = heavy oxidation. Metallic particles = bearing\nsurface damage — STOP, escalate to bearing replacement (SOP not applicable).\n7\nIf oil is acceptable (amber, light oxidation only): continue with refill. If metallic contamination found: STOP, escalate.\n8\nRefit drain plug. Torque to 12 Nm.\n9\nFill bearing housing with 200 mL fresh PART_005 (Industrial Oil ISO68) via fill port.\n10\nRefit fill plug. Torque to 12 Nm.\n11\nRemove LOTO. Controlled restart: bring pump to operating speed.\n12\nTake vibration reading at 30 minutes. Note: improvement after oil service"
+  },
+  {
+    "source_file": "SOP_003_lubrication_pump_stage2.pdf",
+    "doc_type": "SOP",
+    "page_number": 2,
+    "text": "12 Nm.\n11\nRemove LOTO. Controlled restart: bring pump to operating speed.\n12\nTake vibration reading at 30 minutes. Note: improvement after oil service is not immediate — 30-minute reading is\nearly warning only.\n13\nRun at full operating condition for 24 hours before formal QA check.\n14\nTake final vibration, temperature, and kurtosis readings at 24 hours. Compare against Section 7 criteria.\n15\nUpdate bearing_master.last_lubrication_date to today. Record oil condition findings on work order.\n16\nClose work order. If 24-hour readings have not returned to baseline, schedule bearing inspection.\n6. Critical Specifications\nOil Type\nPART_005 — Industrial Oil ISO68 (Castrol Hyspin or equivalent)\nOil Volume\n200 mL per bearing housing — do not overfill\nRe-lube Interval\nEvery 60 days. NOTE: original"
+  },
+  {
+    "source_file": "SOP_003_lubrication_pump_stage2.pdf",
+    "doc_type": "SOP",
+    "page_number": 2,
+    "text": "strial Oil ISO68 (Castrol Hyspin or equivalent)\nOil Volume\n200 mL per bearing housing — do not overfill\nRe-lube Interval\nEvery 60 days. NOTE: original system setting of 90 days was incorrect — 60\ndays confirmed correct for this operating temperature (CASE_002 correction).\nDrain Plug Torque\n12 Nm\nOil Condition Rejection\nMetallic particles visible, burnt smell, or viscosity clearly reduced → bearing\ndamage; escalate to SOP for replacement\n7. Post-Service Acceptance Criteria (at 24 hours)\nThe 30-minute reading is for trend monitoring only. PASS/FAIL is determined at 24 hours.\nParameter\nAST_PMP_001\n(BRG_005/006)\nAST_PMP_002\n(BRG_007/008)\nFailure Action\nVibration RMS at 24 h\n≤ 3.5 mm/s\n≤ 3.0 mm/s\nSchedule bearing inspection"
+  },
+  {
+    "source_file": "SOP_003_lubrication_pump_stage2.pdf",
+    "doc_type": "SOP",
+    "page_number": 3,
+    "text": "DRO Synthetic Data Baseline  |  Page 3  |  CONFIDENTIAL — Internal Use Only\nParameter\nAST_PMP_001\n(BRG_005/006)\nAST_PMP_002\n(BRG_007/008)\nFailure Action\nBearing Temperature at 24 h\n≤ 65°C\n≤ 60°C\nCheck oil fill level; re-inspect\nKurtosis at 24 h\n≤ 3.5\n≤ 3.0\nEscalate: bearing damage\nsuspected\nSignal Quality Score\n≥ 0.97\n≥ 0.97\nCheck CH_005/006 or\nCH_007/008\n8. Common Issues and Troubleshooting\n If vibration does not improve at 24 h (remains above 3.5× baseline) → bearing damage is present; lubrication\nalone cannot resolve. Escalate to bearing replacement.\n If temperature rises above 70°C at 30 min → possible overfill; drain to mark and restart.\n If metallic particles found in drained oil → STOP. Do not refill. Escalate immediately to bearing inspection and\nlikely replacement.\n If"
+  },
+  {
+    "source_file": "SOP_003_lubrication_pump_stage2.pdf",
+    "doc_type": "SOP",
+    "page_number": 3,
+    "text": "d restart.\n If metallic particles found in drained oil → STOP. Do not refill. Escalate immediately to bearing inspection and\nlikely replacement.\n If kurtosis remains above 4.0 at 24 h → cage fault developing; schedule bearing replacement within 5–10 days.\n Re-lube interval must be 60 days, not 90 days — system parameter should be updated at work order close\n(CASE_002 root cause).\n9. Related Documents\n SOP_006 — Post-Repair QA Procedure (all assets)\n LOTO_002 permit record — AST_PMP_001\n LOTO_006 permit record — AST_PMP_002\n CASE_002 — Lubrication issue, AST_PMP_001, lube interval root cause confirmed\n CASE_009 — Preventive lube check, AST_PMP_001, BRG_006 (NDE), no fault\n CASE_010 — Vibration inspection, AST_PMP_002, BRG_008 (NDE), healthy"
+  },
+  {
+    "source_file": "SOP_004_sensor_replacement_conveyor.pdf",
+    "doc_type": "SOP",
+    "page_number": 1,
+    "text": "DRO Synthetic Data Baseline  |  Page 1  |  CONFIDENTIAL — Internal Use Only\nSensor Inspection and Cable Repair — Conveyor\nSignal Quality Fault — Burst Dropout on Vibration Channel\nAsset: AST_CON_001 (Conveyor Assembly) | Channel: CH_31B | LINE_001\nBearing Type: SKF22212 | Est. Duration: 2–3 h | Crew: 1 (OT Specialist) | Priority: HIGH\nSOP_004 | v1.0 | Revised: 2026-04-01\n1. Purpose and Scope\nThis procedure covers inspection and repair of vibration sensor channels on the conveyor assembly (AST_CON_001)\nwhere the Data Foundation Agent has raised a signal_quality_alert indicating burst-pattern dropouts. Burst dropouts\n— consecutive null readings in clusters of 2 to 4 — reliably indicate a physical connection fault (loose terminal or cable\ndamage), NOT a bearing fault. This SOP does not cover"
+  },
+  {
+    "source_file": "SOP_004_sensor_replacement_conveyor.pdf",
+    "doc_type": "SOP",
+    "page_number": 1,
+    "text": "s in clusters of 2 to 4 — reliably indicate a physical connection fault (loose terminal or cable\ndamage), NOT a bearing fault. This SOP does not cover bearing replacement. A visual bearing inspection is included\nin the scope while access is available. CRITICAL: AST_CON_001 LOTO permit LOTO_003 expired on 2026-04-15. A\nrenewed permit MUST be issued before any work starts. This SOP will be blocked by the Safety Agent if LOTO_003\nis_current = false.\n2. Prerequisites\n CRITICAL: LOTO_003 must be renewed before work starts. Confirm is_current = true and expiry > today.\n Signal quality alert confirmed: burst-pattern dropout on CH_31B (historian tag: PI:CON001.BRG9:VIB)\n Dropout percentage confirmed: ≥ 1% over 7-day window in burst pattern\n Consecutive null records confirmed at TEL_0015 and"
+  },
+  {
+    "source_file": "SOP_004_sensor_replacement_conveyor.pdf",
+    "doc_type": "SOP",
+    "page_number": 1,
+    "text": "tag: PI:CON001.BRG9:VIB)\n Dropout percentage confirmed: ≥ 1% over 7-day window in burst pattern\n Consecutive null records confirmed at TEL_0015 and TEL_0016 (signal_quality_score < 0.20)\n Work order raised with priority HIGH (data integrity risk on bottleneck asset)\n OT instrument specialist assigned (sensor cable repair qualification required)\n Access to junction box J-301 confirmed\n Torque screwdriver and replacement cable/connector from instrument store\n3. Safety Requirements\n3.1 LOTO Isolation Procedure\nLOTO Permit\nLOTO_003 — MUST be renewed before this SOP can proceed\nIsolation Points\nMCC-20, GB-301\nEnergy Types\nElectrical, Mechanical\nSAFETY STOP\nIf LOTO_003 is_current = false: DO NOT PROCEED. Obtain renewed permit.\nThe Safety Agent will block this work order until permit is"
+  },
+  {
+    "source_file": "SOP_004_sensor_replacement_conveyor.pdf",
+    "doc_type": "SOP",
+    "page_number": 1,
+    "text": "hanical\nSAFETY STOP\nIf LOTO_003 is_current = false: DO NOT PROCEED. Obtain renewed permit.\nThe Safety Agent will block this work order until permit is current.\nVerification\nAfter isolation: confirm conveyor does not move. Confirm zero voltage at\nMCC-20 terminals.\n3.2 PPE and Zone Requirements\nMandatory PPE\nSafety helmet, electrical insulation gloves, safety boots\nZone — AST_CON_001\nB — Unrestricted approach with standard PPE. Conveyor must be fully isolated\nbefore accessing belt or bearing zones.\n4. Tools and Materials Required\nNo bearing parts required for this SOP. Cable components from instrument store:\n Replacement signal cable (2-conductor shielded, 1 m minimum) — from OT instrument store\n Replacement terminal block connector (M4 screw terminal, rated for signal use)\n Torque"
+  },
+  {
+    "source_file": "SOP_004_sensor_replacement_conveyor.pdf",
+    "doc_type": "SOP",
+    "page_number": 1,
+    "text": "-conductor shielded, 1 m minimum) — from OT instrument store\n Replacement terminal block connector (M4 screw terminal, rated for signal use)\n Torque screwdriver with 5–6 Nm range (CRITICAL: terminal tightening must be to spec)"
+  },
+  {
+    "source_file": "SOP_004_sensor_replacement_conveyor.pdf",
+    "doc_type": "SOP",
+    "page_number": 2,
+    "text": "DRO Synthetic Data Baseline  |  Page 2  |  CONFIDENTIAL — Internal Use Only\n Multimeter for continuity and insulation resistance check\n Cable tie kit\n Label printer or cable marker for re-labelling repaired cable\n Torch or work light for junction box inspection\n5. Step-by-Step Procedure\n1\nSTOP CHECK: Confirm LOTO_003 is_current = true in safety system before touching any equipment.\n2\nApply LOTO per Section 3.1. Verify conveyor is stationary and MCC-20 is locked.\n3\nLocate junction box J-301 (non-drive end, conveyor frame).\n4\nOpen J-301 cover. Visually inspect all terminal screws for the CH_31B signal conductor.\n5\nAttempt to hand-wiggle each conductor at the terminal. Any movement indicates a loose termination.\n6\nIf loose terminal found: re-terminate the cable conductor into the"
+  },
+  {
+    "source_file": "SOP_004_sensor_replacement_conveyor.pdf",
+    "doc_type": "SOP",
+    "page_number": 2,
+    "text": "iggle each conductor at the terminal. Any movement indicates a loose termination.\n6\nIf loose terminal found: re-terminate the cable conductor into the terminal block. Tighten terminal screw to 5–6 Nm\nusing calibrated torque screwdriver.\n7\nIf cable damage found (fraying, insulation breach, cut): cut out damaged section and install replacement cable,\nre-terminate both ends to 5–6 Nm.\n8\nPerform continuity check with multimeter: confirm signal path from sensor to historian connection point.\n9\nPerform insulation resistance check: confirm IR > 1 MΩ between signal conductor and shield/ground.\n10\nLabel repaired cable/terminal with date and technician ID.\n11\nClose J-301 cover and secure all fasteners.\n12\nWhile access is available: perform visual inspection of BRG_009 (DRIVE bearing). Note any"
+  },
+  {
+    "source_file": "SOP_004_sensor_replacement_conveyor.pdf",
+    "doc_type": "SOP",
+    "page_number": 2,
+    "text": "nician ID.\n11\nClose J-301 cover and secure all fasteners.\n12\nWhile access is available: perform visual inspection of BRG_009 (DRIVE bearing). Note any visible damage, grease\nleakage, or discolouration. Record findings.\n13\nAlso inspect BRG_010 (NON_DRIVE bearing) if accessible. Record condition.\n14\nRemove LOTO. Controlled conveyor restart.\n15\nMonitor CH_31B historian tag for 15 consecutive clean readings with signal_quality_score ≥ 0.97.\n16\nIf signal quality restored: QA PASS. Record on work order and close.\n17\nIf dropouts continue: escalate — cable damage may extend beyond J-301 or sensor itself may need replacement.\n6. Critical Specifications\nTerminal Tightening Torque\n5–6 Nm — MUST use torque screwdriver. Hand-tightening is the root cause of\nCASE_003 recurring fault.\nInsulation"
+  },
+  {
+    "source_file": "SOP_004_sensor_replacement_conveyor.pdf",
+    "doc_type": "SOP",
+    "page_number": 2,
+    "text": "cifications\nTerminal Tightening Torque\n5–6 Nm — MUST use torque screwdriver. Hand-tightening is the root cause of\nCASE_003 recurring fault.\nInsulation Resistance\n≥ 1 MΩ — signal conductor to shield/ground\nSignal Quality Pass Criterion\n≥ 0.97 for 15 consecutive readings — no burst dropout in monitoring window\nChannel ID — do not rename\nCH_31B (historian tag: PI:CON001.BRG9:VIB) — ID is fixed in telemetry\nschema. Renaming will break downstream agent routing.\n7. Post-Repair Quality Acceptance Criteria\nParameter\nCriterion\nFailure Action\nSignal Quality Score (CH_31B)\n≥ 0.97 for 15 consecutive readings\nContinue investigation — escalate to\nsensor replacement\nDropout Rate (7-day window)\n< 0.1% (zero burst events)\nDo not close work order — continue\nmonitoring\nBearing Vib at restart (BRG_009)\n≤ 2.8"
+  },
+  {
+    "source_file": "SOP_004_sensor_replacement_conveyor.pdf",
+    "doc_type": "SOP",
+    "page_number": 2,
+    "text": "eplacement\nDropout Rate (7-day window)\n< 0.1% (zero burst events)\nDo not close work order — continue\nmonitoring\nBearing Vib at restart (BRG_009)\n≤ 2.8 mm/s\nRaise separate bearing inspection case\nBearing Temp at restart (BRG_009)\n≤ 58°C\nRaise separate bearing inspection case"
+  },
+  {
+    "source_file": "SOP_004_sensor_replacement_conveyor.pdf",
+    "doc_type": "SOP",
+    "page_number": 3,
+    "text": "DRO Synthetic Data Baseline  |  Page 3  |  CONFIDENTIAL — Internal Use Only\nParameter\nCriterion\nFailure Action\nBRG_010 visual condition\nNo visible damage or leakage\nRaise separate inspection case\n8. Common Issues and Troubleshooting\n If dropout continues after terminal re-tightening → cable insulation breach along run from J-301 to sensor.\nReplace full cable run.\n If sensor itself is damaged (connector cracked, IP rating breached) → sensor replacement required. Order OEM\nsensor and raise separate work order.\n If bearing inspection reveals unexpected vibration or discolouration → raise separate bearing inspection case\nunder SOP_006.\n If LOTO_003 is still expired at next inspection → LOTO renewal is the safety team's responsibility; escalate to\nmaintenance supervisor.\n Terminal torque"
+  },
+  {
+    "source_file": "SOP_004_sensor_replacement_conveyor.pdf",
+    "doc_type": "SOP",
+    "page_number": 3,
+    "text": "LOTO_003 is still expired at next inspection → LOTO renewal is the safety team's responsibility; escalate to\nmaintenance supervisor.\n Terminal torque below 5 Nm will allow re-loosening from conveyor vibration — always use torque screwdriver, not\nelectric driver.\n9. Related Documents\n SOP_006 — Post-Repair QA Procedure (all assets)\n LOTO_003 permit record — AST_CON_001 (MUST be renewed, expiry: 2026-04-15)\n CASE_003 — Sensor dropout, CH_31B, loose terminal at J-301, LOTO permit expired\n CASE_011 — Preventive check, AST_CON_001, BRG_010 (NON_DRIVE), no fault"
+  },
+  {
+    "source_file": "SOP_005_outer_race_gearbox_stage3.pdf",
+    "doc_type": "SOP",
+    "page_number": 1,
+    "text": "DRO Synthetic Data Baseline  |  Page 1  |  CONFIDENTIAL — Internal Use Only\nOuter Race Bearing Replacement — Gearbox\nStage 3 Outer Race Fault — Bottleneck Asset with Zone D Isolation\nAsset: AST_GBX_001 (Gearbox Unit) | LINE_001 | SKF22318\nBearing Type: SKF22318 | Est. Duration: 8 h | Crew: 2 | Priority: CRITICAL\nSOP_005 | v1.0 | Revised: 2026-04-10\nWARNING — CRITICAL ASSET: AST_GBX_001 is a high-criticality bottleneck on LINE_001 with\ndowntime cost of INR 18,000/hour and Zone D ISO 10816 classification. No personnel may approach\nthis asset without LOTO_004 fully applied. Financial exposure at Stage 3: approximately INR 122,400 if\nrun to failure.\n1. Purpose and Scope\nThis procedure covers planned replacement of the input or output shaft bearing on AST_GBX_001 (Flender\nFL-GBX-88) where an"
+  },
+  {
+    "source_file": "SOP_005_outer_race_gearbox_stage3.pdf",
+    "doc_type": "SOP",
+    "page_number": 1,
+    "text": "ilure.\n1. Purpose and Scope\nThis procedure covers planned replacement of the input or output shaft bearing on AST_GBX_001 (Flender\nFL-GBX-88) where an outer race fault at Stage 3 has been confirmed. Stage 3 is defined as BPFO energy exceeding\n3.5× baseline AND kurtosis exceeding 5.0. The part required is PART_003 (SKF22318-E). CRITICAL: PART_003 has\na standard lead time of 30 days and an expedited lead time of 12 days. If stock is zero, DO NOT open the gearbox\nbefore the replacement bearing is on site. Opening the gearbox without the replacement part available will cause a\nforced extended outage.\n2. Prerequisites\n CRITICAL: PART_003 (SKF22318-E) physically on site and confirmed. Do NOT start disassembly without the\nreplacement bearing in hand.\n If PART_003 qty_on_hand = 0: initiate"
+  },
+  {
+    "source_file": "SOP_005_outer_race_gearbox_stage3.pdf",
+    "doc_type": "SOP",
+    "page_number": 1,
+    "text": "KF22318-E) physically on site and confirmed. Do NOT start disassembly without the\nreplacement bearing in hand.\n If PART_003 qty_on_hand = 0: initiate emergency procurement. Estimated expedited lead: 12 days. Do not open\ngearbox until part arrives.\n LOTO_004 confirmed current (is_current = true). Two technicians available, both LOTO_CERTIFIED.\n At least one technician holding ISO_CAT_III for Zone D access and post-repair vibration validation.\n Approved maintenance window of minimum 8 hours (CTX_001 or equivalent).\n Zone D access confirmed — all personnel on shift briefed on Zone D isolation requirement.\n Oil drain and collection system confirmed available.\n Induction heater, bearing puller, and calibrated torque wrench on site.\n Operating load reduced by 15–20% during monitoring"
+  },
+  {
+    "source_file": "SOP_005_outer_race_gearbox_stage3.pdf",
+    "doc_type": "SOP",
+    "page_number": 1,
+    "text": "em confirmed available.\n Induction heater, bearing puller, and calibrated torque wrench on site.\n Operating load reduced by 15–20% during monitoring period before repair (derate procedure).\n3. Safety Requirements\n3.1 LOTO Isolation Procedure\nLOTO Permit\nLOTO_004\nIsolation Points\nGear-Isolation-1, Oil-Drain-GBX\nEnergy Types\nMechanical, Oil System\nZone Classification\nD — No approach without LOTO fully applied. Non-negotiable.\nIsolation Steps\nApply mechanical isolation at Gear-Isolation-1. Open oil drain at Oil-Drain-GBX\nto release hydraulic pressure. Lock and tag both points. Each technician\napplies personal padlock.\nVerification\nAttempt to operate input shaft by hand — must not move. Confirm zero oil\npressure at gauge. Confirm all drive power isolated.\n3.2 PPE Requirements\nMandatory"
+  },
+  {
+    "source_file": "SOP_005_outer_race_gearbox_stage3.pdf",
+    "doc_type": "SOP",
+    "page_number": 1,
+    "text": "t to operate input shaft by hand — must not move. Confirm zero oil\npressure at gauge. Confirm all drive power isolated.\n3.2 PPE Requirements\nMandatory PPE\nFull face shield, heavy-duty nitrile gloves, oil-resistant apron, steel-toed safety\nboots, safety helmet"
+  },
+  {
+    "source_file": "SOP_005_outer_race_gearbox_stage3.pdf",
+    "doc_type": "SOP",
+    "page_number": 2,
+    "text": "DRO Synthetic Data Baseline  |  Page 2  |  CONFIDENTIAL — Internal Use Only\nOil Spill Risk\nZone D oil system — have absorbent pads and drip trays positioned before\nany oil system components are opened\n4. Tools and Materials Required\nPart Number\nDescription\nQuantity\nBin Location\nPART_003\nSKF22318-E Spherical\nRoller Bearing\n1\nBIN_C1 (CHECK STOCK —\nmay be 0)\nPART_005\nIndustrial Oil ISO68 (for re-fill\nafter service)\n500 mL\nBIN_L2\n Heavy-duty bearing puller (rated for SKF22318 mass)\n Induction heater rated for large-bore bearings (target 100°C for SKF22318)\n Torque wrench, calibrated, range 50–400 Nm\n Dial indicator and magnetic base (for shaft runout check)\n Oil drain container (minimum 2 L for gearbox sump)\n Oil sample vial for pre-drain oil condition record\n Portable vibration"
+  },
+  {
+    "source_file": "SOP_005_outer_race_gearbox_stage3.pdf",
+    "doc_type": "SOP",
+    "page_number": 2,
+    "text": "for shaft runout check)\n Oil drain container (minimum 2 L for gearbox sump)\n Oil sample vial for pre-drain oil condition record\n Portable vibration analyser\n Infrared thermometer\n Clean lint-free rags and industrial solvent\n Precision feeler gauges for bearing clearance check\n5. Step-by-Step Procedure\n1\nCRITICAL STOP: Confirm PART_003 is physically in hand. If not: STOP. Do not proceed. Initiate emergency\nprocurement and monitor under derate.\n2\nConfirm maintenance window is active and duration ≥ 8 hours. This job requires uninterrupted 8-hour block — do not\nstart if window is less than 8 hours.\n3\nApply LOTO_004 per Section 3.1. Each technician applies personal padlock. Verify zero energy and zero oil pressure.\n4\nDrain gearbox oil via Oil-Drain-GBX. Collect sample for condition"
+  },
+  {
+    "source_file": "SOP_005_outer_race_gearbox_stage3.pdf",
+    "doc_type": "SOP",
+    "page_number": 2,
+    "text": "ach technician applies personal padlock. Verify zero energy and zero oil pressure.\n4\nDrain gearbox oil via Oil-Drain-GBX. Collect sample for condition record (colour, particles, smell).\n5\nRemove gearbox access cover (side or top as per FL-GBX-88 manual section 4.2).\n6\nRemove input shaft bearing retaining ring or end plate as applicable.\n7\nUsing heavy-duty bearing puller, extract existing SKF22318-E bearing. Note any abnormal resistance.\n8\nInspect removed bearing: photograph spalling, measure raceway damage, note oil condition inside bearing.\n9\nInspect shaft journal and housing bore with feeler gauges. Check shaft runout with dial indicator. Record all\nmeasurements.\n10\nClean housing bore and shaft journal thoroughly with lint-free cloth and solvent.\n11\nHeat new SKF22318-E in induction"
+  },
+  {
+    "source_file": "SOP_005_outer_race_gearbox_stage3.pdf",
+    "doc_type": "SOP",
+    "page_number": 2,
+    "text": "tor. Record all\nmeasurements.\n10\nClean housing bore and shaft journal thoroughly with lint-free cloth and solvent.\n11\nHeat new SKF22318-E in induction heater to 100°C. Do not exceed 120°C.\n12\nSlide heated bearing onto shaft smoothly — press force on inner ring only. Allow to cool.\n13\nRefit retaining ring or end plate. Torque to specification (see Section 6).\n14\nRefit gearbox access cover. Torque cover bolts to specification.\n15\nRefill gearbox oil with fresh PART_005 to fill-line mark (approximately 400–500 mL depending on housing).\n16\nRemove LOTO_004. Controlled restart at reduced load (50%) for 1 hour.\n17\nMonitor vibration and temperature at 30 minutes. Record on work order.\n18\nRamp to full load. Take measurements at 1 hour.\n19\nFinal QA check at 24 hours: confirm all criteria in Section"
+  },
+  {
+    "source_file": "SOP_005_outer_race_gearbox_stage3.pdf",
+    "doc_type": "SOP",
+    "page_number": 2,
+    "text": "at 30 minutes. Record on work order.\n18\nRamp to full load. Take measurements at 1 hour.\n19\nFinal QA check at 24 hours: confirm all criteria in Section 7 are met."
+  },
+  {
+    "source_file": "SOP_005_outer_race_gearbox_stage3.pdf",
+    "doc_type": "SOP",
+    "page_number": 3,
+    "text": "DRO Synthetic Data Baseline  |  Page 3  |  CONFIDENTIAL — Internal Use Only\n20\nUpdate bearing_master. Record actual duration and cost. Close work order.\n6. Critical Specifications\nRetaining Ring / End Plate\nTorque\n180 Nm — torque wrench required, not impact gun\nCover Bolt Torque\n95 Nm in cross pattern\nBearing Fit\nInterference fit — induction heating required\nMounting Temperature\n100°C target, max 120°C\nOil Type\nPART_005 — Industrial Oil ISO68\nOil Fill Quantity\n400–500 mL — fill to mark, not by volume alone\nShaft Runout Acceptance\n≤ 0.02 mm TIR — if exceeded, do not fit new bearing until shaft is inspected\n7. Post-Repair Quality Acceptance Criteria\nParameter\nAcceptance Criterion\nFailure Action\nVibration RMS (at full load)\n≤ 3.5 mm/s\nShut down, re-inspect bearing seating\nPeak Vibration\n≤"
+  },
+  {
+    "source_file": "SOP_005_outer_race_gearbox_stage3.pdf",
+    "doc_type": "SOP",
+    "page_number": 3,
+    "text": "Criteria\nParameter\nAcceptance Criterion\nFailure Action\nVibration RMS (at full load)\n≤ 3.5 mm/s\nShut down, re-inspect bearing seating\nPeak Vibration\n≤ 4.0 g\nShut down, re-inspect\nBearing Temperature\n≤ 65°C at 1 h | ≤ 62°C at 24 h\nCheck oil level; re-inspect if rising\nKurtosis at 24 h\n≤ 2.8\nRe-inspect bearing seating and shaft\nalignment\nBPFO Energy (normalised)\n≤ 1.2× baseline\nRe-inspect — bearing may be\nmisseated\nOil Condition after 24 h\nNo new metallic particles in sump\nsample\nShut down, full teardown\n8. Part Shortage Protocol (PART_003 qty = 0)\nIf PART_003 stock is zero at the time of fault detection, the following interim protocol applies until the replacement\nbearing arrives (expedited lead time: 12 days):\n Initiate emergency procurement of PART_003 from SKF India — expedited"
+  },
+  {
+    "source_file": "SOP_005_outer_race_gearbox_stage3.pdf",
+    "doc_type": "SOP",
+    "page_number": 3,
+    "text": "applies until the replacement\nbearing arrives (expedited lead time: 12 days):\n Initiate emergency procurement of PART_003 from SKF India — expedited delivery (12 days).\n Reduce gearbox operating load by 15–20% to extend RUL under reduced stress.\n Increase monitoring frequency to every 2 hours (historian polling interval).\n Pre-book maintenance window for Day 13 after today (1 day after part arrives).\n Brief all shift supervisors: Zone D — no approach without LOTO_004 at any time.\n If vibration exceeds 10 mm/s or kurtosis exceeds 9.0 before part arrives: initiate controlled shutdown.\n Do NOT open the gearbox without the replacement bearing physically on site.\n9. Related Documents\n SOP_006 — Post-Repair QA Procedure (all assets)\n LOTO_004 permit record — AST_GBX_001 (Zone D)\n"
+  },
+  {
+    "source_file": "SOP_005_outer_race_gearbox_stage3.pdf",
+    "doc_type": "SOP",
+    "page_number": 3,
+    "text": "t bearing physically on site.\n9. Related Documents\n SOP_006 — Post-Repair QA Procedure (all assets)\n LOTO_004 permit record — AST_GBX_001 (Zone D)\n CASE_004 — Stage 3 outer race, AST_GBX_001, part shortage, monitoring active\n CASE_012 — Lubrication service, AST_GBX_001, BRG_012 (OUTPUT), oil changed preventively\n Flender FL-GBX-88 maintenance manual — Section 4 (bearing replacement)"
+  },
+  {
+    "source_file": "SOP_006_post_repair_qa_all_assets.pdf",
+    "doc_type": "SOP",
+    "page_number": 1,
+    "text": "DRO Synthetic Data Baseline  |  Page 1  |  CONFIDENTIAL — Internal Use Only\nPost-Repair Quality Acceptance — All Assets\nUniversal QA Verification Procedure — All Asset Types and Fault Modes\nApplies after: SOP_001, SOP_002, SOP_003, SOP_004, SOP_005\nBearing Types: All | Est. Duration: 1–2 h | Crew: 1 | Priority: MANDATORY\nSOP_006 | v1.1 | Revised: 2026-03-20\n1. Purpose and Scope\nThis procedure defines the universal post-repair quality acceptance check performed after any maintenance\nintervention on plant assets AST_MTR_001, AST_MTR_002, AST_PMP_001, AST_PMP_002, AST_CON_001, and\nAST_GBX_001. The QA check must be performed at two time points after every repair: at 1 hour post-restart and at\n24 hours post-restart. A work order cannot be closed as 'successful' unless both QA checks are"
+  },
+  {
+    "source_file": "SOP_006_post_repair_qa_all_assets.pdf",
+    "doc_type": "SOP",
+    "page_number": 1,
+    "text": "oints after every repair: at 1 hour post-restart and at\n24 hours post-restart. A work order cannot be closed as 'successful' unless both QA checks are documented. This\nSOP is read by both the Monitoring Agent (to confirm QA pass/fail thresholds) and the Learning Agent (to capture\nconfirmed post-repair baselines for future reference).\n2. Post-Repair Acceptance Thresholds by Asset\nAsset ID\nBearing IDs\nVib RMS ≤\n(mm/s)\nTemp ≤ (°C)\nKurtosis ≤\nBPFO ≤\n(×baseline)\nAST_MTR_001\nBRG_001 (DE),\nBRG_002 (NDE)\n2.5\n60°C at 1h | 55°C\nat 24h\n2.8\n1.2×\nAST_MTR_002\nBRG_003 (DE),\nBRG_004 (NDE)\n2.2\n55°C\n2.5\n1.2×\nAST_PMP_001\nBRG_005 (DE),\nBRG_006 (NDE)\n3.5\n65°C\n3.5\n1.2×\nAST_PMP_002\nBRG_007 (DE),\nBRG_008 (NDE)\n3.0\n60°C\n3.0\n1.2×\nAST_CON_001\nBRG_009\n(DRIVE),\nBRG_010"
+  },
+  {
+    "source_file": "SOP_006_post_repair_qa_all_assets.pdf",
+    "doc_type": "SOP",
+    "page_number": 1,
+    "text": "T_PMP_001\nBRG_005 (DE),\nBRG_006 (NDE)\n3.5\n65°C\n3.5\n1.2×\nAST_PMP_002\nBRG_007 (DE),\nBRG_008 (NDE)\n3.0\n60°C\n3.0\n1.2×\nAST_CON_001\nBRG_009\n(DRIVE),\nBRG_010 (ND)\n2.8\n58°C\n2.8\n1.2×\nAST_GBX_001\nBRG_011\n(INPUT),\nBRG_012 (OUT)\n3.5\n65°C at 1h | 62°C\nat 24h\n2.8\n1.2×\n3. Step-by-Step QA Procedure\n1\nWait for machine to reach stable operating speed and rated load before taking the 1-hour reading.\n2\nRecord vib_rms_mm_s from portable vibration meter at the bearing housing (or from historian for 1-hour average).\n3\nRecord temp_c from infrared thermometer at bearing housing outer surface (or from historian).\n4\nRecord kurtosis from historian (1-hour rolling average from latest telemetry record).\n5\nRecord signal_quality_score from latest telemetry record for each active channel.\n6\nCompare all readings against"
+  },
+  {
+    "source_file": "SOP_006_post_repair_qa_all_assets.pdf",
+    "doc_type": "SOP",
+    "page_number": 1,
+    "text": "rage from latest telemetry record).\n5\nRecord signal_quality_score from latest telemetry record for each active channel.\n6\nCompare all readings against Section 2 thresholds for the specific asset.\n7\nIf ALL criteria pass at 1 hour: annotate work order with 1-hour QA PASS and readings.\n8\nIf ANY criterion fails at 1 hour: STOP. Do not proceed to 24-hour check. Investigate and re-assess.\n9\nAt 24 hours post-restart: repeat steps 2 through 6 using historian data.\n10\nIf ALL criteria pass at 24 hours: annotate work order with 24-hour QA PASS. Work order may be closed.\n11\nRecord post-repair baseline: vib_rms, temp_c, kurtosis as the new reference for this bearing.\n12\nUpdate bearing_master.current_health_score to reflect post-repair healthy state."
+  },
+  {
+    "source_file": "SOP_006_post_repair_qa_all_assets.pdf",
+    "doc_type": "SOP",
+    "page_number": 2,
+    "text": "DRO Synthetic Data Baseline  |  Page 2  |  CONFIDENTIAL — Internal Use Only\n13\nFor signal-quality repairs (SOP_004): confirm zero burst dropouts on CH_31B for 15 consecutive readings.\n14\nClose work order and submit QA record to Learning Agent for case closure.\n4. Confirmed Post-Repair Baselines from Historical Cases\nReference values below are confirmed outcomes from closed cases. Use these as expected healthy-state\nbenchmarks when assessing QA results:\nCase\nAsset\nBearing\nPost-Repair Vib\n(mm/s)\nPost-Repair\nTemp (°C)\nOutcome\nCASE_001\nAST_MTR_001\nBRG_001\n1.8\n55\nPASS — bearing\nreplacement\nCASE_002\nAST_PMP_001\nBRG_005\n2.2\n60\nPASS —\nlubrication service\nCASE_003\nAST_CON_001\nBRG_009\n2.1\n54\nPASS — sensor\nrepair\nCASE_005\nAST_MTR_002\nBRG_003\n1.7\n51\nPASS —\npreventive"
+  },
+  {
+    "source_file": "SOP_006_post_repair_qa_all_assets.pdf",
+    "doc_type": "SOP",
+    "page_number": 2,
+    "text": "G_005\n2.2\n60\nPASS —\nlubrication service\nCASE_003\nAST_CON_001\nBRG_009\n2.1\n54\nPASS — sensor\nrepair\nCASE_005\nAST_MTR_002\nBRG_003\n1.7\n51\nPASS —\npreventive check\nCASE_006\nAST_PMP_002\nBRG_007\n2.0\n57\nPASS — vibration\ninspection\nCASE_009\nAST_PMP_001\nBRG_006\n2.1\n58\nPASS —\npreventive lube\n5. Related Documents\n SOP_001 — Outer Race Bearing Replacement, Motor\n SOP_002 — Preventive Maintenance, Motor\n SOP_003 — Lubrication Service, Pump\n SOP_004 — Sensor Repair, Conveyor\n SOP_005 — Outer Race Bearing Replacement, Gearbox"
+  }
+]

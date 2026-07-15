@@ -1,0 +1,45 @@
+{
+  "case_id": "DEMO-004",
+  "asset_id": "AST_PMP_001",
+  "bearing_id": "BRG_005",
+  "recommended_action": {
+    "name": "lubrication_service",
+    "description": "lubrication_service (in_window) per SOP_003",
+    "estimated_duration_hours": 3.0
+  },
+  "urgency": "planned",
+  "ranked_alternatives": [],
+  "required_parts": [
+    {
+      "part_number": "MOBIL-DTE-25",
+      "quantity": 1,
+      "lead_time_days": 0
+    }
+  ],
+  "window_chosen": "WIN_005",
+  "rationale": "THE PROBLEM: Lubrication Issue detected at severity 'stage_2' on bearing BRG_005 (asset AST_PMP_001). Remaining useful life estimate: ~14 days. Stage 2 indicates active degradation \u2014 action required soon.\n\nTHE RECOMMENDATION: Action: lubrication_service (in_window) per SOP_003. Required part MOBIL-DTE-25 is confirmed in stock \u2014 the repair can proceed without delay. Scheduled into maintenance window: WIN_005.\n\nTHE REASONING: This action was selected as the highest-scoring feasible option from 1 candidate evaluated. Scheduling in a planned window avoids an unplanned production stop and allows the line to run until the window opens.",
+  "evidence": {
+    "fault": "Diagnosed by Agent 6.3 (Fault Diagnosis), case DEMO-004",
+    "risk": "Risk assessment by Agent 6.4 \u2014 RUL 14\u201320 days",
+    "recommended_action": "Action catalog, per SOP_003",
+    "part": "Inventory record \u2014 part MOBIL-DTE-25",
+    "window": "Maintenance schedule \u2014 window WIN_005",
+    "responsible_person": "Approval hierarchy (personas.json) \u2014 routine sign-off by Plant Supervisor",
+    "urgency": "Computed: 1 - (RUL 14d / fault stage-1 lifespan); resolved timing = in_window"
+  },
+  "recommendation_status": "ok",
+  "is_llm_suggested": false,
+  "approval_status": "pending",
+  "responsible_person": "Plant Supervisor \u2014 James Kowalski",
+  "responsible_person_id": "PERSONA_SUP",
+  "responsible_approver": "Plant Supervisor \u2014 James Kowalski",
+  "responsible_approver_id": "PERSONA_SUP",
+  "contributors": [
+    {
+      "role": "Maintenance Planner",
+      "name": "Tom Rodriguez",
+      "concern": "confirms parts and crew readiness"
+    }
+  ],
+  "generated_at_utc": "2026-07-03T13:35:25.605835Z"
+}

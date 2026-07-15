@@ -1,0 +1,101 @@
+[
+  {
+    "window_id": "WIN_001",
+    "asset_id": "AST_MTR_001",
+    "window_type": "planned_maintenance",
+    "start_utc": "2026-05-24T06:00:00Z",
+    "end_utc": "2026-05-24T10:00:00Z",
+    "duration_hours": 4,
+    "notes": "Quarterly inspection slot — nearest available window for this asset"
+  },
+  {
+    "window_id": "WIN_002",
+    "asset_id": "AST_MTR_001",
+    "window_type": "production_blackout",
+    "start_utc": "2026-05-30T00:00:00Z",
+    "end_utc": "2026-06-01T23:59:00Z",
+    "duration_hours": 72,
+    "notes": "End-of-month peak production run — no maintenance permitted"
+  },
+  {
+    "window_id": "WIN_003",
+    "asset_id": "AST_MTR_001",
+    "window_type": "planned_maintenance",
+    "start_utc": "2026-06-07T06:00:00Z",
+    "end_utc": "2026-06-07T10:00:00Z",
+    "duration_hours": 4,
+    "notes": "Next quarterly inspection slot"
+  },
+  {
+    "window_id": "WIN_004",
+    "asset_id": "AST_MTR_002",
+    "window_type": "planned_maintenance",
+    "start_utc": "2026-05-27T08:00:00Z",
+    "end_utc": "2026-05-27T11:00:00Z",
+    "duration_hours": 3,
+    "notes": "Scheduled lubrication and inspection"
+  },
+  {
+    "window_id": "WIN_005",
+    "asset_id": "AST_PMP_001",
+    "window_type": "planned_maintenance",
+    "start_utc": "2026-05-26T07:00:00Z",
+    "end_utc": "2026-05-26T11:00:00Z",
+    "duration_hours": 4,
+    "notes": "Pump overhaul slot — scheduled due to overdue lubrication"
+  },
+  {
+    "window_id": "WIN_006",
+    "asset_id": "AST_PMP_001",
+    "window_type": "production_blackout",
+    "start_utc": "2026-06-02T00:00:00Z",
+    "end_utc": "2026-06-04T23:59:00Z",
+    "duration_hours": 72,
+    "notes": "Cooling system audit — pump must remain running"
+  },
+  {
+    "window_id": "WIN_007",
+    "asset_id": "AST_PMP_002",
+    "window_type": "planned_maintenance",
+    "start_utc": "2026-05-29T08:00:00Z",
+    "end_utc": "2026-05-29T10:00:00Z",
+    "duration_hours": 2,
+    "notes": "Routine check — bearing health currently good"
+  },
+  {
+    "window_id": "WIN_008",
+    "asset_id": "AST_CON_001",
+    "window_type": "planned_maintenance",
+    "start_utc": "2026-05-25T05:00:00Z",
+    "end_utc": "2026-05-25T09:00:00Z",
+    "duration_hours": 4,
+    "notes": "Line shutdown for conveyor belt tensioning — bearing inspection can be added"
+  },
+  {
+    "window_id": "WIN_009",
+    "asset_id": "AST_CON_001",
+    "window_type": "production_blackout",
+    "start_utc": "2026-05-28T00:00:00Z",
+    "end_utc": "2026-05-29T23:59:00Z",
+    "duration_hours": 48,
+    "notes": "High-volume order fulfillment — conveyor must run continuously"
+  },
+  {
+    "window_id": "WIN_010",
+    "asset_id": "AST_GBX_001",
+    "window_type": "production_blackout",
+    "start_utc": "2026-05-20T00:00:00Z",
+    "end_utc": "2026-06-06T23:59:00Z",
+    "duration_hours": 432,
+    "notes": "Critical production contract — gearbox line cannot be stopped"
+  },
+  {
+    "window_id": "WIN_011",
+    "asset_id": "AST_GBX_001",
+    "window_type": "planned_maintenance",
+    "start_utc": "2026-06-14T06:00:00Z",
+    "end_utc": "2026-06-14T14:00:00Z",
+    "duration_hours": 8,
+    "notes": "Next available gearbox maintenance slot — 3.5 weeks from telemetry date"
+  }
+]

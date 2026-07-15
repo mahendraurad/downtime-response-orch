@@ -1,0 +1,57 @@
+{
+  "_comment": "Real team personas. Approvers form a severity hierarchy (Supervisor -> Manager -> VP, escalating by severity); contributors are specialists who weigh in on their domain but do NOT approve work orders. Stage 1 = data only; the agent code is rewired to read this structure in Stage 2.",
+
+  "approvers": {
+    "normal": {
+      "role": "Plant Supervisor",
+      "name": "James Kowalski",
+      "id": "PERSONA_SUP",
+      "scope": "Shift decisions, escalations, approves work orders",
+      "approval_level": "primary approver",
+      "applies_when": "routine / planned cases (default sign-off authority)"
+    },
+    "escalated": {
+      "role": "Plant Manager",
+      "name": "Sarah Chen",
+      "id": "PERSONA_MGR",
+      "scope": "Production impact, cost trade-offs, ops-level approval",
+      "approval_level": "higher approver",
+      "applies_when": "elevated severity or cases with significant production/cost impact"
+    },
+    "executive": {
+      "role": "VP Operations",
+      "name": "Michael Osei",
+      "id": "PERSONA_VP",
+      "scope": "Portfolio risk, financials, executive approval",
+      "approval_level": "top approver",
+      "applies_when": "critical / emergency cases, or portfolio-level financial or risk exposure"
+    }
+  },
+
+  "contributors": {
+    "diagnosis": {
+      "role": "Reliability Engineer",
+      "name": "Priya Nair",
+      "id": "PERSONA_REL",
+      "concern": "reviews diagnostic evidence, RUL and root cause"
+    },
+    "sensor": {
+      "role": "OT / Controls",
+      "name": "Raj Iyer",
+      "id": "PERSONA_OT",
+      "concern": "verifies sensor/signal health and data validity"
+    },
+    "parts": {
+      "role": "Maintenance Planner",
+      "name": "Tom Rodriguez",
+      "id": "PERSONA_PLAN",
+      "concern": "confirms parts and crew readiness"
+    },
+    "safety": {
+      "role": "Safety Officer",
+      "name": "Lisa Park",
+      "id": "PERSONA_SAFE",
+      "concern": "validates LOTO, permits, PPE and compliance"
+    }
+  }
+}

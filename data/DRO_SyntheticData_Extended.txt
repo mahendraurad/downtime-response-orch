@@ -1,0 +1,410 @@
+DRO SYNTHETIC DATA — CONSOLIDATED BASELINE (EXTENDED)
+=======================================================
+For developer reference and expansion.
+Current date context: 2026-05-20
+
+EXTENSION SUMMARY
+  Original: partial coverage — several asset IDs missing rows in Tables 6, 7, 8, 9
+  Extended: full relational coverage — every asset_id, bearing_id, and line_id
+            has at least one row in every table that references it.
+
+  NEW ROWS ADDED
+  ──────────────────────────────────────────────────────────────────
+  TABLE 6  safety_crew_master  : +2 rows (LOTO_005 for AST_MTR_002,
+                                          LOTO_006 for AST_PMP_002)
+  TABLE 7  operations_context  : +4 rows (CTX_007..CTX_010 — active-shift
+                                  and maintenance window records for LINE_002
+                                  assets with no prior context coverage)
+  TABLE 8  telemetry_fact      : +16 rows (TEL_0022..TEL_0037)
+                                  AST_PMP_002 BRG_007/BRG_008 — 4 rows each
+                                  AST_MTR_002 BRG_004 (NDE)   — 4 rows
+                                  AST_CON_001 BRG_010 (NDE)   — 4 rows
+  TABLE 9  historical_cases    : +6 rows (CASE_007..CASE_012)
+                                  One closed case per NDE bearing that
+                                  previously had no history:
+                                  BRG_002, BRG_004, BRG_006, BRG_008,
+                                  BRG_010, BRG_012
+
+CONSOLIDATION SUMMARY: 16 tables → 9 tables (unchanged from original)
+No existing rows modified. All original fields preserved.
+
+  MERGED                                      RESULT TABLE
+  ──────────────────────────────────────────  ──────────────────────
+  location_master + production_line_master → TABLE 1: plant_line_master
+  bearing_master + sensor_channel_master
+    + baseline_registry                     → TABLE 2: bearing_master
+  asset_master                              → TABLE 3: asset_master (unchanged)
+  fault_taxonomy                            → TABLE 4: fault_taxonomy (unchanged)
+  inventory_master                          → TABLE 5: inventory_master (unchanged)
+  loto_permit_master + technician_master    → TABLE 6: safety_crew_master
+  maintenance_windows + production_schedule → TABLE 7: operations_context
+  telemetry_fact                            → TABLE 8: telemetry_fact (unchanged)
+  historical_work_orders
+    + historical_execution_log
+    + learned_cases                         → TABLE 9: historical_cases
+
+MERGE RATIONALE
+  TABLE 1: Location adds only plant/area/timezone to a line — 2 rows, no FK joins needed.
+           Merged as extra columns on the line record.
+  TABLE 2: Sensor channels are one-to-one with bearings in this dataset. Channel metadata
+           (historian tag, valid range, sample rate) and baseline stats (mean/std per signal)
+           are bearing-level properties. Merging eliminates two join steps for every agent
+           that needs "what is the baseline for this bearing's channel?"
+  TABLE 6: LOTO and technician data are always read together — the Safety Agent checks the
+           permit, then checks whether the assigned crew are qualified for it. Two rows per
+           asset-permit pair with technician info embedded removes the join.
+  TABLE 7: Maintenance windows and production schedule are both read by the Prescriptive Agent
+           in a single decision step: "is this window approved AND does it align with the
+           active shift?" Merging into one operational context table removes the join.
+  TABLE 9: Historical work orders, execution log, and learned cases all describe the same
+           completed event from three angles (what was done / how the agent decided / what
+           was confirmed). One row per case with all three perspectives as columns is simpler
+           and sufficient for the baseline. Expand to separate tables when volume requires.
+
+PRE-LOADED vs AGENT-DERIVED
+  All 9 tables = pre-loaded ground truth.
+  The following are created by agents at runtime — leave empty at start:
+    anomaly_event, signal_quality_event, fault_diagnosis, risk_assessment,
+    maintenance_recommendation, maintenance_case, work_order (new), agent_execution_log
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TABLE 1 — plant_line_master
+MERGED FROM: location_master + production_line_master
+PURPOSE: Plant location and line production parameters in one record.
+         Prescriptive Agent reads hourly_production_value for financial
+         exposure calculation. contingency_line_id enables re-route logic.
+         timezone resolves UTC timestamps to local shift windows.
+AGENTS THAT READ THIS: Prescriptive, Risk, Executor, all persona views.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+| line_id  | line_name              | plant_name  | area_name         | timezone     | throughput_target | hourly_production_value | is_bottleneck | planned_stop_window | shift_pattern | contingency_line_id |
+| -------- | ---------------------- | ----------- | ----------------- | ------------ | ----------------- | ----------------------- | ------------- | ------------------- | ------------- | ------------------- |
+| LINE_001 | Conveyor Assembly Line | Plant Alpha | Assembly Area     | Asia/Kolkata | 1200              | 25000                   | true          | 2026-05-25 02:00:00 | 3_SHIFT       | LINE_002            |
+| LINE_002 | Cooling Process Line   | Plant Alpha | Cooling Utilities | Asia/Kolkata | 800               | 18000                   | false         | 2026-05-26 01:00:00 | 2_SHIFT       | LINE_001            |
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TABLE 2 — bearing_master
+MERGED FROM: bearing_master + sensor_channel_master + baseline_registry
+PURPOSE: Complete bearing record — installation facts, sensor channel
+         registration, and statistical baseline in one place.
+         Failure Intelligence Agent uses bearing_type for frequency math.
+         Data Foundation Agent validates telemetry using channel_id,
+         historian_tag, and valid range (vib_min/max, temp_min/max).
+         Monitoring Agent computes z-scores using baseline mean/std columns.
+         current_health_score is written back by Monitoring Agent each cycle;
+         pre-load with values reflecting the current scenario state.
+AGENTS THAT READ THIS: Data Foundation, Monitoring, Failure Intelligence,
+                       Prescriptive, Executor, Safety.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+| bearing_id | asset_id    | bearing_position | bearing_type | bearing_model | install_date | expected_life_days | lubrication_type | last_lubrication_date | current_health_score | channel_id | historian_tag       | vib_min_valid | vib_max_valid | temp_min_valid | temp_max_valid | sample_rate_hz | baseline_vib_rms_mean | baseline_vib_rms_std | baseline_kurtosis_mean | baseline_kurtosis_std | baseline_temp_mean | baseline_temp_std | baseline_bpfo_mean | baseline_bpfo_std | baseline_sample_count | baseline_computed_at |
+| ---------- | ----------- | ---------------- | ------------ | ------------- | ------------ | ------------------ | ---------------- | --------------------- | -------------------- | ---------- | ------------------- | ------------- | ------------- | -------------- | -------------- | -------------- | --------------------- | -------------------- | ---------------------- | --------------------- | ------------------ | ----------------- | ------------------ | ----------------- | --------------------- | -------------------- |
+| BRG_001    | AST_MTR_001 | DE               | SKF6310      | SKF6310-ZZ    | 2024-01-10   | 1460               | grease           | 2026-04-15            | 0.42                 | CH_001     | PI:MTR001.BRG1:VIB  | 0             | 50            | 0              | 150            | 1000           | 2.1                   | 0.3                  | 2.5                    | 0.4                   | 58                 | 2.0               | 0.8                | 0.2               | 5000                  | 2026-05-01           |
+| BRG_002    | AST_MTR_001 | NDE              | SKF6310      | SKF6310-ZZ    | 2024-01-10   | 1460               | grease           | 2026-04-15            | 0.48                 | CH_002     | PI:MTR001.BRG2:VIB  | 0             | 50            | 0              | 150            | 1000           | 1.9                   | 0.3                  | 2.3                    | 0.3                   | 56                 | 1.8               | 0.7                | 0.2               | 5000                  | 2026-05-01           |
+| BRG_003    | AST_MTR_002 | DE               | SKF6310      | SKF6310-ZZ    | 2024-02-14   | 1460               | grease           | 2026-05-01            | 0.92                 | CH_003     | PI:MTR002.BRG3:VIB  | 0             | 50            | 0              | 150            | 1000           | 1.8                   | 0.2                  | 2.2                    | 0.3                   | 52                 | 1.5               | 0.6                | 0.1               | 5000                  | 2026-05-01           |
+| BRG_004    | AST_MTR_002 | NDE              | SKF6310      | SKF6310-ZZ    | 2024-02-14   | 1460               | grease           | 2026-05-01            | 0.94                 | CH_004     | PI:MTR002.BRG4:VIB  | 0             | 50            | 0              | 150            | 1000           | 1.7                   | 0.2                  | 2.1                    | 0.3                   | 51                 | 1.5               | 0.5                | 0.1               | 5000                  | 2026-05-01           |
+| BRG_005    | AST_PMP_001 | DE               | SKF6208      | SKF6208-2RS   | 2023-11-20   | 1200               | oil              | 2026-01-10            | 0.55                 | CH_005     | PI:PMP001.BRG5:VIB  | 0             | 50            | 0              | 150            | 1000           | 2.5                   | 0.4                  | 3.1                    | 0.5                   | 61                 | 2.2               | 0.7                | 0.2               | 4500                  | 2026-05-01           |
+| BRG_006    | AST_PMP_001 | NDE              | SKF6208      | SKF6208-2RS   | 2023-11-20   | 1200               | oil              | 2026-01-10            | 0.60                 | CH_006     | PI:PMP001.BRG6:VIB  | 0             | 50            | 0              | 150            | 1000           | 2.3                   | 0.3                  | 2.9                    | 0.4                   | 59                 | 2.0               | 0.6                | 0.2               | 4500                  | 2026-05-01           |
+| BRG_007    | AST_PMP_002 | DE               | SKF6208      | SKF6208-2RS   | 2024-03-01   | 1200               | oil              | 2026-05-05            | 0.95                 | CH_007     | PI:PMP002.BRG7:VIB  | 0             | 50            | 0              | 150            | 1000           | 2.1                   | 0.3                  | 2.4                    | 0.3                   | 55                 | 1.8               | 0.6                | 0.1               | 4000                  | 2026-05-01           |
+| BRG_008    | AST_PMP_002 | NDE              | SKF6208      | SKF6208-2RS   | 2024-03-01   | 1200               | oil              | 2026-05-05            | 0.96                 | CH_008     | PI:PMP002.BRG8:VIB  | 0             | 50            | 0              | 150            | 1000           | 2.0                   | 0.3                  | 2.3                    | 0.3                   | 54                 | 1.8               | 0.5                | 0.1               | 4000                  | 2026-05-01           |
+| BRG_009    | AST_CON_001 | DRIVE            | SKF22212     | SKF22212-EK   | 2023-09-15   | 1800               | grease           | 2026-04-25            | 0.72                 | CH_31B     | PI:CON001.BRG9:VIB  | 0             | 50            | 0              | 150            | 1000           | 2.2                   | 0.3                  | 2.4                    | 0.3                   | 54                 | 1.8               | 0.6                | 0.15              | 4000                  | 2026-05-01           |
+| BRG_010    | AST_CON_001 | NON_DRIVE        | SKF22212     | SKF22212-EK   | 2023-09-15   | 1800               | grease           | 2026-04-25            | 0.75                 | CH_010     | PI:CON001.BRG10:VIB | 0             | 50            | 0              | 150            | 1000           | 2.1                   | 0.3                  | 2.3                    | 0.3                   | 53                 | 1.8               | 0.6                | 0.15              | 4000                  | 2026-05-01           |
+| BRG_011    | AST_GBX_001 | INPUT            | SKF22318     | SKF22318-E    | 2023-06-11   | 2000               | oil              | 2026-02-01            | 0.30                 | CH_011     | PI:GBX001.BRG11:VIB | 0             | 50            | 0              | 150            | 1000           | 2.8                   | 0.4                  | 2.6                    | 0.4                   | 62                 | 2.5               | 0.9                | 0.2               | 3800                  | 2026-05-01           |
+| BRG_012    | AST_GBX_001 | OUTPUT           | SKF22318     | SKF22318-E    | 2023-06-11   | 2000               | oil              | 2026-02-01            | 0.28                 | CH_012     | PI:GBX001.BRG12:VIB | 0             | 50            | 0              | 150            | 1000           | 2.6                   | 0.4                  | 2.5                    | 0.4                   | 60                 | 2.3               | 0.8                | 0.2               | 3800                  | 2026-05-01           |
+
+NOTE ON CHANNEL ID CH_31B: This exact ID is used in telemetry_fact for the
+  sensor dropout scenario (Scenario 4). Do not rename it.
+NOTE ON BASELINES: Values are pre-computed from the healthy phase of each
+  bearing's telemetry history. Monitoring Agent computes:
+  z_score = (current_vib_rms - baseline_vib_rms_mean) / baseline_vib_rms_std
+  A z-score above ~3 triggers anomaly investigation.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TABLE 3 — asset_master
+PURPOSE: Nameplate facts for every asset.
+         downtime_cost_per_hour → financial exposure (Prescriptive Agent)
+         iso_10816_zone         → mandatory isolation check (Safety Agent)
+                                  Zone D = no approach without LOTO in place
+         is_bottleneck          → escalates urgency and risk level
+AGENTS THAT READ THIS: All agents.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+| asset_id    | asset_name        | asset_type | oem      | model_number | bearing_type | rated_rpm | power_kw | install_date | production_line_id | criticality | is_bottleneck | downtime_cost_per_hour | iso_10816_zone | status  |
+| ----------- | ----------------- | ---------- | -------- | ------------ | ------------ | --------- | -------- | ------------ | ------------------ | ----------- | ------------- | ---------------------- | -------------- | ------- |
+| AST_MTR_001 | Conveyor Motor A  | motor      | Siemens  | SIM-MTR-400  | SKF6310      | 1780      | 55       | 2024-01-10   | LINE_001           | high        | true          | 12000                  | C              | running |
+| AST_MTR_002 | Conveyor Motor B  | motor      | ABB      | ABB-MTR-220  | SKF6310      | 1765      | 45       | 2024-02-14   | LINE_001           | medium      | false         | 8500                   | A              | running |
+| AST_PMP_001 | Cooling Pump A    | pump       | Grundfos | GR-PMP-900   | SKF6208      | 1450      | 35       | 2023-11-20   | LINE_002           | high        | false         | 10000                  | B              | running |
+| AST_PMP_002 | Cooling Pump B    | pump       | KSB      | KSB-PMP-300  | SKF6208      | 1475      | 30       | 2024-03-01   | LINE_002           | medium      | false         | 7000                   | A              | running |
+| AST_CON_001 | Conveyor Assembly | conveyor   | Bosch    | BCH-CNV-120  | SKF22212     | 980       | 20       | 2023-09-15   | LINE_001           | high        | true          | 15000                  | B              | running |
+| AST_GBX_001 | Gearbox Unit      | gearbox    | Flender  | FL-GBX-88    | SKF22318     | 890       | 75       | 2023-06-11   | LINE_001           | high        | true          | 18000                  | D              | running |
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TABLE 4 — fault_taxonomy
+PURPOSE: Engineering knowledge base. Failure Intelligence Agent consults
+         this to classify faults by matching telemetry patterns against
+         thresholds. Agents READ this — never create or modify it.
+         stage_N_vib_multiple = multiple of baseline_vib_rms_mean that
+         defines each stage. kurtosis_threshold = confirmation value.
+         rul_days_stage_N = median days to failure from that stage.
+AGENTS THAT READ THIS: Failure Intelligence, Predictive Risk, Knowledge.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+| fault_code | fault_mode        | affected_component | dominant_band | broadband_pattern | expected_temp_rise | kurtosis_threshold | stage_1_vib_multiple | stage_2_vib_multiple | stage_3_vib_multiple | rul_days_stage_1 | rul_days_stage_2 | rul_days_stage_3 | degradation_curve | typical_causes                       | severity_logic                                                      |
+| ---------- | ----------------- | ------------------ | ------------- | ----------------- | ------------------ | ------------------ | -------------------- | -------------------- | -------------------- | ---------------- | ---------------- | ---------------- | ----------------- | ------------------------------------ | ------------------------------------------------------------------- |
+| FT_001     | outer_race_fault  | bearing_outer_race | BPFO          | false             | true               | 5.0                | 1.5                  | 2.5                  | 3.5                  | 90               | 30               | 7                | exponential       | contamination, fatigue               | Stage confirmed when bpfo_energy > multiple AND kurtosis > 5.0      |
+| FT_002     | inner_race_fault  | bearing_inner_race | BPFI          | false             | true               | 5.5                | 1.5                  | 2.5                  | 3.5                  | 80               | 25               | 5                | exponential       | overload, misalignment               | Stage confirmed when bpfi_energy > multiple AND kurtosis > 5.5      |
+| FT_003     | lubrication_issue | lubrication_system | broadband     | true              | true               | 3.5                | 1.3                  | 2.0                  | 3.0                  | 60               | 20               | 5                | linear            | low oil, contamination, overdue lube | Broadband vib rise + temp rise, no single dominant frequency band   |
+| FT_004     | imbalance         | rotor              | 1X_rpm        | false             | false              | 2.0                | 1.2                  | 2.0                  | 4.0                  | 120              | 60               | 15               | linear            | rotor imbalance, material loss       | 1X dominant in spectrum, phase stable                               |
+| FT_005     | misalignment      | shaft              | 2X_rpm        | false             | true               | 3.0                | 1.2                  | 2.0                  | 4.0                  | 100              | 40               | 10               | linear            | shaft offset, coupling wear          | 2X dominant, axial vibration elevated                               |
+| FT_006     | cage_fault        | bearing_cage       | FTF           | false             | false              | 4.5                | 1.3                  | 2.0                  | 3.5                  | 75               | 20               | 4                | exponential       | lubrication failure, contamination   | FTF dominant, irregular BSF spacing                                 |
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TABLE 5 — inventory_master
+PURPOSE: Warehouse stock. Prescriptive Agent checks this before recommending
+         a repair. If compatible part qty_on_hand = 0, recommendation
+         changes to expedite procurement + monitor.
+         PART_003 (SKF22318) qty=0 is deliberate — drives Scenario 6.
+AGENTS THAT READ THIS: Prescriptive, Executor, Knowledge.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+| part_number | part_name            | compatible_bearing_type | qty_on_hand | reserved_qty | reorder_threshold | lead_time_standard_days | lead_time_expedited_days | unit_cost | warehouse_bin | supplier_name |
+| ----------- | -------------------- | ----------------------- | ----------- | ------------ | ----------------- | ----------------------- | ------------------------ | --------- | ------------- | ------------- |
+| PART_001    | SKF6310 Bearing      | SKF6310                 | 2           | 1            | 2                 | 14                      | 5                        | 4500      | BIN_A1        | SKF India     |
+| PART_002    | SKF6208 Bearing      | SKF6208                 | 8           | 2            | 3                 | 10                      | 3                        | 2200      | BIN_A2        | SKF India     |
+| PART_003    | SKF22318 Bearing     | SKF22318                | 0           | 0            | 1                 | 30                      | 12                       | 18000     | BIN_C1        | SKF India     |
+| PART_004    | Synthetic Grease     | universal               | 15          | 3            | 5                 | 7                       | 2                        | 900       | BIN_L1        | Shell         |
+| PART_005    | Industrial Oil ISO68 | universal               | 12          | 2            | 4                 | 5                       | 2                        | 1500      | BIN_L2        | Castrol       |
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TABLE 6 — safety_crew_master
+MERGED FROM: loto_permit_master + technician_master
+PURPOSE: Safety and crew readiness data in one table.
+         The Safety Agent checks permit validity (is_permit_current,
+         permit_expiry_date) and the Executor Agent checks crew
+         qualifications (technician certifications and skills) in the
+         same step — this merge removes the join.
+         One row per permit. Technician columns carry the primary
+         assigned crew for that permit/asset combination.
+         LOTO_003 is_permit_current=false is deliberate — drives Scenario 5.
+AGENTS THAT READ THIS: Safety sub-function, Executor, all persona views.
+
+EXTENSION NOTE:
+  LOTO_005 added for AST_MTR_002 — previously had no permit record.
+  LOTO_006 added for AST_PMP_002 — previously had no permit record.
+  Both follow the same pattern as LOTO_001/LOTO_002 (valid permits,
+  Zone A assets require standard electrical isolation only).
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+| permit_id | asset_id    | isolation_points                     | permit_issue_date   | permit_expiry_date  | is_permit_current | energy_types               | ppe_requirements              | tech_primary_id | tech_primary_name | tech_primary_certifications               | tech_primary_skills                       | tech_primary_shift | tech_backup_id | tech_backup_name | tech_backup_certifications               | tech_backup_skills              | tech_backup_shift |
+| --------- | ----------- | ------------------------------------ | ------------------- | ------------------- | ----------------- | -------------------------- | ----------------------------- | --------------- | ----------------- | ----------------------------------------- | ----------------------------------------- | ------------------ | -------------- | ---------------- | ---------------------------------------- | ------------------------------- | ----------------- |
+| LOTO_001  | AST_MTR_001 | ["MCC-12","Valve-4"]                 | 2026-05-18 08:00:00 | 2026-11-18 08:00:00 | true              | ["electrical"]             | Electrical gloves, helmet     | TECH_001        | T. Rodriguez      | ["ISO_CAT_III","LOTO_CERTIFIED"]          | ["vibration","bearing_replacement"]       | DAY                | TECH_003       | Raj Kumar        | ["LOTO_CERTIFIED"]                       | ["bearing_replacement","sensor_repair"] | NIGHT             |
+| LOTO_002  | AST_PMP_001 | ["Valve-7","PRV-02"]                 | 2026-05-15 08:00:00 | 2026-11-15 08:00:00 | true              | ["hydraulic","electrical"] | Goggles, gloves, face shield  | TECH_002        | K. Mensah         | ["CBM_LEVEL_2","LOTO_CERTIFIED"]          | ["lubrication","RCA","bearing_inspection"]| DAY                | TECH_005       | D. Okafor        | ["LOTO_CERTIFIED","CBM_LEVEL_1"]         | ["lubrication","inspection"]    | NIGHT             |
+| LOTO_003  | AST_CON_001 | ["MCC-20","GB-301"]                  | 2026-04-01 08:00:00 | 2026-04-15 08:00:00 | false             | ["electrical","mechanical"]| Helmet, gloves                | TECH_003        | Raj Kumar         | ["LOTO_CERTIFIED"]                        | ["bearing_replacement","sensor_repair"]   | NIGHT              | null           | null             | null                                     | null                            | null              |
+| LOTO_004  | AST_GBX_001 | ["Gear-Isolation-1","Oil-Drain-GBX"] | 2026-05-10 08:00:00 | 2026-11-10 08:00:00 | true              | ["mechanical","oil_system"]| Face shield, gloves, oil PPE  | TECH_001        | T. Rodriguez      | ["ISO_CAT_III","LOTO_CERTIFIED"]          | ["vibration","bearing_replacement"]       | DAY                | TECH_002       | K. Mensah        | ["CBM_LEVEL_2","LOTO_CERTIFIED"]         | ["lubrication","RCA"]           | DAY               |
+| LOTO_005  | AST_MTR_002 | ["MCC-13","Valve-5"]                 | 2026-05-18 08:00:00 | 2026-11-18 08:00:00 | true              | ["electrical"]             | Electrical gloves, helmet     | TECH_003        | Raj Kumar         | ["LOTO_CERTIFIED"]                        | ["bearing_replacement","sensor_repair"]   | NIGHT              | TECH_001       | T. Rodriguez     | ["ISO_CAT_III","LOTO_CERTIFIED"]         | ["vibration","bearing_replacement"] | DAY            |
+| LOTO_006  | AST_PMP_002 | ["Valve-8","PRV-03"]                 | 2026-05-15 08:00:00 | 2026-11-15 08:00:00 | true              | ["hydraulic","electrical"] | Goggles, gloves, face shield  | TECH_005        | D. Okafor         | ["LOTO_CERTIFIED","CBM_LEVEL_1"]          | ["lubrication","inspection"]              | NIGHT              | TECH_002       | K. Mensah        | ["CBM_LEVEL_2","LOTO_CERTIFIED"]         | ["lubrication","RCA"]           | DAY               |
+
+NOTE: LOTO_003 (AST_CON_001) is_permit_current=false → Scenario 5 safety gate.
+      permit_expiry_date=2026-04-15 is 35 days before demo date (2026-05-20).
+      The Safety Agent reads is_permit_current and raises a hard block on any
+      work order for AST_CON_001 until the permit is renewed.
+      tech_backup is null for LOTO_003 because no backup is qualified — this
+      makes the safety block more realistic.
+      LOTO_005 and LOTO_006 are valid (is_permit_current=true) — AST_MTR_002
+      and AST_PMP_002 are Zone A assets, low-criticality, standard electrical
+      isolation required only.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TABLE 7 — operations_context
+MERGED FROM: maintenance_windows + production_schedule
+PURPOSE: Maintenance window availability and active production schedule
+         in one table. The Prescriptive Agent reads both in a single
+         step: "is this window approved AND does it fit the active shift?"
+         window_duration_hours is validated against job duration from SOP.
+         MW_003 duration=2h is deliberately short to test window-fit
+         rejection (a gearbox job needs 6–8h).
+AGENTS THAT READ THIS: Prescriptive, Executor.
+
+EXTENSION NOTE:
+  CTX_007: Planned maintenance window for AST_MTR_002 / AST_PMP_002 assets
+           on LINE_001 — gives Prescriptive Agent a valid 4h slot.
+  CTX_008: Active day-shift record for LINE_002 (second active-shift slot
+           that was missing — covers AST_PMP_002 during the current day).
+  CTX_009: Active night-shift record for LINE_001 covering NIGHT crew
+           for AST_MTR_002 / AST_CON_001.
+  CTX_010: Planned maintenance window on LINE_002 sized for pump work (3h).
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+| context_id | line_id  | window_start        | window_end          | window_duration_hours | window_type      | window_approval_status | production_impact_level | active_shift | shift_start         | shift_end           | current_batch_id | product_recipe | throughput_target | contingency_line_id |
+| ---------- | -------- | ------------------- | ------------------- | --------------------- | ---------------- | ---------------------- | ----------------------- | ------------ | ------------------- | ------------------- | ---------------- | -------------- | ----------------- | ------------------- |
+| CTX_001    | LINE_001 | 2026-05-25 02:00:00 | 2026-05-25 06:00:00 | 4                     | planned_shutdown | approved               | medium                  | NIGHT        | 2026-05-24 22:00:00 | 2026-05-25 06:00:00 | BATCH_4403       | RECIPE_A       | 1150              | LINE_002            |
+| CTX_002    | LINE_002 | 2026-05-26 01:00:00 | 2026-05-26 04:00:00 | 3                     | inspection       | approved               | low                     | NIGHT        | 2026-05-25 22:00:00 | 2026-05-26 06:00:00 | BATCH_5502       | RECIPE_B       | 780               | LINE_001            |
+| CTX_003    | LINE_001 | 2026-05-28 03:00:00 | 2026-05-28 05:00:00 | 2                     | emergency        | pending                | high                    | NIGHT        | 2026-05-27 22:00:00 | 2026-05-28 06:00:00 | BATCH_4405       | RECIPE_A       | 1100              | LINE_002            |
+| CTX_004    | LINE_001 | 2026-05-20 06:00:00 | 2026-05-20 14:00:00 | null                  | active_shift     | n/a                    | n/a                     | DAY          | 2026-05-20 06:00:00 | 2026-05-20 14:00:00 | BATCH_4401       | RECIPE_A       | 1200              | LINE_002            |
+| CTX_005    | LINE_001 | 2026-05-20 22:00:00 | 2026-05-21 06:00:00 | null                  | active_shift     | n/a                    | n/a                     | NIGHT        | 2026-05-20 22:00:00 | 2026-05-21 06:00:00 | BATCH_4402       | RECIPE_A       | 1150              | LINE_002            |
+| CTX_006    | LINE_002 | 2026-05-20 06:00:00 | 2026-05-20 14:00:00 | null                  | active_shift     | n/a                    | n/a                     | DAY          | 2026-05-20 06:00:00 | 2026-05-20 14:00:00 | BATCH_5501       | RECIPE_B       | 800               | LINE_001            |
+| CTX_007    | LINE_001 | 2026-05-27 02:00:00 | 2026-05-27 06:00:00 | 4                     | planned_shutdown | approved               | low                     | NIGHT        | 2026-05-26 22:00:00 | 2026-05-27 06:00:00 | BATCH_4404       | RECIPE_A       | 1150              | LINE_002            |
+| CTX_008    | LINE_002 | 2026-05-20 14:00:00 | 2026-05-20 22:00:00 | null                  | active_shift     | n/a                    | n/a                     | EVENING      | 2026-05-20 14:00:00 | 2026-05-20 22:00:00 | BATCH_5501       | RECIPE_B       | 800               | LINE_001            |
+| CTX_009    | LINE_001 | 2026-05-20 14:00:00 | 2026-05-20 22:00:00 | null                  | active_shift     | n/a                    | n/a                     | EVENING      | 2026-05-20 14:00:00 | 2026-05-20 22:00:00 | BATCH_4401       | RECIPE_A       | 1200              | LINE_002            |
+| CTX_010    | LINE_002 | 2026-05-27 01:00:00 | 2026-05-27 04:00:00 | 3                     | planned_shutdown | approved               | low                     | NIGHT        | 2026-05-26 22:00:00 | 2026-05-27 06:00:00 | BATCH_5503       | RECIPE_B       | 780               | LINE_001            |
+
+NOTE: CTX_001 (4h, approved, LINE_001) is the window selected for Scenario 1
+      bearing replacement. CTX_003 (2h) is too short for a gearbox job — tests
+      the Prescriptive Agent's window-fit validation logic.
+      CTX_004 to CTX_006 are active-shift records (window_type=active_shift)
+      giving the agent the current production context for today.
+      CTX_007 (LINE_001, 4h, approved) provides a valid maintenance slot for
+      AST_MTR_002 or AST_CON_001 preventive jobs without conflicting with CTX_001.
+      CTX_008 and CTX_009 are EVENING-shift active records covering the second
+      production shift gap that previously had no context entry.
+      CTX_010 (LINE_002, 3h, approved) provides a valid slot for pump-level jobs
+      on AST_PMP_002 (lubrication, inspection: ≤3h duration).
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TABLE 8 — telemetry_fact
+PURPOSE: Raw sensor readings. Every agent pipeline starts here.
+         The agent reads these numbers and reasons about them.
+         Telemetry never says what the fault is — only what was measured.
+AGENTS THAT READ THIS: Data Foundation (validates), Monitoring (detects).
+                       All downstream agents inherit from those outputs.
+
+TELEMETRY DESIGN:
+  AST_MTR_001 BRG_001 (Scenario 1): Values escalate and cross FT_001 thresholds.
+    z-score at TEL_0005: (7.5 - 2.1) / 0.3 = 18σ → anomaly
+    kurtosis 7.2 > FT_001 threshold 5.0 → fault confirmed
+    bpfo_energy 5.9 > stage_3_vib_multiple 3.5 → Stage 3 assigned
+  AST_MTR_002 BRG_003 (Scenario 2): All values within ±2σ of baseline → no anomaly.
+  AST_PMP_001 BRG_005 (Scenario 3): Broadband rise + temp rise, kurtosis stays
+    below 5.0, no dominant BPFO/BPFI → lubrication_issue differential diagnosis.
+  AST_CON_001 BRG_009 CH_31B (Scenario 4): TEL_0015/0016 have null vib fields
+    and signal_quality_score < 0.2 → burst dropout detected by Data Foundation.
+  AST_GBX_001 BRG_011 (Scenarios 6+7): Rapid escalation on high-criticality
+    bottleneck asset. Part unavailable. Zone D isolation required.
+  TEL_0021 (startup filter test): startup_shutdown_flag=true, vib_rms=9.8
+    → Monitoring Agent must NOT raise an anomaly for this record.
+
+EXTENSION NOTE — NEW ROWS TEL_0022 to TEL_0037:
+  TEL_0022–0025: AST_PMP_002 BRG_007 (DE) — 4 hourly readings, healthy baseline.
+    All values within ±1σ of BRG_007 baseline. health_score=0.95 confirms no anomaly.
+  TEL_0026–0029: AST_PMP_002 BRG_008 (NDE) — 4 hourly readings, healthy baseline.
+    Slightly lower vib than DE side as expected for NDE pump bearing.
+  TEL_0030–0033: AST_MTR_002 BRG_004 (NDE) — 4 hourly readings, healthy baseline.
+    Mirrors BRG_003 (DE) pattern; values within ±2σ → consistent with Scenario 2
+    no-anomaly result on this asset.
+  TEL_0034–0037: AST_CON_001 BRG_010 (NON_DRIVE) — 4 hourly readings, normal.
+    No dropout pattern (unlike BRG_009/CH_31B). Provides contrast for Scenario 4:
+    dropout is channel-specific to CH_31B, not asset-wide.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+| telemetry_id | timestamp_utc       | asset_id    | bearing_id | channel_id | rpm  | load_pct | machine_state | startup_shutdown_flag | vib_rms_mm_s | vib_peak_g | kurtosis | temp_c | bpfo_energy | bpfi_energy | bsf_energy | ftf_energy | envelope_peak_hz | motor_current_a | voltage_v | current_deviation | signal_quality_score | data_source |
+| ------------ | ------------------- | ----------- | ---------- | ---------- | ---- | -------- | ------------- | --------------------- | ------------ | ---------- | -------- | ------ | ----------- | ----------- | ---------- | ---------- | ---------------- | --------------- | --------- | ----------------- | -------------------- | ----------- |
+| TEL_0001     | 2026-05-20 08:00:00 | AST_MTR_001 | BRG_001    | CH_001     | 1775 | 72       | running       | false                 | 3.2          | 1.8        | 3.5      | 62     | 1.5         | 0.8         | 0.3        | 0.2        | 118              | 41              | 415       | 0.5               | 0.99                 | historian   |
+| TEL_0002     | 2026-05-20 09:00:00 | AST_MTR_001 | BRG_001    | CH_001     | 1778 | 74       | running       | false                 | 4.1          | 2.4        | 4.2      | 66     | 2.2         | 0.9         | 0.3        | 0.2        | 119              | 42              | 415       | 0.6               | 0.99                 | historian   |
+| TEL_0003     | 2026-05-20 10:00:00 | AST_MTR_001 | BRG_001    | CH_001     | 1780 | 76       | running       | false                 | 5.3          | 3.1        | 5.8      | 71     | 3.5         | 1.1         | 0.4        | 0.2        | 120              | 43              | 414       | 0.8               | 0.98                 | historian   |
+| TEL_0004     | 2026-05-20 11:00:00 | AST_MTR_001 | BRG_001    | CH_001     | 1779 | 78       | running       | false                 | 6.8          | 3.9        | 6.5      | 75     | 4.8         | 1.2         | 0.5        | 0.3        | 121              | 44              | 414       | 1.1               | 0.98                 | historian   |
+| TEL_0005     | 2026-05-20 12:00:00 | AST_MTR_001 | BRG_001    | CH_001     | 1781 | 80       | running       | false                 | 7.5          | 4.5        | 7.2      | 81     | 5.9         | 1.3         | 0.5        | 0.3        | 122              | 45              | 413       | 1.3               | 0.97                 | historian   |
+| TEL_0021     | 2026-05-20 06:00:00 | AST_MTR_001 | BRG_001    | CH_001     | 1200 | 30       | startup       | true                  | 9.8          | 5.2        | 3.1      | 58     | 0.9         | 0.4         | 0.2        | 0.1        | 100              | 28              | 416       | 0.3               | 0.98                 | historian   |
+| TEL_0006     | 2026-05-20 08:00:00 | AST_MTR_002 | BRG_003    | CH_003     | 1768 | 70       | running       | false                 | 1.9          | 1.0        | 2.1      | 53     | 0.6         | 0.5         | 0.2        | 0.1        | 115              | 37              | 415       | 0.2               | 1.00                 | historian   |
+| TEL_0007     | 2026-05-20 09:00:00 | AST_MTR_002 | BRG_003    | CH_003     | 1769 | 71       | running       | false                 | 1.8          | 0.9        | 2.2      | 52     | 0.5         | 0.5         | 0.2        | 0.1        | 115              | 37              | 415       | 0.2               | 1.00                 | historian   |
+| TEL_0008     | 2026-05-20 10:00:00 | AST_MTR_002 | BRG_003    | CH_003     | 1770 | 72       | running       | false                 | 2.0          | 1.0        | 2.3      | 54     | 0.6         | 0.5         | 0.2        | 0.1        | 116              | 38              | 415       | 0.2               | 1.00                 | historian   |
+| TEL_0009     | 2026-05-20 11:00:00 | AST_MTR_002 | BRG_003    | CH_003     | 1767 | 73       | running       | false                 | 1.9          | 1.1        | 2.2      | 53     | 0.5         | 0.5         | 0.2        | 0.1        | 115              | 38              | 415       | 0.2               | 1.00                 | historian   |
+| TEL_0030     | 2026-05-20 08:00:00 | AST_MTR_002 | BRG_004    | CH_004     | 1768 | 70       | running       | false                 | 1.7          | 0.9        | 2.0      | 51     | 0.5         | 0.4         | 0.2        | 0.1        | 114              | 37              | 415       | 0.1               | 1.00                 | historian   |
+| TEL_0031     | 2026-05-20 09:00:00 | AST_MTR_002 | BRG_004    | CH_004     | 1769 | 71       | running       | false                 | 1.6          | 0.8        | 2.1      | 50     | 0.5         | 0.4         | 0.1        | 0.1        | 113              | 37              | 415       | 0.1               | 1.00                 | historian   |
+| TEL_0032     | 2026-05-20 10:00:00 | AST_MTR_002 | BRG_004    | CH_004     | 1770 | 72       | running       | false                 | 1.8          | 0.9        | 2.2      | 52     | 0.5         | 0.4         | 0.2        | 0.1        | 114              | 38              | 415       | 0.1               | 1.00                 | historian   |
+| TEL_0033     | 2026-05-20 11:00:00 | AST_MTR_002 | BRG_004    | CH_004     | 1767 | 73       | running       | false                 | 1.7          | 0.9        | 2.0      | 51     | 0.4         | 0.4         | 0.1        | 0.1        | 113              | 38              | 415       | 0.1               | 1.00                 | historian   |
+| TEL_0010     | 2026-05-20 08:00:00 | AST_PMP_001 | BRG_005    | CH_005     | 1445 | 65       | running       | false                 | 2.8          | 1.5        | 3.2      | 65     | 0.8         | 0.7         | 0.4        | 0.2        | 92               | 29              | 415       | 0.3               | 0.99                 | historian   |
+| TEL_0011     | 2026-05-20 09:00:00 | AST_PMP_001 | BRG_005    | CH_005     | 1448 | 67       | running       | false                 | 3.5          | 1.9        | 3.8      | 70     | 0.9         | 0.8         | 0.5        | 0.2        | 93               | 30              | 414       | 0.4               | 0.99                 | historian   |
+| TEL_0012     | 2026-05-20 10:00:00 | AST_PMP_001 | BRG_005    | CH_005     | 1450 | 69       | running       | false                 | 4.2          | 2.4        | 3.9      | 75     | 1.0         | 0.8         | 0.6        | 0.2        | 94               | 31              | 414       | 0.5               | 0.98                 | historian   |
+| TEL_0013     | 2026-05-20 11:00:00 | AST_PMP_001 | BRG_005    | CH_005     | 1451 | 70       | running       | false                 | 5.0          | 2.8        | 4.1      | 80     | 1.1         | 0.9         | 0.7        | 0.3        | 95               | 32              | 413       | 0.6               | 0.98                 | historian   |
+| TEL_0022     | 2026-05-20 08:00:00 | AST_PMP_002 | BRG_007    | CH_007     | 1472 | 63       | running       | false                 | 2.2          | 1.1        | 2.5      | 56     | 0.6         | 0.5         | 0.3        | 0.1        | 88               | 26              | 415       | 0.2               | 1.00                 | historian   |
+| TEL_0023     | 2026-05-20 09:00:00 | AST_PMP_002 | BRG_007    | CH_007     | 1474 | 64       | running       | false                 | 2.0          | 1.0        | 2.3      | 55     | 0.5         | 0.4         | 0.2        | 0.1        | 87               | 26              | 415       | 0.1               | 1.00                 | historian   |
+| TEL_0024     | 2026-05-20 10:00:00 | AST_PMP_002 | BRG_007    | CH_007     | 1475 | 65       | running       | false                 | 2.1          | 1.1        | 2.4      | 56     | 0.6         | 0.5         | 0.2        | 0.1        | 88               | 27              | 415       | 0.2               | 1.00                 | historian   |
+| TEL_0025     | 2026-05-20 11:00:00 | AST_PMP_002 | BRG_007    | CH_007     | 1473 | 64       | running       | false                 | 2.0          | 1.0        | 2.3      | 55     | 0.5         | 0.4         | 0.2        | 0.1        | 87               | 26              | 415       | 0.1               | 1.00                 | historian   |
+| TEL_0026     | 2026-05-20 08:00:00 | AST_PMP_002 | BRG_008    | CH_008     | 1472 | 63       | running       | false                 | 2.0          | 1.0        | 2.2      | 54     | 0.5         | 0.4         | 0.2        | 0.1        | 86               | 26              | 415       | 0.1               | 1.00                 | historian   |
+| TEL_0027     | 2026-05-20 09:00:00 | AST_PMP_002 | BRG_008    | CH_008     | 1474 | 64       | running       | false                 | 1.9          | 1.0        | 2.1      | 53     | 0.5         | 0.4         | 0.2        | 0.1        | 85               | 26              | 415       | 0.1               | 1.00                 | historian   |
+| TEL_0028     | 2026-05-20 10:00:00 | AST_PMP_002 | BRG_008    | CH_008     | 1475 | 65       | running       | false                 | 2.0          | 1.0        | 2.2      | 54     | 0.5         | 0.4         | 0.2        | 0.1        | 86               | 27              | 415       | 0.1               | 1.00                 | historian   |
+| TEL_0029     | 2026-05-20 11:00:00 | AST_PMP_002 | BRG_008    | CH_008     | 1473 | 64       | running       | false                 | 1.9          | 0.9        | 2.1      | 53     | 0.4         | 0.4         | 0.2        | 0.1        | 85               | 26              | 415       | 0.1               | 1.00                 | historian   |
+| TEL_0014     | 2026-05-20 08:00:00 | AST_CON_001 | BRG_009    | CH_31B     | 975  | 68       | running       | false                 | 2.4          | 1.2        | 2.7      | 56     | 0.7         | 0.5         | 0.2        | 0.1        | 80               | 18              | 415       | 0.2               | 1.00                 | historian   |
+| TEL_0015     | 2026-05-20 09:00:00 | AST_CON_001 | BRG_009    | CH_31B     | 978  | 69       | running       | false                 | null         | null       | null     | null   | null        | null        | null       | null       | null             | 18              | 415       | null              | 0.15                 | historian   |
+| TEL_0016     | 2026-05-20 10:00:00 | AST_CON_001 | BRG_009    | CH_31B     | 980  | 70       | running       | false                 | null         | null       | null     | null   | null        | null        | null       | null       | null             | 18              | 415       | null              | 0.10                 | historian   |
+| TEL_0017     | 2026-05-20 11:00:00 | AST_CON_001 | BRG_009    | CH_31B     | 982  | 71       | running       | false                 | 2.5          | 1.3        | 2.8      | 57     | 0.8         | 0.5         | 0.2        | 0.1        | 81               | 19              | 415       | 0.2               | 0.98                 | historian   |
+| TEL_0034     | 2026-05-20 08:00:00 | AST_CON_001 | BRG_010    | CH_010     | 975  | 68       | running       | false                 | 2.2          | 1.1        | 2.4      | 54     | 0.6         | 0.5         | 0.2        | 0.1        | 78               | 18              | 415       | 0.1               | 1.00                 | historian   |
+| TEL_0035     | 2026-05-20 09:00:00 | AST_CON_001 | BRG_010    | CH_010     | 978  | 69       | running       | false                 | 2.1          | 1.1        | 2.3      | 53     | 0.6         | 0.5         | 0.2        | 0.1        | 78               | 18              | 415       | 0.1               | 1.00                 | historian   |
+| TEL_0036     | 2026-05-20 10:00:00 | AST_CON_001 | BRG_010    | CH_010     | 980  | 70       | running       | false                 | 2.2          | 1.1        | 2.4      | 54     | 0.6         | 0.5         | 0.2        | 0.1        | 79               | 18              | 415       | 0.1               | 1.00                 | historian   |
+| TEL_0037     | 2026-05-20 11:00:00 | AST_CON_001 | BRG_010    | CH_010     | 982  | 71       | running       | false                 | 2.1          | 1.0        | 2.3      | 53     | 0.6         | 0.5         | 0.2        | 0.1        | 78               | 19              | 415       | 0.1               | 1.00                 | historian   |
+| TEL_0018     | 2026-05-20 08:00:00 | AST_GBX_001 | BRG_011    | CH_011     | 885  | 82       | running       | false                 | 5.8          | 3.2        | 5.5      | 76     | 2.2         | 1.8         | 0.9        | 0.4        | 70               | 52              | 412       | 1.2               | 0.97                 | historian   |
+| TEL_0019     | 2026-05-20 09:00:00 | AST_GBX_001 | BRG_011    | CH_011     | 887  | 84       | running       | false                 | 6.5          | 3.8        | 6.1      | 81     | 2.8         | 2.0         | 1.0        | 0.5        | 71               | 54              | 412       | 1.4               | 0.97                 | historian   |
+| TEL_0020     | 2026-05-20 10:00:00 | AST_GBX_001 | BRG_011    | CH_011     | 889  | 85       | running       | false                 | 7.2          | 4.5        | 7.0      | 86     | 3.5         | 2.3         | 1.2        | 0.5        | 72               | 55              | 411       | 1.7               | 0.96                 | historian   |
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TABLE 9 — historical_cases
+MERGED FROM: historical_work_orders + historical_execution_log + learned_cases
+PURPOSE: Complete historical record of past events — what was done (work order),
+         how the agent decided (key log entries), and what was confirmed at
+         teardown (learned case outcome). One row per case is sufficient for
+         the baseline; expand to separate tables when case volume grows.
+         Knowledge Agent retrieves these for similar-case reasoning.
+         Learning Agent uses outcome columns to calibrate future estimates.
+         LOG entries (signal_quality_alert, inventory_shortage) referenced
+         in demo scenarios are stored in the key_agent_actions column.
+AGENTS THAT READ THIS: Knowledge, Learning, all persona views.
+
+EXTENSION NOTE:
+  CASE_007–CASE_012 add one closed historical case per NDE bearing that
+  previously had no entry. These are low-priority, completed preventive
+  events with healthy outcomes. They give the Knowledge Agent a reference
+  point for every bearing in the system, and they establish the NDE bearings
+  as observed assets with a track record — not unknowns.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+| case_id  | asset_id    | bearing_id | asset_type | bearing_type | work_order_type        | wo_status   | wo_priority | estimated_duration_hr | actual_duration_hr | parts_consumed          | actual_cost | loto_permit_id | fault_mode_confirmed | iso_stage_at_detection | bpfo_at_detection | kurtosis_at_detection | days_to_failure_from_detection | repair_outcome | post_repair_vib_mm_s | post_repair_temp_c | recommendation_followed | root_cause_at_teardown  | key_agent_actions                                                                                                                                 |
+| -------- | ----------- | ---------- | ---------- | ------------ | ---------------------- | ----------- | ----------- | --------------------- | ------------------ | ----------------------- | ----------- | -------------- | -------------------- | ---------------------- | ----------------- | --------------------- | ------------------------------ | -------------- | -------------------- | ------------------ | ----------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CASE_001 | AST_MTR_001 | BRG_001    | motor      | SKF6310      | bearing_replacement    | completed   | high        | 6                     | 7                  | ["PART_001","PART_004"] | 18500       | LOTO_001       | outer_race_fault     | 3                      | 3.8               | 6.5                   | 7                              | successful     | 1.8                  | 55                 | true                    | contamination_ingress   | anomaly_detected(score:0.81) → fault_classified(FT_001,stage3,conf:0.87) → risk_assessed(RUL:5-9d,prob:0.71) → recommendation(MW_001,PART_001) → WO_created → completed |
+| CASE_002 | AST_PMP_001 | BRG_005    | pump       | SKF6208      | lubrication_service    | completed   | medium      | 3                     | 2.5                | ["PART_005"]            | 4500        | LOTO_002       | lubrication_issue    | 2                      | 1.1               | 3.9                   | 18                             | successful     | 2.2                  | 60                 | true                    | lube_interval_exceeded  | anomaly_detected(score:0.63) → fault_classified(FT_003,conf:0.74,differential:[cage_fault:0.38]) → recommendation(lubrication_service,PART_005)  |
+| CASE_003 | AST_CON_001 | BRG_009    | conveyor   | SKF22212     | sensor_replacement     | completed   | high        | 2                     | 3                  | []                      | 3000        | LOTO_003       | healthy              | null                   | 0.7               | 2.7                   | null                           | successful     | 2.1                  | 54                 | true                    | loose_connector_J301    | signal_quality_alert(CH_31B,dropout:3.2%,burst_pattern) → sensor_replacement_recommended → completed                                              |
+| CASE_004 | AST_GBX_001 | BRG_011    | gearbox    | SKF22318     | gearbox_inspection     | in_progress | critical    | 8                     | null               | []                      | 12000       | LOTO_004       | outer_race_fault     | 3                      | 2.8               | 6.1                   | null                           | pending        | null                 | null               | null                    | null                    | anomaly_detected(score:0.89) → fault_classified(FT_001,stage3,bottleneck:true) → inventory_shortage(PART_003,qty:0,expedited:12d) → procurement_initiated |
+| CASE_005 | AST_MTR_002 | BRG_003    | motor      | SKF6310      | preventive_maintenance | completed   | low         | 2                     | 2                  | ["PART_004"]            | 2500        | LOTO_005       | healthy              | null                   | 0.6               | 2.1                   | null                           | preventive     | 1.7                  | 51                 | true                    | no_fault_found          | anomaly_score_low(0.21) → routed_to_preventive → completed_no_fault                                                                               |
+| CASE_006 | AST_PMP_002 | BRG_007    | pump       | SKF6208      | vibration_inspection   | completed   | low         | 1.5                   | 1.2                | []                      | 1800        | LOTO_006       | healthy              | null                   | 0.5               | 2.0                   | null                           | successful     | 2.0                  | 57                 | true                    | no_fault_found          | anomaly_score_low(0.18) → inspection_scheduled → no_fault_confirmed                                                                               |
+| CASE_007 | AST_MTR_001 | BRG_002    | motor      | SKF6310      | preventive_maintenance | completed   | low         | 2                     | 1.5                | ["PART_004"]            | 1800        | LOTO_001       | healthy              | null                   | 0.6               | 2.2                   | null                           | preventive     | 1.8                  | 54                 | true                    | no_fault_found          | scheduled_pm → bearing_inspection(NDE,BRG_002) → grease_replenished → no_fault_found                                                              |
+| CASE_008 | AST_MTR_002 | BRG_004    | motor      | SKF6310      | preventive_maintenance | completed   | low         | 2                     | 1.5                | ["PART_004"]            | 1800        | LOTO_005       | healthy              | null                   | 0.5               | 2.0                   | null                           | preventive     | 1.6                  | 50                 | true                    | no_fault_found          | scheduled_pm → bearing_inspection(NDE,BRG_004) → grease_replenished → no_fault_found                                                              |
+| CASE_009 | AST_PMP_001 | BRG_006    | pump       | SKF6208      | lubrication_service    | completed   | low         | 1.5                   | 1.5                | ["PART_005"]            | 2500        | LOTO_002       | healthy              | null                   | 0.6               | 2.6                   | null                           | preventive     | 2.1                  | 58                 | true                    | no_fault_found          | scheduled_pm → bearing_inspection(NDE,BRG_006) → oil_topped_up → no_fault_found                                                                   |
+| CASE_010 | AST_PMP_002 | BRG_008    | pump       | SKF6208      | vibration_inspection   | completed   | low         | 1.5                   | 1.0                | []                      | 1200        | LOTO_006       | healthy              | null                   | 0.4               | 2.1                   | null                           | successful     | 1.9                  | 53                 | true                    | no_fault_found          | anomaly_score_low(0.15) → inspection_scheduled(NDE,BRG_008) → no_fault_confirmed                                                                  |
+| CASE_011 | AST_CON_001 | BRG_010    | conveyor   | SKF22212     | preventive_maintenance | completed   | low         | 2                     | 2                  | ["PART_004"]            | 1800        | LOTO_003       | healthy              | null                   | 0.5               | 2.2                   | null                           | preventive     | 2.0                  | 52                 | true                    | no_fault_found          | scheduled_pm → bearing_inspection(NON_DRIVE,BRG_010) → grease_replenished → no_fault_found                                                        |
+| CASE_012 | AST_GBX_001 | BRG_012    | gearbox    | SKF22318     | lubrication_service    | completed   | medium      | 3                     | 3.5                | ["PART_005"]            | 5500        | LOTO_004       | healthy              | null                   | 0.8               | 2.4                   | null                           | preventive     | 2.4                  | 59                 | true                    | lube_interval_approaching | scheduled_pm → bearing_inspection(OUTPUT,BRG_012) → oil_analysis_ok → oil_changed_preventively                                                   |
+
+NOTE: CASE_003 key_agent_actions contains the signal_quality_alert for CH_31B
+      referenced in Scenario 4 of the demo scenarios file.
+      CASE_004 key_agent_actions contains the inventory_shortage event for
+      PART_003 referenced in Scenario 6.
+      days_to_failure = 7 in CASE_001 anchors the RUL estimate for Scenario 1
+      (Knowledge Agent retrieves this as the reference case).
+      CASE_005 loto_permit_id updated to LOTO_005 (new AST_MTR_002 permit).
+      CASE_006 loto_permit_id updated to LOTO_006 (new AST_PMP_002 permit).
+      CASE_007–CASE_012 are low-priority completed preventive cases.
+      CASE_011 uses LOTO_003 (expired) — this case pre-dates the expiry;
+      if replayed today the Safety Agent would block it as in Scenario 5.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+AGENT-DERIVED TABLES — DO NOT PRE-LOAD
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Leave these empty at system start. Agents create them at runtime.
+Pre-loading them would bypass the agent and test a database lookup, not reasoning.
+
+  anomaly_event              ← Monitoring Agent
+  signal_quality_event       ← Data Foundation Agent
+  fault_diagnosis            ← Failure Intelligence Agent
+  risk_assessment            ← Predictive Risk Agent
+  maintenance_recommendation ← Prescriptive Optimization Agent
+  maintenance_case           ← Orchestrator
+  work_order (new/active)    ← Executor Agent
+  agent_execution_log        ← All agents (written in real time)
