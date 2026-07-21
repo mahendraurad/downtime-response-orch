@@ -1,0 +1,9 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "src"]
+
+[project]
+name = "dro"
+version = "0.1.0"
+description = "Downtime Response Orchestrator — multi-agent bearing predictive maintenance"
+requires-python = ">=3.10"

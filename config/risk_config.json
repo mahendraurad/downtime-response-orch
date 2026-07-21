@@ -1,0 +1,55 @@
+{
+  "_comment": "Predictive Risk Agent (Phase 5) config. Tunable without code changes — edit and restart. RUL day-counts themselves live in data/fault_taxonomy.json (rul_days_stage_N); this file holds agent-level policy: failure-probability blend, risk-level source, business-impact flagging, the monitor band for undetermined faults, and logging.",
+
+  "failure_probability": {
+    "_comment": "failure_probability = stage_base[iso_stage] blended with the anomaly_score. Weights must sum to 1.0. stage_base['0'] covers the undetermined/no-fault case (anomaly fired but no signature matched).",
+    "stage_base": {
+      "0": 0.1,
+      "1": 0.3,
+      "2": 0.6,
+      "3": 0.85
+    },
+    "weights": {
+      "stage_base": 0.6,
+      "anomaly_score": 0.4
+    }
+  },
+
+  "risk_level": {
+    "_comment": "Reuse the Failure Intelligence severity (already escalated one level for high-criticality and/or bottleneck assets) as risk_level. This keeps risk_level and diagnosis.severity from diverging. fallback is used only when the diagnosis carries no severity.",
+    "source": "diagnosis_severity",
+    "fallback": "medium"
+  },
+
+  "business_impact": {
+    "_comment": "business_impact_flag is raised for production bottlenecks and/or high-criticality assets.",
+    "flag_if_bottleneck": true,
+    "flag_if_high_criticality": true,
+    "high_criticality_label": "high"
+  },
+
+  "monitor_band": {
+    "_comment": "RUL band returned when iso_stage == 0 (undetermined fault — an anomaly fired but no taxonomy signature matched). No imminent timeline is quantified, so financial_exposure is forced to 0.",
+    "rul_min_days": 45,
+    "rul_max_days": 999,
+    "label": "monitor"
+  },
+
+  "llm_fallback": {
+    "_comment": "Optional LLM advisory layer for cases the rule engine cannot assess confidently. Set enabled=true and provide Azure AI Foundry credentials (AZURE_AI_ENDPOINT/KEY/DEPLOYMENT) or Azure OpenAI credentials (AZURE_OPENAI_ENDPOINT/KEY/DEPLOYMENT) in .env. When unavailable, the deterministic assessment is always kept. The LLM augments the assessment with a recommended_action + rationale (advisory_note); the rule-based RUL/exposure numbers remain the auditable source of truth. For the undetermined/monitor case it may also set risk_level.",
+    "enabled": true,
+    "trigger_on_undetermined": true,
+    "_trigger_undetermined_comment": "Fire when iso_stage == 0 / no fault_code matched (rules give only a monitor band).",
+    "trigger_low_confidence_below": 0,
+    "_trigger_conf_comment": "Fire when diagnosis.confidence is below this threshold even if a fault matched. Set to 0 (default) to keep this trigger disabled — a matched fault means the rules DO have coverage and the LLM should not second-guess them.",
+    "temperature": 0.2,
+    "max_tokens": 500,
+    "timeout_seconds": 20,
+    "hitl_enabled": true,
+    "_hitl_comment": "When true, interactive runners (run_risk_demo.py, test_llm_fallback.py) pause after the LLM returns an advisory and ask the operator to Accept / Modify / Reject before the note is applied to the assessment. Programmatic callers (tests) leave hitl_handler=None so this flag has no effect."
+  },
+
+  "logging": {
+    "log_assessments": true
+  }
+}

@@ -1,0 +1,229 @@
+[
+  {
+    "fault_code": "FT_001",
+    "fault_mode": "outer_race_fault",
+    "affected_component": "bearing_outer_race",
+    "dominant_band": "BPFO",
+    "broadband_pattern": false,
+    "expected_temp_rise": true,
+    "kurtosis_threshold": 5.0,
+    "stage_1_vib_multiple": 1.5,
+    "stage_2_vib_multiple": 2.5,
+    "stage_3_vib_multiple": 3.5,
+    "rul_days_stage_1": 90,
+    "rul_days_stage_2": 30,
+    "rul_days_stage_3": 7,
+    "degradation_curve": "exponential",
+    "typical_causes": [
+      "contamination",
+      "fatigue"
+    ],
+    "severity_logic": "Stage confirmed when bpfo_energy > multiple AND kurtosis > 5.0",
+    "detection": {
+      "_comment": "Machine-readable form of severity_logic. The matcher reads this \u00e2\u20ac\u201d no per-fault code. priority = order in which faults are tried (lower wins as primary). signal = the value compared to stage_N_vib_multiple. kurtosis.threshold_field points at the field holding the gate value, so thresholds live in one place.",
+      "priority": 1,
+      "signal": "bpfo_energy",
+      "kurtosis": {
+        "mode": "above",
+        "threshold_field": "kurtosis_threshold"
+      },
+      "require_dominant": false,
+      "dominant_among": [],
+      "require_broadband": false,
+      "require_temp_rise": false
+    }
+  },
+  {
+    "fault_code": "FT_002",
+    "fault_mode": "inner_race_fault",
+    "affected_component": "bearing_inner_race",
+    "dominant_band": "BPFI",
+    "broadband_pattern": false,
+    "expected_temp_rise": true,
+    "kurtosis_threshold": 5.5,
+    "stage_1_vib_multiple": 1.5,
+    "stage_2_vib_multiple": 2.5,
+    "stage_3_vib_multiple": 3.5,
+    "rul_days_stage_1": 80,
+    "rul_days_stage_2": 25,
+    "rul_days_stage_3": 5,
+    "degradation_curve": "exponential",
+    "typical_causes": [
+      "overload",
+      "misalignment"
+    ],
+    "severity_logic": "Stage confirmed when bpfi_energy > multiple AND kurtosis > 5.5",
+    "detection": {
+      "priority": 2,
+      "signal": "bpfi_energy",
+      "kurtosis": {
+        "mode": "above",
+        "threshold_field": "kurtosis_threshold"
+      },
+      "require_dominant": false,
+      "dominant_among": [],
+      "require_broadband": false,
+      "require_temp_rise": false
+    }
+  },
+  {
+    "fault_code": "FT_003",
+    "fault_mode": "lubrication_issue",
+    "affected_component": "lubrication_system",
+    "dominant_band": "broadband",
+    "broadband_pattern": true,
+    "expected_temp_rise": true,
+    "kurtosis_threshold": 3.5,
+    "stage_1_vib_multiple": 1.3,
+    "stage_2_vib_multiple": 2.0,
+    "stage_3_vib_multiple": 3.0,
+    "rul_days_stage_1": 60,
+    "rul_days_stage_2": 20,
+    "rul_days_stage_3": 5,
+    "degradation_curve": "linear",
+    "typical_causes": [
+      "low oil",
+      "contamination",
+      "overdue lube"
+    ],
+    "severity_logic": "Broadband vib rise + temp rise, no single dominant frequency band",
+    "detection": {
+      "_comment": "Broadband (lubrication) fingerprint. signal=vib_ratio (overall vibration / baseline) compared to the stage multiples. kurtosis must stay BELOW the discrete-defect level \u00e2\u20ac\u201d referenced (not copied) from whichever rule detects the bpfo_energy band, so there is one source of truth and it survives a fault_code rename. Change that rule's kurtosis_threshold and this follows automatically.",
+      "priority": 4,
+      "signal": "vib_ratio",
+      "kurtosis": {
+        "mode": "below",
+        "ceiling": {
+          "signal": "bpfo_energy",
+          "field": "kurtosis_threshold"
+        }
+      },
+      "require_dominant": false,
+      "dominant_among": [],
+      "require_broadband": true,
+      "require_temp_rise": true
+    }
+  },
+  {
+    "fault_code": "FT_004",
+    "fault_mode": "imbalance",
+    "affected_component": "rotor",
+    "dominant_band": "1X_rpm",
+    "broadband_pattern": false,
+    "expected_temp_rise": false,
+    "kurtosis_threshold": 2.0,
+    "stage_1_vib_multiple": 1.2,
+    "stage_2_vib_multiple": 2.0,
+    "stage_3_vib_multiple": 4.0,
+    "rul_days_stage_1": 120,
+    "rul_days_stage_2": 60,
+    "rul_days_stage_3": 15,
+    "degradation_curve": "linear",
+    "typical_causes": [
+      "rotor imbalance",
+      "material loss"
+    ],
+    "severity_logic": "1X dominant in spectrum, phase stable",
+    "_detection_note": "No detection block: 1X_rpm band energy is not in the telemetry schema yet, so this rule is dormant. Add a 'detection' block (signal -> the 1X energy field) once that signal is published, and the matcher will pick it up with no code change."
+  },
+  {
+    "fault_code": "FT_005",
+    "fault_mode": "misalignment",
+    "affected_component": "shaft",
+    "dominant_band": "2X_rpm",
+    "broadband_pattern": false,
+    "expected_temp_rise": true,
+    "kurtosis_threshold": 3.0,
+    "stage_1_vib_multiple": 1.2,
+    "stage_2_vib_multiple": 2.0,
+    "stage_3_vib_multiple": 4.0,
+    "rul_days_stage_1": 100,
+    "rul_days_stage_2": 40,
+    "rul_days_stage_3": 10,
+    "degradation_curve": "linear",
+    "typical_causes": [
+      "shaft offset",
+      "coupling wear"
+    ],
+    "severity_logic": "2X dominant, axial vibration elevated",
+    "_detection_note": "No detection block: 2X_rpm band energy is not in the telemetry schema yet, so this rule is dormant. Add a 'detection' block once that signal is published."
+  },
+  {
+    "fault_code": "FT_006",
+    "fault_mode": "cage_fault",
+    "affected_component": "bearing_cage",
+    "dominant_band": "FTF",
+    "broadband_pattern": false,
+    "expected_temp_rise": false,
+    "kurtosis_threshold": 4.5,
+    "stage_1_vib_multiple": 1.3,
+    "stage_2_vib_multiple": 2.0,
+    "stage_3_vib_multiple": 3.5,
+    "rul_days_stage_1": 75,
+    "rul_days_stage_2": 20,
+    "rul_days_stage_3": 4,
+    "degradation_curve": "exponential",
+    "typical_causes": [
+      "lubrication failure",
+      "contamination"
+    ],
+    "severity_logic": "FTF dominant, irregular BSF spacing",
+    "detection": {
+      "_comment": "Cage fault. signal=ftf_energy, but it only counts if FTF is the dominant band \u00e2\u20ac\u201d require_dominant compares it against the other band energies in dominant_among.",
+      "priority": 3,
+      "signal": "ftf_energy",
+      "kurtosis": {
+        "mode": "above",
+        "threshold_field": "kurtosis_threshold"
+      },
+      "require_dominant": true,
+      "dominant_among": [
+        "bpfo_energy",
+        "bpfi_energy",
+        "bsf_energy",
+        "ftf_energy"
+      ],
+      "require_broadband": false,
+      "require_temp_rise": false
+    }
+  },
+  {
+    "fault_code": "FT_007",
+    "fault_mode": "gearbox_fault",
+    "affected_component": "gear_teeth",
+    "dominant_band": "BSF",
+    "broadband_pattern": false,
+    "expected_temp_rise": true,
+    "kurtosis_threshold": 4.5,
+    "stage_1_vib_multiple": 1.5,
+    "stage_2_vib_multiple": 2.5,
+    "stage_3_vib_multiple": 3.5,
+    "rul_days_stage_1": 90,
+    "rul_days_stage_2": 30,
+    "rul_days_stage_3": 10,
+    "degradation_curve": "exponential",
+    "typical_causes": [
+      "gear tooth wear",
+      "overloading",
+      "lubrication failure"
+    ],
+    "severity_logic": "Stage confirmed when bsf_energy is the dominant band AND > multiple AND kurtosis > 4.5",
+    "detection": {
+      "priority": 5,
+      "signal": "bsf_energy",
+      "kurtosis": {
+        "mode": "above",
+        "threshold_field": "kurtosis_threshold"
+      },
+      "require_dominant": true,
+      "dominant_among": [
+        "bpfo_energy",
+        "bpfi_energy",
+        "bsf_energy",
+        "ftf_energy"
+      ],
+      "require_broadband": false,
+      "require_temp_rise": false
+    }
+  }
+]

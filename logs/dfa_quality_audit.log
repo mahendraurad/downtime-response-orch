@@ -1,0 +1,319 @@
+
+========================================================================
+  DFA QUALITY AUDIT RUN
+  Timestamp : 2026-05-29 12:55:22 UTC
+========================================================================
+
+  27 records across 6 assets
+
+  Data Foundation — Asset Quality Report
+  ────────────────────────────────────────────────────────────────────────
+
+  AST_UNKNOWN_001  UNREGISTERED  ░░░░░░░░░░░░░░ 0%  (1 records)
+  Reason : asset_id 'AST_UNKNOWN_001' is not registered in the asset master
+  Fix    : Register this asset in asset_master.json (Table 3), then add its bearings to bearing_master.json (Table 2)
+
+  AST_CON_001  Conveyor Assembly  ██████████░░░░ 73%  (4 records)
+  Reason : Missing fields: vib_rms_mm_s, kurtosis, temp_c, bpfo_energy, bpfi_energy
+  Fix    : Ensure historian publishes all critical fields: vib_rms_mm_s, kurtosis, temp_c, bpfo_energy, bpfi_energy
+  Reason : signal_quality_score=0.10 below quality floor (0.5) — sensor may be malfunctioning. Fix: inspect sensor cable and connection at junction box (config: validation.min_signal_quality_score)
+  Fix    : Check sensor calibration and scaling factors in the historian configuration
+
+  AST_MTR_002  Conveyor Motor B  █████████████░ 90%  (4 records)
+  Reason : Score is 90% — advisory issue only: Record within freshness window (does not block routing)
+
+  AST_MTR_001  Conveyor Motor A  █████████████░ 90%  (11 records)
+  Reason : Score is 90% — advisory issue only: Record within freshness window (does not block routing)
+
+  AST_PMP_001  Cooling Pump A  █████████████░ 90%  (4 records)
+  Reason : Score is 90% — advisory issue only: Record within freshness window (does not block routing)
+
+  AST_GBX_001  Gearbox Unit  █████████████░ 90%  (3 records)
+  Reason : Score is 90% — advisory issue only: Record within freshness window (does not block routing)
+
+  ────────────────────────────────────────────────────────────────────────
+  6 assets  4 advisory-only  2 with real issues  1 unregistered
+
+
+
+========================================================================
+  DFA QUALITY AUDIT RUN
+  Timestamp : 2026-05-29 12:55:33 UTC
+========================================================================
+
+  27 records across 6 assets
+
+  Data Foundation — Asset Quality Report
+  ────────────────────────────────────────────────────────────────────────
+
+  AST_UNKNOWN_001  UNREGISTERED  ░░░░░░░░░░░░░░ 0%  (1 records)
+  Reason : asset_id 'AST_UNKNOWN_001' is not registered in the asset master
+  Fix    : Register this asset in asset_master.json (Table 3), then add its bearings to bearing_master.json (Table 2)
+
+  AST_CON_001  Conveyor Assembly  ██████████░░░░ 73%  (4 records)
+  Reason : Missing fields: vib_rms_mm_s, kurtosis, temp_c, bpfo_energy, bpfi_energy
+  Fix    : Ensure historian publishes all critical fields: vib_rms_mm_s, kurtosis, temp_c, bpfo_energy, bpfi_energy
+  Reason : signal_quality_score=0.10 below quality floor (0.5) — sensor may be malfunctioning. Fix: inspect sensor cable and connection at junction box (config: validation.min_signal_quality_score)
+  Fix    : Check sensor calibration and scaling factors in the historian configuration
+
+  AST_MTR_002  Conveyor Motor B  █████████████░ 90%  (4 records)
+  Reason : Score is 90% — advisory issue only: Record within freshness window (does not block routing)
+
+  AST_MTR_001  Conveyor Motor A  █████████████░ 90%  (11 records)
+  Reason : Score is 90% — advisory issue only: Record within freshness window (does not block routing)
+
+  AST_PMP_001  Cooling Pump A  █████████████░ 90%  (4 records)
+  Reason : Score is 90% — advisory issue only: Record within freshness window (does not block routing)
+
+  AST_GBX_001  Gearbox Unit  █████████████░ 90%  (3 records)
+  Reason : Score is 90% — advisory issue only: Record within freshness window (does not block routing)
+
+  ────────────────────────────────────────────────────────────────────────
+  6 assets  4 advisory-only  2 with real issues  1 unregistered
+
+
+
+========================================================================
+  DFA QUALITY AUDIT RUN
+  Timestamp : 2026-06-01 10:25:50 UTC
+========================================================================
+
+  27 records across 6 assets
+
+  Data Foundation — Asset Quality Report
+  ────────────────────────────────────────────────────────────────────────
+
+  AST_UNKNOWN_001  UNREGISTERED  ░░░░░░░░░░░░░░ 0%  (1 records)
+  Reason : asset_id 'AST_UNKNOWN_001' is not registered in the asset master
+  Fix    : Register this asset in asset_master.json (Table 3), then add its bearings to bearing_master.json (Table 2)
+
+  AST_CON_001  Conveyor Assembly  ████████████░░ 86%  (4 records)
+  Reason : Missing fields: vib_rms_mm_s, kurtosis, temp_c, bpfo_energy, bpfi_energy
+  Fix    : Ensure historian publishes all critical fields: vib_rms_mm_s, kurtosis, temp_c, bpfo_energy, bpfi_energy
+  Reason : signal_quality_score=0.10 below quality floor (0.5) — sensor may be malfunctioning. Fix: inspect sensor cable and connection at junction box (config: validation.min_signal_quality_score)
+  Fix    : Inspect the sensor cable and junction-box connection; a low signal_quality_score usually means a noisy, loose or failing transducer
+
+  AST_GBX_001  Gearbox Unit  ██████████████ 100%  (3 records)
+  Reason : Score is 100% — all checks passed
+
+  AST_MTR_001  Conveyor Motor A  ██████████████ 100%  (11 records)
+  Reason : Score is 100% — all checks passed
+
+  AST_PMP_001  Cooling Pump A  ██████████████ 100%  (4 records)
+  Reason : Score is 100% — all checks passed
+
+  AST_MTR_002  Conveyor Motor B  ██████████████ 100%  (4 records)
+  Reason : Score is 100% — all checks passed
+
+  ────────────────────────────────────────────────────────────────────────
+  6 assets  4 advisory-only  2 with real issues  1 unregistered
+
+
+
+========================================================================
+  DFA QUALITY AUDIT RUN
+  Timestamp : 2026-06-01 10:25:53 UTC
+========================================================================
+
+  27 records across 6 assets
+
+  Data Foundation — Asset Quality Report
+  ────────────────────────────────────────────────────────────────────────
+
+  AST_UNKNOWN_001  UNREGISTERED  ░░░░░░░░░░░░░░ 0%  (1 records)
+  Reason : asset_id 'AST_UNKNOWN_001' is not registered in the asset master
+  Fix    : Register this asset in asset_master.json (Table 3), then add its bearings to bearing_master.json (Table 2)
+
+  AST_CON_001  Conveyor Assembly  ████████████░░ 86%  (4 records)
+  Reason : Missing fields: vib_rms_mm_s, kurtosis, temp_c, bpfo_energy, bpfi_energy
+  Fix    : Ensure historian publishes all critical fields: vib_rms_mm_s, kurtosis, temp_c, bpfo_energy, bpfi_energy
+  Reason : signal_quality_score=0.10 below quality floor (0.5) — sensor may be malfunctioning. Fix: inspect sensor cable and connection at junction box (config: validation.min_signal_quality_score)
+  Fix    : Inspect the sensor cable and junction-box connection; a low signal_quality_score usually means a noisy, loose or failing transducer
+
+  AST_GBX_001  Gearbox Unit  ██████████████ 100%  (3 records)
+  Reason : Score is 100% — all checks passed
+
+  AST_MTR_001  Conveyor Motor A  ██████████████ 100%  (11 records)
+  Reason : Score is 100% — all checks passed
+
+  AST_PMP_001  Cooling Pump A  ██████████████ 100%  (4 records)
+  Reason : Score is 100% — all checks passed
+
+  AST_MTR_002  Conveyor Motor B  ██████████████ 100%  (4 records)
+  Reason : Score is 100% — all checks passed
+
+  ────────────────────────────────────────────────────────────────────────
+  6 assets  4 advisory-only  2 with real issues  1 unregistered
+
+
+
+========================================================================
+  DFA QUALITY AUDIT RUN
+  Timestamp : 2026-06-01 12:21:06 UTC
+========================================================================
+REMEDIATION SESSION
+  TEL_0015  AST_CON_001/BRG_009  IMPUTED ['vib_rms_mm_s', 'kurtosis', 'temp_c', 'bpfo_energy'] via baseline_mean  72% -> 88%  status FLAGGED
+      └─ then DROPPED (still missing ['bpfi_energy'])
+  TEL_0016  AST_CON_001/BRG_009  IMPUTED ['vib_rms_mm_s', 'kurtosis', 'temp_c', 'bpfo_energy'] via baseline_mean  71% -> 87%  status FLAGGED
+      └─ then KEPT (still missing ['bpfi_energy'])
+
+  Curated table written: 25 routable records (1 imputed, 1 dropped) → C:\Users\anshika.upadhyay\OneDrive - Accenture\Documents\DRO\src\tools\..\..\data\curated_signals.json
+
+========================================================================
+  DFA QUALITY AUDIT RUN
+  Timestamp : 2026-06-02 10:17:19 UTC
+========================================================================
+REMEDIATION SESSION
+  TEL_0015  AST_CON_001/BRG_009  IMPUTED ['vib_rms_mm_s', 'kurtosis', 'temp_c', 'bpfo_energy'] via baseline_mean  72% -> 88%  status FLAGGED
+      └─ then KEPT (still missing ['bpfi_energy'])
+  TEL_0016  AST_CON_001/BRG_009  IMPUTED ['kurtosis', 'temp_c', 'bpfo_energy'] via baseline_mean  75% -> 87%  status FLAGGED
+      └─ then DROPPED (still missing ['bpfi_energy'])
+
+  Curated table written: 25 routable records (1 imputed, 1 dropped) → C:\Users\anshika.upadhyay\OneDrive - Accenture\Documents\DRO\data\curated_signals.json
+
+========================================================================
+  DFA QUALITY AUDIT RUN
+  Timestamp : 2026-06-02 10:22:49 UTC
+========================================================================
+REMEDIATION SESSION
+  TEL_0015  AST_CON_001/BRG_009  IMPUTED ['vib_rms_mm_s', 'kurtosis', 'temp_c', 'bpfo_energy'] via baseline_mean  72% -> 88%  status FLAGGED
+      └─ then DROPPED (still missing ['bpfi_energy'])
+  TEL_0016  AST_CON_001/BRG_009  IMPUTED ['kurtosis', 'temp_c', 'bpfo_energy'] via baseline_mean  76% -> 88%  status FLAGGED
+      └─ then KEPT (still missing ['bpfi_energy'])
+
+  Curated table written: 25 routable records (1 imputed, 1 dropped) → C:\Users\anshika.upadhyay\OneDrive - Accenture\Documents\DRO\data\curated_signals.json
+
+========================================================================
+  DFA QUALITY AUDIT RUN
+  Timestamp : 2026-06-02 10:50:32 UTC
+========================================================================
+REMEDIATION SESSION
+  TEL_0015  AST_CON_001/BRG_009  IMPUTED ['vib_rms_mm_s', 'kurtosis', 'temp_c', 'bpfo_energy'] via baseline_mean  72% -> 88%  status FLAGGED
+      └─ then DROPPED (still missing ['bpfi_energy'])
+  TEL_0016  AST_CON_001/BRG_009  IMPUTED ['kurtosis', 'temp_c', 'bpfo_energy'] via baseline_mean  76% -> 88%  status FLAGGED
+      └─ then KEPT (still missing ['bpfi_energy'])
+
+  Curated table written: 25 routable records (1 imputed, 1 dropped) → C:\Users\anshika.upadhyay\OneDrive - Accenture\Documents\DRO\data\curated_signals.json
+
+========================================================================
+  DFA QUALITY AUDIT RUN
+  Timestamp : 2026-06-02 11:19:51 UTC
+========================================================================
+REMEDIATION SESSION
+  TEL_0015  AST_CON_001/BRG_009  KEPT  (score 72%)
+  TEL_0016  AST_CON_001/BRG_009  KEPT  (score 76%)
+
+  Curated table written: 26 routable records (0 imputed, 0 dropped) → C:\Users\anshika.upadhyay\OneDrive - Accenture\Documents\DRO\data\curated_signals.json
+
+========================================================================
+  DFA QUALITY AUDIT RUN
+  Timestamp : 2026-06-02 11:56:26 UTC
+========================================================================
+REMEDIATION SESSION
+  TEL_0015  AST_CON_001/BRG_009  KEPT  (score 72%)
+  TEL_0016  AST_CON_001/BRG_009  KEPT  (score 76%)
+
+  Curated table written: 26 routable records (0 imputed, 0 dropped) → C:\Users\anshika.upadhyay\OneDrive - Accenture\Documents\DRO\data\curated_signals.json
+
+========================================================================
+  DFA QUALITY AUDIT RUN
+  Timestamp : 2026-06-02 12:01:44 UTC
+========================================================================
+REMEDIATION SESSION
+  TEL_0015  AST_CON_001/BRG_009  KEPT  (score 72%)
+  TEL_0016  AST_CON_001/BRG_009  KEPT  (score 76%)
+
+  Curated table written: 26 routable records (0 imputed, 0 dropped) → C:\Users\anshika.upadhyay\OneDrive - Accenture\Documents\DRO\data\curated_signals.json
+
+========================================================================
+  DFA QUALITY AUDIT RUN
+  Timestamp : 2026-06-03 04:33:35 UTC
+========================================================================
+REMEDIATION SESSION
+  TEL_0015  AST_CON_001/BRG_009  KEPT  (score 72%)
+  TEL_0016  AST_CON_001/BRG_009  KEPT  (score 76%)
+
+  Curated table written: 26 routable records (0 imputed, 0 dropped) → C:\Users\anshika.upadhyay\OneDrive - Accenture\Documents\DRO\data\curated_signals.json
+
+========================================================================
+  DFA QUALITY AUDIT RUN
+  Timestamp : 2026-06-03 14:37:47 UTC
+========================================================================
+REMEDIATION SESSION
+  TEL_0015  AST_CON_001/BRG_009  KEPT  (score 72%)
+  TEL_0016  AST_CON_001/BRG_009  KEPT  (score 76%)
+
+  Curated table written: 26 routable records (0 imputed, 0 dropped) → C:\Users\anshika.upadhyay\OneDrive - Accenture\Documents\DRO\data\curated_signals.json
+
+========================================================================
+  DFA QUALITY AUDIT RUN
+  Timestamp : 2026-06-16 14:15:00 UTC
+========================================================================
+
+  27 records across 6 assets
+
+  Data Foundation — Asset Quality Report
+  ────────────────────────────────────────────────────────────────────────
+
+  AST_UNKNOWN_001  UNREGISTERED  ░░░░░░░░░░░░░░ 0%  (1 records)
+  Reason : asset_id 'AST_UNKNOWN_001' is not registered in the asset master
+  Fix    : Register this asset in asset_master.json (Table 3), then add its bearings to bearing_master.json (Table 2)
+
+  AST_CON_001  Conveyor Assembly  ████████████░░ 87%  (4 records)
+  Reason : Missing fields: kurtosis, temp_c, bpfo_energy, bpfi_energy
+  Fix    : Ensure historian publishes all critical fields: vib_rms_mm_s, kurtosis, temp_c, bpfo_energy, bpfi_energy
+  Reason : signal_quality_score=0.15 below quality floor (0.5) — sensor may be malfunctioning. Fix: inspect sensor cable and connection at junction box (config: validation.min_signal_quality_score)
+  Fix    : Inspect the sensor cable and junction-box connection; a low signal_quality_score usually means a noisy, loose or failing transducer
+
+  AST_GBX_001  Gearbox Unit  ██████████████ 100%  (3 records)
+  Reason : Score is 100% — all checks passed
+
+  AST_MTR_001  Conveyor Motor A  ██████████████ 100%  (11 records)
+  Reason : Score is 100% — all checks passed
+
+  AST_PMP_001  Cooling Pump A  ██████████████ 100%  (4 records)
+  Reason : Score is 100% — all checks passed
+
+  AST_MTR_002  Conveyor Motor B  ██████████████ 100%  (4 records)
+  Reason : Score is 100% — all checks passed
+
+  ────────────────────────────────────────────────────────────────────────
+  6 assets  4 advisory-only  2 with real issues  1 unregistered
+
+
+
+========================================================================
+  DFA QUALITY AUDIT RUN
+  Timestamp : 2026-06-16 14:18:06 UTC
+========================================================================
+REMEDIATION SESSION
+  TEL_0015  AST_CON_001/BRG_009  IMPUTED ['vib_rms_mm_s', 'kurtosis', 'temp_c', 'bpfo_energy'] via baseline_mean  72% -> 88%  status FLAGGED
+      └─ then KEPT (still missing ['bpfi_energy'])
+  TEL_0016  AST_CON_001/BRG_009  IMPUTED ['kurtosis', 'temp_c', 'bpfo_energy'] via baseline_mean  76% -> 88%  status FLAGGED
+      └─ then KEPT (still missing ['bpfi_energy'])
+
+  Curated table written: 26 routable records (2 imputed, 0 dropped) → C:\Users\anshika.upadhyay\OneDrive - Accenture\Documents\DRO\data\curated_signals.json
+
+========================================================================
+  DFA QUALITY AUDIT RUN
+  Timestamp : 2026-06-16 14:25:00 UTC
+========================================================================
+REMEDIATION SESSION
+  TEL_0015  AST_CON_001/BRG_009  IMPUTED ['vib_rms_mm_s', 'kurtosis', 'temp_c', 'bpfo_energy'] via baseline_mean  72% -> 88%  status FLAGGED
+      └─ then DROPPED (still missing ['bpfi_energy'])
+  TEL_0016  AST_CON_001/BRG_009  IMPUTED ['kurtosis', 'temp_c', 'bpfo_energy'] via baseline_mean  76% -> 88%  status FLAGGED
+      └─ then DROPPED (still missing ['bpfi_energy'])
+
+  Curated table written: 24 routable records (0 imputed, 2 dropped) → C:\Users\anshika.upadhyay\OneDrive - Accenture\Documents\DRO\data\curated_signals.json
+
+========================================================================
+  DFA QUALITY AUDIT RUN
+  Timestamp : 2026-06-24 08:48:59 UTC
+========================================================================
+REMEDIATION SESSION
+  TEL_0015  AST_CON_001/BRG_009  IMPUTED ['vib_rms_mm_s', 'kurtosis', 'temp_c', 'bpfo_energy'] via baseline_mean  72% -> 88%  status FLAGGED
+      └─ then DROPPED (still missing ['bpfi_energy'])
+  TEL_0016  AST_CON_001/BRG_009  IMPUTED ['kurtosis', 'temp_c', 'bpfo_energy'] via baseline_mean  76% -> 88%  status FLAGGED
+      └─ then KEPT (still missing ['bpfi_energy'])
+
+  Curated table written: 25 routable records (1 imputed, 1 dropped) → C:\Users\anshika.upadhyay\OneDrive - Accenture\Documents\DRO\data\curated_signals.json

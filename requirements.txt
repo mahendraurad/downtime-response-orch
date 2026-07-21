@@ -1,0 +1,32 @@
+# ── Phase 2–5 (Data Foundation → Risk Agents) ────────────────────────────────
+numpy>=1.24.0
+
+# ── Phase 5 LLM fallback ─────────────────────────────────────────────────────
+# Azure AI Foundry endpoint (*.services.ai.azure.com) — recommended:
+openai>=1.0.0
+
+# ── Phase 6 (Knowledge Agent / RAG) ─────────────────────────────────────────
+# Dev mode uses numpy cosine similarity — no extra installs needed.
+pdfplumber>=0.10.0         # PDF loading for data/sops/*.pdf
+# Uncomment for production Azure AI Search:
+# azure-search-documents>=11.4.0
+
+# ── Phase 7 (Prescriptive Optimisation Agent — LLM rationale writer) ─────────
+langchain-openai>=0.1.0        # AzureChatOpenAI for novel-fault proposals
+python-dotenv>=1.0.0           # loads AZURE_OPENAI_* from .env
+
+# ── Phase 8 (LangGraph Orchestrator + FastAPI server) ────────────────────────
+langgraph>=1.0.0
+langchain-core>=0.1.0
+fastapi>=0.100.0
+uvicorn>=0.20.0
+
+# ── Testing ──────────────────────────────────────────────────────────────────
+# pytest>=7.0.0
+# pytest-cov
+
+# ── Production / Azure ───────────────────────────────────────────────────────
+# azure-storage-blob>=12.19.0
+# azure-identity>=1.15.0
+# azure-keyvault-secrets>=4.7.0
+# psycopg2-binary>=2.9.9    # PostgreSQL checkpointing for LangGraph

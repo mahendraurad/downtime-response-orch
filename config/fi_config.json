@@ -1,0 +1,62 @@
+{
+  "_comment": "Failure Intelligence Agent (Phase 4) config. Tunable without code changes — edit and restart. Fault thresholds themselves live in data/fault_taxonomy.json; this file holds agent-level policy: severity, broadband detection, recommended checks, confidence blend, logging.",
+
+  "severity": {
+    "_comment": "Base severity from ISO stage, then escalate one level if the asset is high-criticality and/or a production bottleneck.",
+    "stage_base": {
+      "1": "low",
+      "2": "medium",
+      "3": "high"
+    },
+    "escalation_order": ["low", "medium", "high", "critical"],
+    "escalate_if_high_criticality": true,
+    "escalate_if_bottleneck": true,
+    "high_criticality_label": "high",
+    "undetermined_severity": "medium"
+  },
+
+  "broadband": {
+    "_comment": "Broadband pattern = vib_rms elevated vs baseline AND no single defect band dominates (neither BPFO nor BPFI crosses its own stage-1 multiple). Used to route to FT_003 lubrication_issue.",
+    "vib_elevation_ratio": 1.3
+  },
+
+  "fault_checks": {
+    "FT_001": [
+      "Inspect bearing outer race for spalling/brinelling via envelope analysis",
+      "Confirm BPFO frequency tracks shaft speed (rule out electrical/structural source)",
+      "Re-measure vibration within the stage RUL window and trend BPFO energy"
+    ],
+    "FT_002": [
+      "Inspect bearing inner race and rolling elements",
+      "Check for overload or coupling misalignment driving inner-race loading",
+      "Verify BPFI sidebands at 1X shaft-speed spacing in the spectrum"
+    ],
+    "FT_003": [
+      "Verify lubricant level, grade, and condition",
+      "Check last lubrication date against the maintenance schedule",
+      "Sample oil/grease for contamination, water ingress, and viscosity"
+    ],
+    "FT_006": [
+      "Inspect cage integrity and rolling-element spacing",
+      "Check FTF frequency and look for irregular BSF modulation",
+      "Review lubrication history — cage faults are frequently lubrication-driven"
+    ],
+    "undetermined": [
+      "Schedule manual vibration spectrum review by a reliability engineer",
+      "Capture a high-resolution envelope spectrum for offline analysis",
+      "Compare against historical baselines for this bearing"
+    ]
+  },
+
+  "confidence": {
+    "_comment": "Final confidence = anomaly_confidence-weighted blend with match_strength (how decisively the fault signature was crossed). Weights must sum to 1.0.",
+    "weights": {
+      "anomaly_confidence": 0.5,
+      "match_strength": 0.5
+    }
+  },
+
+  "logging": {
+    "log_diagnoses": true
+  }
+}

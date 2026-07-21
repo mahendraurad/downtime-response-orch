@@ -1,0 +1,11 @@
+{
+  "case_id": "CASE_003",
+  "fault_mode": "lubrication_issue",
+  "asset_type": "pump",
+  "bearing_type": "SKF6308",
+  "iso_stage": 2,
+  "outcome": "success",
+  "content": "Lubrication degradation fault on pump P-302 SKF6308 bearing at ISO Stage 2. Elevated temperature reading 68 deg C, vibration 3.4 mm/s RMS. Kurtosis 3.2 with broadband noise floor increase consistent with dry-running friction. No discrete fault frequencies observed. Root cause: lubricant starvation due to blocked grease relief port and extended interval since last lubrication service. Bearing operating in corrosive environment with high ambient humidity causing grease oxidation. Action taken: immediate lubrication with Mobilux EP2, cleared relief port blockage, flushed contaminated grease. Asset monitored for 4 hours post-lubrication. Temperature reduced to 42 deg C, vibration settled to 1.6 mm/s RMS within 3 hours confirming Stage 2 recovery. No bearing replacement required at this stage. Lesson: pump bearings in humid or corrosive environments require 4-week lubrication intervals rather than standard 6-week cycle. Grease relief port inspection must be included in every PM visit. Delayed action at Stage 2 lubrication faults often progresses to Stage 3 inner race spalling within 30 days.",
+  "tags": ["lubrication_issue", "pump", "SKF6308", "stage2", "re_lubrication", "temperature_elevated", "recovery"],
+  "created_at": "2025-09-18T14:15:00Z"
+}

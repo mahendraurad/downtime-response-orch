@@ -1,0 +1,9 @@
+{
+  "_comment": "Phase 7 (Prescriptive Optimization Agent) tunable parameters. Secrets (Azure OpenAI) stay in .env. Values here are read at startup by src/agents/prescriptive_optimization_agent.py; if this file is missing or a key is absent, the code falls back to its built-in defaults.",
+  "thresholds": {
+    "min_reliable_confidence": 0.5,
+    "contributor_review_confidence": 0.6,
+    "monitor_appropriateness": 0.3,
+    "default_duration_hours": 2.0
+  }
+}

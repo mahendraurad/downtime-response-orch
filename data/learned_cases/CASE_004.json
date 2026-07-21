@@ -1,0 +1,11 @@
+{
+  "case_id": "CASE_004",
+  "fault_mode": "sensor_fault",
+  "asset_type": "conveyor",
+  "bearing_type": "SKF6312",
+  "iso_stage": 0,
+  "outcome": "success",
+  "content": "Sensor fault detected on conveyor C-501 vibration monitoring node. Accelerometer reporting erratic readings: vibration oscillating between 0.2 and 12.1 mm/s with no physical correlation. Temperature sensor stable at 39 deg C. No actual bearing fault confirmed. Root cause: cable connector corrosion on the accelerometer mounting stud causing intermittent signal dropout and noise injection. Adjacent bearing physically inspected and confirmed healthy. Action taken: replaced damaged Kistler 8702B accelerometer and re-routed cable away from moisture ingress point. Applied dielectric grease to connector. Post-replacement readings stabilised at 1.1 mm/s RMS. Calibration verification run against reference sensor confirmed accurate baseline. Lessons learned: erratic high-frequency noise with no temperature correlation and no identifiable fault families should be classified as sensor fault before escalating to bearing replacement. Connector inspection and cable routing must be included in annual maintenance scope. Maintain spare accelerometer inventory for conveyor assets.",
+  "tags": ["sensor_fault", "conveyor", "SKF6312", "accelerometer", "cable_corrosion", "sensor_replacement", "no_bearing_fault"],
+  "created_at": "2025-08-05T09:00:00Z"
+}

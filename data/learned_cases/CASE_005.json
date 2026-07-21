@@ -1,0 +1,11 @@
+{
+  "case_id": "CASE_005",
+  "fault_mode": "outer_race_fault",
+  "asset_type": "gearbox",
+  "bearing_type": "SKF6316",
+  "iso_stage": 3,
+  "outcome": "success",
+  "content": "Outer race spall fault on gearbox GB-107 SKF6316 bearing at ISO Stage 3. BPFO amplitude 11.4 mm/s RMS, kurtosis 8.1. Temperature 81 deg C. High-load application with repeated shock loading contributing to accelerated fatigue. Root cause: bearing operating under cyclic overload from gearbox torque peaks, combined with misalignment of 0.08 mm measured at last PM. Spall initiated at 6 o-clock load zone consistent with static overload signature. Action taken: gearbox isolated under LOTO, bearing pressed out, shaft inspected for out-of-round — within tolerance. New SKF6316 installed. Shaft alignment corrected to 0.02 mm using laser alignment tool. Torque load profile reviewed — operating within nameplate rating. Post-repair vibration 1.4 mm/s RMS, temperature 41 deg C. Lessons learned: gearbox bearings under cyclic shock loading should have a 12-month or 5000-hour replacement cycle. Laser alignment must be verified after any gearbox bearing replacement. BPFO pattern in gearbox assets with high kurtosis (>7) indicates imminent catastrophic failure within 7 days.",
+  "tags": ["outer_race_fault", "gearbox", "SKF6316", "stage3", "bearing_replacement", "laser_alignment", "overload"],
+  "created_at": "2025-07-22T07:45:00Z"
+}
