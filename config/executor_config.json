@@ -1,0 +1,7 @@
+{
+  "allowed_actions": ["continue_monitoring", "inspect_next_shift", "repair_next_planned_stop", "derate_and_monitor", "stop_and_replace", "lubrication_service", "inspection", "bearing_replacement"],
+  "priority_by_urgency": {"immediate": "P1-Critical", "urgent": "P2-High", "planned": "P3-Medium", "monitor": "P4-Low"},
+  "escalate_urgencies": ["immediate", "urgent"],
+  "repository": {"sqlite_path": "data/execution_results.db", "reject_duplicate_cases": true},
+  "logging": {"log_execution": true}
+}

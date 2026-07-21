@@ -1,0 +1,2079 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Downtime Response Orchestrator — DRO</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#080d1a;--bg2:#0d1628;--sf:#172038;--sf2:#1c2845;
+  --b:rgba(80,120,255,.1);--b2:rgba(80,120,255,.22);
+  --ac:#4f8eff;--ac2:#7ab0ff;--ag:rgba(79,142,255,.13);
+  --gn:#2ecc8a;--gd:rgba(46,204,138,.1);
+  --rd:#ff4d6a;--rdm:rgba(255,77,106,.1);
+  --am:#ffb740;--adm:rgba(255,183,64,.1);
+  --pu:#a78bfa;--pdm:rgba(167,139,250,.1);
+  --or:#ff7a35;--odm:rgba(255,122,53,.1);
+  --tl:#2dd4bf;--tdm:rgba(45,212,191,.1);
+  --t:#e4ecff;--t2:#6d85b8;--t3:#374d74;
+  --f:'Space Grotesk',sans-serif;--m:'JetBrains Mono',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg);color:var(--t);font-family:var(--f);font-size:14px;height:100vh;overflow:hidden;display:flex;flex-direction:column;}
+.tb{display:flex;align-items:center;justify-content:space-between;padding:0 20px;height:48px;background:var(--bg2);border-bottom:1px solid var(--b);flex-shrink:0;position:relative;z-index:10;}
+.tb-l{display:flex;align-items:center;gap:11px;}
+.logo{width:27px;height:27px;background:linear-gradient(135deg,var(--ac),#8b5cf6);border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:10.5px;font-weight:700;color:#fff;}
+.pn{font-size:13px;font-weight:600;}.ps{font-size:10px;color:var(--t3);font-family:var(--m);margin-top:1px;}
+.tb-c{position:absolute;left:50%;transform:translateX(-50%);display:flex;gap:1px;}
+.nt{padding:5px 12px;border-radius:5px;font-size:11.5px;font-weight:500;color:var(--t3);cursor:pointer;border:none;background:none;font-family:var(--f);transition:all .15s;}
+.nt:hover{color:var(--t2);background:rgba(255,255,255,.04);}.nt.on{color:var(--t);background:var(--ag);}
+.tb-r{display:flex;align-items:center;gap:8px;}
+.ldot{width:6px;height:6px;border-radius:50%;background:var(--gn);box-shadow:0 0 5px var(--gn);animation:pulse 2s infinite;}
+@keyframes pulse{0%,100%{opacity:1;}50%{opacity:.4;}}
+.ltx{font-size:10.5px;color:var(--gn);font-family:var(--m);}
+.abdg{padding:3px 8px;background:var(--rdm);border:1px solid rgba(255,77,106,.26);border-radius:20px;font-size:10.5px;color:var(--rd);font-weight:600;cursor:pointer;animation:pulse 3s infinite;}
+.main{display:flex;flex:1;overflow:hidden;}
+/* PERSONA PANEL */
+.lp{width:204px;background:var(--bg2);border-right:1px solid var(--b);display:flex;flex-direction:column;flex-shrink:0;}
+.lphdr{padding:11px 13px 6px;font-size:9px;font-weight:600;color:var(--t3);letter-spacing:1.2px;text-transform:uppercase;font-family:var(--m);}
+.plist{flex:1;overflow-y:auto;padding:2px 7px 5px;}
+.pi{display:flex;align-items:center;gap:7px;padding:7px 8px;border-radius:8px;cursor:pointer;transition:all .15s;margin-bottom:1px;border:1px solid transparent;position:relative;}
+.pi:hover{background:rgba(255,255,255,.03);}.pi.on{background:var(--ag);border-color:var(--b2);}
+.pav{width:30px;height:30px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;}
+.pin{flex:1;min-width:0;}.pnm{font-size:11.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.prl{font-size:9.5px;color:var(--t3);margin-top:1px;}.pdot{width:5px;height:5px;border-radius:50%;flex-shrink:0;}
+.pnotif{position:absolute;top:4px;right:5px;width:14px;height:14px;border-radius:50%;background:var(--rd);font-size:8px;font-weight:700;color:#fff;display:flex;align-items:center;justify-content:center;}
+.slbl{padding:8px 13px 2px;font-size:8.5px;font-weight:600;color:var(--t3);letter-spacing:1px;text-transform:uppercase;font-family:var(--m);opacity:.5;}
+.fbox{padding:9px 10px;border-top:1px solid var(--b);}
+.fttl{font-size:9px;color:var(--t3);letter-spacing:.7px;text-transform:uppercase;font-family:var(--m);margin-bottom:5px;}
+.fs{display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;}
+.fsl{font-size:10.5px;color:var(--t3);}.fsv{font-size:10.5px;font-family:var(--m);}
+.cnt{flex:1;display:flex;flex-direction:column;overflow:hidden;}
+.view{display:none;flex:1;overflow:hidden;}.view.on{display:flex;}
+/* SHARED */
+.chip{padding:4px 10px;border-radius:20px;font-size:10.5px;font-weight:500;cursor:pointer;border:1px solid var(--b2);color:var(--t2);background:none;font-family:var(--f);transition:all .15s;}
+.chip:hover{background:rgba(255,255,255,.04);}.chip.blu{background:var(--ac);border-color:var(--ac);color:#fff;}
+.chip.grn{background:var(--gd);border-color:rgba(46,204,138,.28);color:var(--gn);}
+.chip.red{background:var(--rdm);border-color:rgba(255,77,106,.28);color:var(--rd);}
+.pill{padding:2px 7px;border-radius:20px;font-size:9px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;}
+.sttl{font-size:9px;font-weight:600;color:var(--t3);text-transform:uppercase;letter-spacing:.9px;font-family:var(--m);margin-bottom:7px;}
+.sbtn{width:34px;height:34px;border-radius:7px;background:var(--ac);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .15s;}
+.sbtn:hover{background:var(--ac2);}.sbtn svg{width:13px;height:13px;fill:#fff;}
+.dc{background:rgba(255,255,255,.03);border-radius:6px;padding:6px 8px;}
+.dcl{font-size:9px;color:var(--t3);margin-bottom:2px;}.dcv{font-size:13.5px;font-weight:600;font-family:var(--m);}
+.dcs{font-size:9px;color:var(--t3);margin-top:1px;}.dg3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;}
+.dg2{display:grid;grid-template-columns:1fr 1fr;gap:6px;}.dsec{background:var(--sf);border:1px solid var(--b);border-radius:8px;padding:12px 14px;}
+@keyframes fadu{from{opacity:0;transform:translateY(5px);}to{opacity:1;transform:translateY(0);}}.fi{animation:fadu .2s ease forwards;}
+::-webkit-scrollbar{width:3px;}::-webkit-scrollbar-track{background:transparent;}::-webkit-scrollbar-thumb{background:var(--sf2);border-radius:3px;}
+
+/* ═══ CHAT VIEW ═══ */
+#view-chat{flex-direction:row;}
+.chat-main{flex:1;display:flex;flex-direction:column;overflow:hidden;}
+.chdr{display:flex;align-items:center;gap:9px;padding:10px 16px;background:var(--bg2);border-bottom:1px solid var(--b);flex-shrink:0;}
+.chav{width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0;}
+.chnm{font-size:12.5px;font-weight:600;}.chds{font-size:10px;color:var(--t3);margin-top:1px;}
+.msgs{flex:1;overflow-y:auto;padding:14px 16px;display:flex;flex-direction:column;gap:11px;}
+.mg{display:flex;gap:8px;}.mg.u{flex-direction:row-reverse;}
+.mav{width:26px;height:26px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0;margin-top:2px;}
+.mb{max-width:78%;display:flex;flex-direction:column;gap:2px;}.mg.u .mb{align-items:flex-end;}
+.mmeta{display:flex;align-items:center;gap:4px;padding:0 1px;}
+.msndr{font-size:10px;font-weight:600;color:var(--t2);}.mtm{font-size:9px;color:var(--t3);font-family:var(--m);}
+.bbl{padding:8px 12px;border-radius:9px;font-size:12.5px;line-height:1.65;color:var(--t);}
+.bbl.a{background:var(--sf);border:1px solid var(--b);border-top-left-radius:3px;}
+.bbl.u{background:rgba(79,142,255,.16);border:1px solid rgba(79,142,255,.22);border-top-right-radius:3px;}
+.rrow{display:flex;gap:3px;align-items:center;flex-wrap:wrap;padding:4px 8px;background:rgba(167,139,250,.05);border:1px solid rgba(167,139,250,.13);border-radius:5px;margin-bottom:2px;}
+.rtx{font-size:9px;color:var(--pu);font-family:var(--m);}
+.rs{padding:1px 5px;background:rgba(167,139,250,.1);border-radius:3px;font-size:9px;color:var(--pu);font-family:var(--m);}
+.rra{color:var(--t3);font-size:8px;}
+/* ACTION CARDS in chat — shown as "home screen" tiles */
+.act-cards{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:8px;}
+.act-card{padding:10px 12px;border-radius:8px;border:1px solid;cursor:pointer;transition:all .15s;text-align:left;font-family:var(--f);}
+.act-card:hover{transform:translateY(-1px);filter:brightness(1.15);}
+.ac-icon{font-size:16px;margin-bottom:5px;}
+.ac-lbl{font-size:9.5px;opacity:.65;margin-bottom:2px;}
+.ac-nm{font-size:12px;font-weight:600;line-height:1.3;}
+.qbrow{display:flex;flex-wrap:wrap;gap:4px;margin-top:7px;}
+.qb{padding:4px 9px;border-radius:5px;font-size:10.5px;font-weight:500;cursor:pointer;border:1px solid var(--b2);color:var(--t2);background:rgba(255,255,255,.02);font-family:var(--f);transition:all .15s;}
+.qb:hover{background:rgba(255,255,255,.06);}.qb.b{border-color:rgba(79,142,255,.35);color:var(--ac2);background:rgba(79,142,255,.04);}
+.tdg{display:flex;gap:8px;}
+.tdts{display:flex;gap:3px;padding:7px 11px;background:var(--sf);border:1px solid var(--b);border-radius:9px;border-top-left-radius:3px;}
+.tdts span{width:4px;height:4px;border-radius:50%;background:var(--t3);animation:tk 1.2s infinite;}
+.tdts span:nth-child(2){animation-delay:.2s;}.tdts span:nth-child(3){animation-delay:.4s;}
+@keyframes tk{0%,60%,100%{opacity:.2;transform:scale(1);}30%{opacity:1;transform:scale(1.15);}}
+.cinp{padding:9px 16px;background:var(--bg2);border-top:1px solid var(--b);flex-shrink:0;}
+.ctags{display:flex;gap:3px;margin-bottom:5px;flex-wrap:wrap;}
+.ctag{padding:2px 6px;border-radius:4px;font-size:9.5px;font-family:var(--m);border:1px solid;}
+.ctb{background:rgba(79,142,255,.06);border-color:rgba(79,142,255,.18);color:var(--ac2);}
+.ctr{background:var(--rdm);border-color:rgba(255,77,106,.18);color:var(--rd);}
+.cta{background:var(--adm);border-color:rgba(255,183,64,.18);color:var(--am);}
+.cirow{display:flex;gap:7px;align-items:flex-end;}
+.cinptx{flex:1;min-height:35px;max-height:90px;padding:7px 11px;background:var(--sf);border:1px solid var(--b2);border-radius:7px;color:var(--t);font-family:var(--f);font-size:12px;resize:none;outline:none;line-height:1.5;}
+.cinptx:focus{border-color:rgba(79,142,255,.4);}.cinptx::placeholder{color:var(--t3);}
+.qps{display:flex;gap:4px;margin-top:5px;flex-wrap:wrap;}
+.qpb{padding:2px 7px;border-radius:4px;font-size:10px;color:var(--t3);border:1px solid var(--b);background:none;cursor:pointer;font-family:var(--f);transition:all .15s;}
+.qpb:hover{color:var(--t2);border-color:var(--b2);}
+/* Chat sidebar */
+.cctx{width:252px;background:var(--bg2);border-left:1px solid var(--b);display:flex;flex-direction:column;overflow-y:auto;flex-shrink:0;}
+.cxs{padding:11px 11px 9px;border-bottom:1px solid var(--b);}
+.sgrd{display:grid;grid-template-columns:1fr 1fr;gap:3px;}
+.sc{background:var(--sf);border:1px solid var(--b);border-radius:6px;padding:6px 8px;}
+.sl{font-size:9px;color:var(--t3);margin-bottom:1px;}.sv{font-size:15px;font-weight:600;font-family:var(--m);line-height:1;}
+.su{font-size:9px;color:var(--t3);margin-top:1px;}.str{font-size:9px;font-family:var(--m);margin-top:2px;}
+.stup{color:var(--rd);}.stdn{color:var(--gn);}.stst{color:var(--t3);}
+.aglst{display:flex;flex-direction:column;gap:3px;}
+.agrow{display:flex;align-items:center;gap:5px;padding:5px 6px;border-radius:5px;background:var(--sf);border:1px solid var(--b);}
+.adc{width:5px;height:5px;border-radius:50%;flex-shrink:0;}
+.don{background:var(--gn);box-shadow:0 0 4px var(--gn);}.drn{background:var(--am);animation:pulse 1s infinite;}.dof{background:var(--t3);}
+.anm{font-size:10px;font-weight:500;flex:1;}.atg{font-size:8.5px;font-family:var(--m);color:var(--t3);}
+.rlfl{display:flex;flex-direction:column;}
+.rlr{display:flex;align-items:center;gap:6px;padding:4px 2px;border-bottom:1px solid rgba(255,255,255,.04);cursor:pointer;border-radius:3px;transition:background .1s;}
+.rlr:hover{background:rgba(255,255,255,.03);}
+.rlnm{font-size:10px;width:50px;color:var(--t2);flex-shrink:0;}.rltp{font-size:9px;color:var(--t3);flex:1;font-family:var(--m);}
+.rlmb{width:44px;height:3px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden;flex-shrink:0;}
+.rlmf{height:100%;border-radius:2px;}.rld{font-size:9px;font-family:var(--m);width:30px;text-align:right;flex-shrink:0;}
+
+/* ═══ AGENT GRAPH VIEW ═══
+   Layout: header with asset+persona selectors | body: left pipeline | right detail tabs
+*/
+#view-agents{flex-direction:column;}
+.aghdr{padding:10px 18px;background:var(--bg2);border-bottom:1px solid var(--b);display:flex;align-items:center;gap:14px;flex-shrink:0;flex-wrap:wrap;}
+.agttl{font-size:13.5px;font-weight:600;margin-right:4px;}
+.ag-sel-grp{display:flex;align-items:center;gap:6px;margin-left:auto;}
+.ag-sel-lbl{font-size:9.5px;color:var(--t3);font-family:var(--m);}
+.agsel{padding:5px 10px;background:var(--sf);border:1px solid var(--b2);border-radius:6px;color:var(--t);font-family:var(--m);font-size:10.5px;outline:none;cursor:pointer;}
+.agsel:focus{border-color:var(--ac);}
+.agbody{flex:1;display:flex;overflow:hidden;}
+/* Left: pipeline */
+.ag-pipe{width:256px;flex-shrink:0;overflow-y:auto;padding:12px 11px;border-right:1px solid var(--b);background:var(--bg2);display:flex;flex-direction:column;}
+.ag-pipe::-webkit-scrollbar{width:2px;}
+.pnode{background:var(--sf);border:1px solid var(--b);border-radius:8px;padding:9px 11px;cursor:pointer;transition:all .15s;position:relative;margin-bottom:0;}
+.pnode:hover{border-color:var(--b2);}
+.pnode.nd{border-left:3px solid var(--gn);background:rgba(46,204,138,.04);}
+.pnode.nr{border-left:3px solid var(--am);background:rgba(255,183,64,.04);}
+.pnode.ni{opacity:.48;}
+.pnode.sel{border-color:var(--ac)!important;background:rgba(79,142,255,.08);box-shadow:0 0 0 2px rgba(79,142,255,.12);}
+.pntop{display:flex;align-items:center;gap:6px;margin-bottom:4px;}
+.pnico{width:22px;height:22px;border-radius:5px;background:rgba(255,255,255,.05);display:flex;align-items:center;justify-content:center;font-size:11px;}
+.pnnm{font-size:11px;font-weight:600;flex:1;}
+.pnst{font-size:8px;font-family:var(--m);padding:2px 5px;border-radius:3px;font-weight:600;}
+.std{background:rgba(46,204,138,.12);color:var(--gn);}.str2{background:var(--adm);color:var(--am);}.sti{background:rgba(255,255,255,.05);color:var(--t3);}
+.pnout{font-size:9.5px;font-family:var(--m);color:var(--t2);background:rgba(255,255,255,.03);border-radius:3px;padding:3px 6px;line-height:1.4;}
+.pconn{height:18px;margin-left:11px;display:flex;align-items:stretch;}
+.pcline{width:1px;}
+.pcl-d{background:linear-gradient(to bottom,rgba(46,204,138,.35),rgba(46,204,138,.08));}
+.pcl-r{background:linear-gradient(to bottom,rgba(255,183,64,.3),rgba(255,183,64,.05));}
+.pcl-i{background:linear-gradient(to bottom,rgba(255,255,255,.1),rgba(255,255,255,.02));}
+/* Right: detail area with tabs */
+.ag-right{flex:1;display:flex;flex-direction:column;overflow:hidden;}
+.ag-tabs{display:flex;gap:1px;padding:0 16px;background:var(--bg2);border-bottom:1px solid var(--b);flex-shrink:0;}
+.agtab{padding:9px 14px;font-size:11px;font-weight:500;color:var(--t3);cursor:pointer;border-bottom:2px solid transparent;transition:all .15s;font-family:var(--f);}
+.agtab:hover{color:var(--t2);}.agtab.on{color:var(--t);border-bottom-color:var(--ac);}
+.ag-tab-body{flex:1;overflow-y:auto;padding:16px 18px;display:flex;flex-direction:column;gap:12px;}
+.ag-tab-body::-webkit-scrollbar{width:2px;}
+.ag-tab-panel{display:none;}.ag-tab-panel.on{display:flex;flex-direction:column;gap:12px;}
+/* Node detail card */
+.agdcard{background:var(--sf);border:1px solid var(--b);border-radius:8px;padding:13px 15px;}
+.agdttl{font-size:12.5px;font-weight:600;margin-bottom:9px;display:flex;align-items:center;gap:8px;}
+.agdrow{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid rgba(255,255,255,.04);font-size:11px;}
+.agdrow:last-child{border-bottom:none;}.agdlbl{color:var(--t3);}
+.agdval{font-family:var(--m);font-size:10.5px;color:var(--t2);text-align:right;max-width:60%;}
+/* Persona task section */
+.ptask-card{background:var(--sf);border:1px solid var(--b);border-radius:8px;padding:12px 14px;}
+.ptask-ttl{font-size:11.5px;font-weight:600;margin-bottom:8px;}
+.ptask-step{display:flex;gap:8px;align-items:flex-start;padding:6px 8px;border-radius:6px;background:rgba(255,255,255,.02);margin-bottom:4px;font-size:11.5px;line-height:1.5;}
+.ptask-num{width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:8.5px;font-weight:700;flex-shrink:0;margin-top:1px;}
+.ptask-content{flex:1;}
+.ptask-label{font-size:9px;font-family:var(--m);margin-bottom:2px;opacity:.7;}
+/* Action buttons panel */
+.ag-act-btn{padding:10px 13px;border-radius:7px;border:1px solid;cursor:pointer;text-align:left;font-family:var(--f);transition:all .15s;margin-bottom:6px;display:block;width:100%;}
+.ag-act-btn:hover{transform:translateY(-1px);filter:brightness(1.12);}
+.ag-act-nm{font-size:12px;font-weight:600;}
+.ag-act-sub{font-size:10px;opacity:.65;margin-top:2px;}
+/* Agent response inline */
+.ag-resp{background:rgba(79,142,255,.06);border:1px solid rgba(79,142,255,.18);border-radius:8px;padding:11px 13px;display:none;margin-top:4px;}
+.ag-resp-ttl{font-size:9px;font-weight:600;color:var(--ac2);font-family:var(--m);margin-bottom:5px;}
+.ag-resp-body{font-size:12px;line-height:1.7;color:var(--t2);}
+/* Confidence panel */
+.conf-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;}
+.ccard{background:rgba(255,255,255,.03);border-radius:6px;padding:8px 10px;}
+.cclbl{font-size:9px;color:var(--t3);margin-bottom:3px;}.ccval{font-size:16px;font-weight:600;font-family:var(--m);}
+.ccsub{font-size:9px;color:var(--t3);margin-top:1px;}
+/* Asset flow strip */
+.fstrip{display:flex;align-items:center;overflow-x:auto;padding-bottom:3px;gap:0;}
+.fstrip::-webkit-scrollbar{height:2px;}.fstep{flex-shrink:0;text-align:center;}
+.fsbx{padding:5px 8px;border-radius:5px;font-size:10px;font-weight:500;border:1px solid;white-space:nowrap;}
+.fsarr{color:var(--t3);font-size:12px;flex-shrink:0;padding:0 3px;line-height:2.2;}
+
+/* ═══ ASSET REGISTRY VIEW ═══ */
+#view-assets{flex-direction:row;}
+.asl{width:230px;border-right:1px solid var(--b);display:flex;flex-direction:column;background:var(--bg2);flex-shrink:0;}
+.aslhdr{padding:10px 12px;border-bottom:1px solid var(--b);display:flex;align-items:center;justify-content:space-between;}
+.asrch{padding:7px 9px;border-bottom:1px solid var(--b);}
+.asrch input{width:100%;padding:5px 9px;background:var(--sf);border:1px solid var(--b2);border-radius:5px;color:var(--t);font-family:var(--f);font-size:11.5px;outline:none;}
+.asrch input::placeholder{color:var(--t3);}.asrch input:focus{border-color:rgba(79,142,255,.35);}
+.asf{display:flex;gap:3px;padding:5px 8px;border-bottom:1px solid var(--b);flex-wrap:wrap;}
+.asfb{padding:2px 7px;border-radius:4px;font-size:10px;border:1px solid var(--b);background:none;color:var(--t3);cursor:pointer;font-family:var(--f);transition:all .15s;}
+.asfb:hover{color:var(--t2);}.asfb.on{background:var(--ag);color:var(--ac2);border-color:rgba(79,142,255,.25);}
+.alist{flex:1;overflow-y:auto;padding:4px 6px;}
+.ait{display:flex;align-items:center;gap:7px;padding:7px 8px;border-radius:6px;cursor:pointer;transition:all .15s;margin-bottom:1px;border:1px solid transparent;}
+.ait:hover{background:rgba(255,255,255,.04);}.ait.on{background:var(--ag);border-color:rgba(79,142,255,.2);}
+.aih{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
+.aii{flex:1;min-width:0;}.aiid{font-size:11.5px;font-weight:600;}
+.ainm{font-size:10px;color:var(--t3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.airl{font-size:9.5px;font-family:var(--m);flex-shrink:0;}
+.adet{flex:1;display:flex;flex-direction:column;overflow:hidden;border-right:1px solid var(--b);}
+.adethdr{padding:12px 16px;background:var(--bg2);border-bottom:1px solid var(--b);flex-shrink:0;}
+.adetid{font-size:10px;font-family:var(--m);color:var(--t3);margin-bottom:1px;}
+.adetnm{font-size:14px;font-weight:600;margin-bottom:1px;}.adetmt{font-size:10.5px;color:var(--t3);}
+.adetbdg{display:flex;gap:4px;margin-top:5px;flex-wrap:wrap;}
+.adetbody{flex:1;overflow-y:auto;padding:12px 16px;display:flex;flex-direction:column;gap:10px;}
+.fhrow{display:flex;align-items:center;gap:6px;padding:5px 7px;background:rgba(255,255,255,.02);border-radius:5px;font-size:11px;margin-bottom:2px;}
+.fhdt{font-size:9px;font-family:var(--m);color:var(--t3);width:72px;flex-shrink:0;}.fhty{flex:1;}.fhst{font-size:9.5px;font-family:var(--m);}
+.achat{width:296px;flex-shrink:0;background:var(--bg2);display:flex;flex-direction:column;overflow:hidden;}
+.achdr{padding:10px 13px;border-bottom:1px solid var(--b);flex-shrink:0;}
+.achdr-ttl{font-size:12px;font-weight:600;}.achdr-sub{font-size:10px;color:var(--t3);margin-top:1px;}
+.amsgs{flex:1;overflow-y:auto;padding:10px 12px;display:flex;flex-direction:column;gap:8px;}
+.amsgs::-webkit-scrollbar{width:2px;}
+.amg{display:flex;gap:7px;}.amg.u{flex-direction:row-reverse;}
+.amav{width:24px;height:24px;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:10px;flex-shrink:0;margin-top:1px;}
+.ambd{max-width:85%;display:flex;flex-direction:column;gap:2px;}.amg.u .ambd{align-items:flex-end;}
+.amsn{font-size:9.5px;font-weight:600;color:var(--t2);padding:0 1px;}
+.ambb{padding:7px 10px;border-radius:8px;font-size:11.5px;line-height:1.6;color:var(--t);}
+.ambb.a{background:var(--sf);border:1px solid var(--b);border-top-left-radius:3px;}
+.ambb.u{background:rgba(79,142,255,.15);border:1px solid rgba(79,142,255,.2);border-top-right-radius:3px;}
+.achips{padding:8px 12px;border-top:1px solid var(--b);flex-shrink:0;}
+.achip-ttl{font-size:9px;font-weight:600;color:var(--t3);font-family:var(--m);text-transform:uppercase;letter-spacing:.8px;margin-bottom:5px;}
+.achip-row{display:flex;flex-direction:column;gap:3px;margin-bottom:7px;}
+.ach{padding:5px 9px;border-radius:5px;font-size:10.5px;border:1px solid var(--b2);color:var(--t2);background:rgba(255,255,255,.02);cursor:pointer;font-family:var(--f);transition:all .15s;text-align:left;}
+.ach:hover{background:rgba(255,255,255,.06);color:var(--t);}
+.ach.b{border-color:rgba(79,142,255,.3);color:var(--ac2);background:rgba(79,142,255,.04);}
+.ach.g{border-color:rgba(46,204,138,.3);color:var(--gn);background:rgba(46,204,138,.03);}
+.ach.r{border-color:rgba(255,77,106,.3);color:var(--rd);background:rgba(255,77,106,.03);}
+.ach.a{border-color:rgba(255,183,64,.3);color:var(--am);background:rgba(255,183,64,.03);}
+.ainrow{display:flex;gap:6px;}
+.ainp{flex:1;padding:6px 10px;background:var(--sf);border:1px solid var(--b2);border-radius:6px;color:var(--t);font-family:var(--f);font-size:11.5px;outline:none;}
+.ainp:focus{border-color:rgba(79,142,255,.38);}.ainp::placeholder{color:var(--t3);}
+
+/* ═══ WORK ORDERS VIEW ═══ */
+#view-workorders{flex-direction:row;}
+.wol{width:290px;border-right:1px solid var(--b);display:flex;flex-direction:column;background:var(--bg2);flex-shrink:0;}
+.wolhdr{padding:10px 12px;border-bottom:1px solid var(--b);display:flex;align-items:center;justify-content:space-between;}
+.woltt{font-size:13px;font-weight:600;}
+.woflt{display:flex;gap:3px;padding:6px 8px;border-bottom:1px solid var(--b);}
+.wofb{padding:2px 8px;border-radius:4px;font-size:10px;border:1px solid var(--b);background:none;color:var(--t3);cursor:pointer;font-family:var(--f);transition:all .15s;}
+.wofb:hover{color:var(--t2);}.wofb.on{background:var(--ag);color:var(--ac2);border-color:rgba(79,142,255,.25);}
+.wocards{flex:1;overflow-y:auto;padding:5px 7px;}
+.wcard{background:var(--sf);border:1px solid var(--b);border-radius:7px;padding:9px 11px;margin-bottom:5px;cursor:pointer;transition:all .15s;}
+.wcard:hover{border-color:var(--b2);}.wcard.on{border-color:rgba(79,142,255,.4);background:rgba(79,142,255,.06);}
+.wctop{display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;}
+.wcid{font-size:9px;font-family:var(--m);color:var(--t3);}
+.wcpr{font-size:8.5px;font-weight:700;padding:2px 5px;border-radius:3px;text-transform:uppercase;}
+.wcti{font-size:11.5px;font-weight:600;margin-bottom:2px;}.wcas{font-size:10px;color:var(--t3);}
+.wcft{display:flex;align-items:center;justify-content:space-between;margin-top:4px;padding-top:4px;border-top:1px solid var(--b);}
+.wcag{font-size:9.5px;color:var(--t3);}.wcdu{font-size:9px;font-family:var(--m);}
+.wod{flex:1;display:flex;flex-direction:column;overflow:hidden;}
+.wodhdr{padding:11px 16px;background:var(--bg2);border-bottom:1px solid var(--b);flex-shrink:0;}
+.wodbdg{display:flex;gap:4px;margin-bottom:4px;flex-wrap:wrap;}
+.wodtt{font-size:14px;font-weight:600;margin-bottom:2px;}.wodsu{font-size:10.5px;color:var(--t3);margin-bottom:8px;}
+/* Prominent persona WO actions */
+.wod-pacts{display:flex;gap:6px;flex-wrap:wrap;}
+.wpa{padding:7px 14px;border-radius:7px;font-size:11.5px;font-weight:600;cursor:pointer;border:1px solid;font-family:var(--f);transition:all .15s;display:flex;align-items:center;gap:5px;}
+.wpa:hover{transform:translateY(-1px);filter:brightness(1.1);}
+.wpablu{background:var(--ac);border-color:var(--ac);color:#fff;}
+.wpagrn{background:var(--gd);border-color:rgba(46,204,138,.35);color:var(--gn);}
+.wpared{background:var(--rdm);border-color:rgba(255,77,106,.35);color:var(--rd);}
+.wpaamb{background:var(--adm);border-color:rgba(255,183,64,.35);color:var(--am);}
+.wpagry{background:rgba(255,255,255,.04);border-color:var(--b2);color:var(--t2);}
+.wodbody{flex:1;overflow-y:auto;padding:12px 16px;display:flex;flex-direction:column;gap:10px;}
+.wodbody::-webkit-scrollbar{width:2px;}
+.clitem{display:flex;align-items:center;gap:7px;padding:5px 7px;background:rgba(255,255,255,.02);border-radius:5px;font-size:11px;margin-bottom:2px;}
+.clcb{width:14px;height:14px;border-radius:3px;border:1px solid var(--b2);display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer;transition:all .15s;}
+.clcb.ck{background:var(--gn);border-color:var(--gn);}.clcb.ck::after{content:'✓';font-size:7.5px;color:#fff;font-weight:700;}
+.cltx{flex:1;}.cltx.dk{text-decoration:line-through;color:var(--t3);}
+.cltg{font-size:8.5px;padding:1px 5px;border-radius:3px;font-family:var(--m);background:rgba(255,255,255,.04);color:var(--t3);}
+.tlrow{display:flex;gap:8px;padding:4px 0;}
+.tldc{display:flex;flex-direction:column;align-items:center;width:11px;flex-shrink:0;}
+.tldot{width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-top:3px;}
+.tlline{width:1px;flex:1;background:var(--b);margin-top:2px;}
+.tlct{flex:1;padding-bottom:5px;}.tlev{font-size:11px;font-weight:500;margin-bottom:1px;}
+.tltm{font-size:9px;color:var(--t3);font-family:var(--m);}
+.wodai{padding:10px 16px;background:var(--bg2);border-top:1px solid var(--b);flex-shrink:0;}
+.waitl{font-size:9px;font-weight:600;color:var(--t3);text-transform:uppercase;letter-spacing:.8px;font-family:var(--m);margin-bottom:6px;}
+.waichips{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:7px;}
+.waic{padding:4px 9px;border-radius:5px;font-size:10.5px;font-weight:500;border:1px solid var(--b2);color:var(--t2);background:rgba(255,255,255,.02);cursor:pointer;font-family:var(--f);transition:all .15s;}
+.waic:hover{background:rgba(255,255,255,.06);}
+.waic.b{border-color:rgba(79,142,255,.28);color:var(--ac2);background:rgba(79,142,255,.04);}
+.waic.g{border-color:rgba(46,204,138,.28);color:var(--gn);background:rgba(46,204,138,.03);}
+.wocc{display:flex;gap:4px;margin-bottom:5px;}
+.woinrow{display:flex;gap:6px;}
+.woresp{margin-top:7px;background:rgba(79,142,255,.06);border:1px solid rgba(79,142,255,.16);border-radius:6px;padding:9px 11px;font-size:11.5px;line-height:1.7;color:var(--t2);display:none;}
+.worttl{font-size:9px;font-weight:600;color:var(--ac2);font-family:var(--m);margin-bottom:4px;}
+</style>
+</head>
+<body>
+<!-- TOPBAR -->
+<div class="tb">
+  <div class="tb-l"><div class="logo">DRO</div><div><div class="pn">Downtime Response Orchestrator</div><div class="ps">Bearing Failure · Predictive &amp; Prescriptive · Automotive &amp; Industrial AI</div></div></div>
+  <div class="tb-c">
+    <button class="nt on" onclick="sv('chat',this)">Agent Chat</button>
+    <button class="nt" onclick="sv('agents',this)">Agent Graph</button>
+    <button class="nt" onclick="sv('assets',this)">Asset Registry</button>
+    <button class="nt" onclick="sv('workorders',this)">Work Orders</button>
+  </div>
+  <div class="tb-r"><div class="ldot"></div><div class="ltx">LIVE · 47 assets</div><div class="abdg" onclick="sq('List all 3 active alerts with severity, RUL and recommended action for each')">⚠ 3 ALERTS</div></div>
+</div>
+<div class="main">
+<!-- PERSONA PANEL -->
+<div class="lp">
+  <div class="lphdr">Active Persona</div>
+  <div class="plist">
+    <div class="slbl">Operations</div>
+    <div class="pi on" onclick="sp(this,'supervisor')" id="pp-supervisor"><div class="pav" style="background:var(--odm)">🦺</div><div class="pin"><div class="pnm">Plant Supervisor</div><div class="prl">Line 4 · Day Shift</div></div><div class="pdot" style="background:var(--or)"></div><div class="pnotif">2</div></div>
+    <div class="pi" onclick="sp(this,'engineer')" id="pp-engineer"><div class="pav" style="background:var(--ag)">🔧</div><div class="pin"><div class="pnm">Reliability Engr.</div><div class="prl">Rotating Equipment</div></div><div class="pdot" style="background:var(--ac)"></div></div>
+    <div class="pi" onclick="sp(this,'maintenance')" id="pp-maintenance"><div class="pav" style="background:var(--gd)">🛠</div><div class="pin"><div class="pnm">Maint. Planner</div><div class="prl">MRO · Scheduling</div></div><div class="pdot" style="background:var(--gn)"></div><div class="pnotif">1</div></div>
+    <div class="slbl" style="margin-top:4px">Management</div>
+    <div class="pi" onclick="sp(this,'manager')" id="pp-manager"><div class="pav" style="background:var(--pdm)">📊</div><div class="pin"><div class="pnm">Plant Manager</div><div class="prl">Operations Lead</div></div><div class="pdot" style="background:var(--pu)"></div></div>
+    <div class="pi" onclick="sp(this,'executive')" id="pp-executive"><div class="pav" style="background:var(--adm)">👔</div><div class="pin"><div class="pnm">VP Operations</div><div class="prl">Asset Leadership</div></div><div class="pdot" style="background:var(--am)"></div></div>
+    <div class="slbl" style="margin-top:4px">Technical</div>
+    <div class="pi" onclick="sp(this,'ot')" id="pp-ot"><div class="pav" style="background:var(--rdm)">📡</div><div class="pin"><div class="pnm">OT / Controls</div><div class="prl">Historian · SCADA</div></div><div class="pdot" style="background:var(--rd)"></div></div>
+    <div class="pi" onclick="sp(this,'safety')" id="pp-safety"><div class="pav" style="background:var(--tdm)">🛡</div><div class="pin"><div class="pnm">Safety Officer</div><div class="prl">Compliance · HSE</div></div><div class="pdot" style="background:var(--tl)"></div></div>
+  </div>
+  <div class="fbox"><div class="fttl">Fleet Snapshot</div>
+    <div class="fs"><span class="fsl">Critical</span><span class="fsv" style="color:var(--rd)">2 assets</span></div>
+    <div class="fs"><span class="fsl">Warning</span><span class="fsv" style="color:var(--am)">5 assets</span></div>
+    <div class="fs"><span class="fsl">Healthy</span><span class="fsv" style="color:var(--gn)">40 assets</span></div>
+    <div class="fs" style="margin-top:3px;padding-top:3px;border-top:1px solid var(--b)"><span class="fsl">Avg RUL</span><span class="fsv" style="color:var(--am);font-family:var(--m)">14.2 days</span></div>
+  </div>
+</div>
+<div class="cnt">
+
+<!-- ════ CHAT VIEW ════ -->
+<div class="view on" id="view-chat">
+  <div class="chat-main">
+    <div class="chdr">
+      <div class="chav" id="chav" style="background:var(--odm)">🦺</div>
+      <div><div class="chnm" id="chnm">Plant Supervisor — James Kowalski</div><div class="chds" id="chds">Free-form reasoning on faults, risk, decisions, escalations, shift management</div></div>
+    </div>
+    <div class="msgs" id="msgs"></div>
+    <div class="cinp">
+      <div class="ctags" id="ctags"></div>
+      <div class="cirow">
+        <textarea class="cinptx" id="cinp" rows="1" placeholder="Ask anything: fault risk, what-if scenarios, shift decisions, escalation advice…" onkeydown="hk(event)" oninput="ar(this)"></textarea>
+        <button class="sbtn" onclick="sendMsg()"><svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg></button>
+      </div>
+      <div class="qps" id="qps"></div>
+    </div>
+  </div>
+  <!-- Live context sidebar -->
+  <div class="cctx">
+    <div class="cxs"><div class="sttl">Live Sensors · M-104</div>
+      <div class="sgrd">
+        <div class="sc"><div class="sl">Vibration RMS</div><div class="sv" style="color:var(--rd)" id="sv1">14.7</div><div class="su">mm/s</div><div class="str stup">↑ +0.3/hr</div></div>
+        <div class="sc"><div class="sl">Temperature</div><div class="sv" style="color:var(--am)" id="sv2">87.4</div><div class="su">°C</div><div class="str stup">↑ +1.2/hr</div></div>
+        <div class="sc"><div class="sl">BPFO Ratio</div><div class="sv" style="color:var(--rd)">4.02</div><div class="su">× base</div><div class="str stst">— stable</div></div>
+        <div class="sc"><div class="sl">Speed</div><div class="sv">1474</div><div class="su">RPM</div><div class="str stst">— nominal</div></div>
+      </div>
+      <svg style="width:100%;height:22px;margin-top:6px" viewBox="0 0 230 22" preserveAspectRatio="none"><polyline points="0,20 19,18 38,17 57,15 76,12 95,10 114,9 133,7 152,5 171,4 190,3 209,2 230,1" fill="none" stroke="var(--rd)" stroke-width="1.4" opacity=".65"/></svg>
+      <div style="font-size:8.5px;color:var(--t3);font-family:var(--m);margin-top:1px">Vibration · last 12h</div>
+    </div>
+    <div class="cxs"><div class="sttl">Agent Pipeline Status</div>
+      <div class="aglst">
+        <div class="agrow"><div class="adc don"></div><div class="anm">Data Foundation</div><div class="atg">OK</div></div>
+        <div class="agrow"><div class="adc don"></div><div class="anm">Monitoring</div><div class="atg">TRIGGERED</div></div>
+        <div class="agrow"><div class="adc drn"></div><div class="anm">Predictive Risk</div><div class="atg" id="rptag">RUNNING</div></div>
+        <div class="agrow"><div class="adc don"></div><div class="anm">Failure Intel</div><div class="atg">COMPLETE</div></div>
+        <div class="agrow"><div class="adc don"></div><div class="anm">Knowledge</div><div class="atg">READY</div></div>
+        <div class="agrow"><div class="adc dof"></div><div class="anm">Prescriptive Opt.</div><div class="atg">STANDBY</div></div>
+        <div class="agrow"><div class="adc dof"></div><div class="anm">Executor</div><div class="atg">AWAITING</div></div>
+      </div>
+    </div>
+    <div class="cxs" style="border-bottom:none"><div class="sttl">Fleet RUL Watch</div>
+      <div class="rlfl">
+        <div class="rlr" onclick="sq('Full risk briefing and recommended action for M-104')"><div class="rlnm">M-104</div><div class="rltp">Motor</div><div class="rlmb"><div class="rlmf" style="width:12%;background:var(--rd)"></div></div><div class="rld" style="color:var(--rd)">~6d</div></div>
+        <div class="rlr" onclick="sq('P-207 bearing condition and urgency — should I act before Wednesday?')"><div class="rlnm">P-207</div><div class="rltp">Pump</div><div class="rlmb"><div class="rlmf" style="width:38%;background:var(--am)"></div></div><div class="rld" style="color:var(--am)">~18d</div></div>
+        <div class="rlr" onclick="sq('C-301 cage fault — how urgent and what is the right action?')"><div class="rlnm">C-301</div><div class="rltp">Conveyor</div><div class="rlmb"><div class="rlmf" style="width:55%;background:var(--am)"></div></div><div class="rld" style="color:var(--am)">~26d</div></div>
+        <div class="rlr" onclick="sq('M-089 health after recent bearing replacement — any run-in concerns?')"><div class="rlnm">M-089</div><div class="rltp">Motor</div><div class="rlmb"><div class="rlmf" style="width:80%;background:var(--gn)"></div></div><div class="rld" style="color:var(--gn)">~37d</div></div>
+        <div class="rlr" onclick="sq('G-112 gearbox post-repair performance — is it settling normally?')"><div class="rlnm">G-112</div><div class="rltp">Gearbox</div><div class="rlmb"><div class="rlmf" style="width:90%;background:var(--gn)"></div></div><div class="rld" style="color:var(--gn)">~43d</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════ AGENT GRAPH VIEW ════ -->
+<div class="view" id="view-agents">
+  <div style="display:flex;flex-direction:column;flex:1;overflow:hidden;">
+    <div class="aghdr">
+      <div class="agttl" id="agttl">Agent Pipeline</div>
+      <div class="ag-sel-grp">
+        <span class="ag-sel-lbl">Asset:</span>
+        <select class="agsel" id="ag-asset-sel" onchange="onAgAssetChange(this.value)">
+          <option value="M-104">M-104 — Drive Motor Line 4 (CRITICAL)</option>
+          <option value="P-207">P-207 — Feed Pump Station 2 (WARNING)</option>
+          <option value="C-301">C-301 — Conveyor Drive Assembly (WARNING)</option>
+          <option value="M-089">M-089 — Drive Motor Line 2 (HEALTHY)</option>
+          <option value="G-112">G-112 — Gearbox Line 3 (HEALTHY)</option>
+        </select>
+        <span class="ag-sel-lbl" style="margin-left:8px">View as:</span>
+        <select class="agsel" id="ag-persona-sel" onchange="onAgPersonaChange(this.value)">
+          <option value="supervisor">Plant Supervisor</option>
+          <option value="engineer">Reliability Engineer</option>
+          <option value="maintenance">Maint. Planner</option>
+          <option value="manager">Plant Manager</option>
+          <option value="executive">VP Operations</option>
+          <option value="ot">OT / Controls</option>
+          <option value="safety">Safety Officer</option>
+        </select>
+        <button class="chip" onclick="replayAg()" style="margin-left:8px">▶ Replay</button>
+      </div>
+    </div>
+    <div class="agbody">
+      <div class="ag-pipe" id="ag-pipe"></div>
+      <div class="ag-right">
+        <div class="ag-tabs">
+          <div class="agtab on" onclick="agTab(this,'overview')">Overview</div>
+          <div class="agtab" onclick="agTab(this,'node')">Node Detail</div>
+          <div class="agtab" onclick="agTab(this,'tasks')">Persona Tasks</div>
+          <div class="agtab" onclick="agTab(this,'actions')">Actions</div>
+        </div>
+        <div class="ag-tab-body">
+          <div class="ag-tab-panel on" id="ag-panel-overview"></div>
+          <div class="ag-tab-panel" id="ag-panel-node"></div>
+          <div class="ag-tab-panel" id="ag-panel-tasks"></div>
+          <div class="ag-tab-panel" id="ag-panel-actions"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════ ASSET REGISTRY VIEW ════ -->
+<div class="view" id="view-assets">
+  <div class="asl">
+    <div class="aslhdr"><span style="font-size:12.5px;font-weight:600">Asset Registry</span><span style="font-size:10px;color:var(--t3);font-family:var(--m)">47 assets</span></div>
+    <div class="asrch"><input type="text" placeholder="Search assets…" oninput="filterA(this.value)"></div>
+    <div class="asf">
+      <button class="asfb on" onclick="fltA(this,'all')">All</button>
+      <button class="asfb" onclick="fltA(this,'critical')">Critical</button>
+      <button class="asfb" onclick="fltA(this,'warning')">Warning</button>
+      <button class="asfb" onclick="fltA(this,'healthy')">Healthy</button>
+    </div>
+    <div class="alist" id="alist"></div>
+  </div>
+  <div class="adet">
+    <div class="adethdr">
+      <div class="adetid" id="adetid">M-104</div>
+      <div class="adetnm" id="adetnm">Drive Motor — Line 4</div>
+      <div class="adetmt" id="adetmt">SKF 6310-2RS · 45 kW · 1480 RPM · Line 4</div>
+      <div class="adetbdg" id="adetbdg"></div>
+    </div>
+    <div class="adetbody" id="adetbody"></div>
+  </div>
+  <div class="achat">
+    <div class="achdr"><div class="achdr-ttl" id="achdr-ttl">DRO Agent — Asset Intelligence</div><div class="achdr-sub" id="achdr-sub">Ask about condition, diagnostics, or risk</div></div>
+    <div class="amsgs" id="amsgs"></div>
+    <div class="achips">
+      <div class="achip-ttl" id="achip-ttl">Quick questions</div>
+      <div class="achip-row" id="achip-row"></div>
+      <div class="ainrow">
+        <input type="text" class="ainp" id="ainp" placeholder="Ask about this asset…" onkeydown="if(event.key==='Enter'){askA(this.value);this.value='';}">
+        <button class="sbtn" onclick="askA(document.getElementById('ainp').value);document.getElementById('ainp').value=''"><svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg></button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════ WORK ORDERS VIEW ════ -->
+<div class="view" id="view-workorders">
+  <div class="wol">
+    <div class="wolhdr"><span class="woltt">Work Orders</span><button class="chip grn" onclick="newWO()" style="font-size:10px;padding:3px 8px">+ New WO</button></div>
+    <div class="woflt">
+      <button class="wofb on" onclick="wflt(this,'all')">All (12)</button>
+      <button class="wofb" onclick="wflt(this,'pending')">Pending (3)</button>
+      <button class="wofb" onclick="wflt(this,'scheduled')">Scheduled (5)</button>
+      <button class="wofb" onclick="wflt(this,'closed')">Closed (4)</button>
+    </div>
+    <div class="wocards" id="wocards"></div>
+  </div>
+  <div class="wod">
+    <div class="wodhdr">
+      <div class="wodbdg" id="wodbdg"></div>
+      <div class="wodtt" id="wodtt">WO-2024-1847 — M-104 Bearing Replacement</div>
+      <div class="wodsu" id="wodsu">Created by DRO Agent · M-104 · Line 4 · Est. 4h</div>
+      <div class="wod-pacts" id="wod-pacts"></div>
+    </div>
+    <div class="wodbody" id="wodbody"></div>
+    <div class="wodai">
+      <div class="waitl" id="waitl">Agent Guidance</div>
+      <div class="waichips" id="waichips"></div>
+      <div class="wocc" id="wocc"></div>
+      <div class="woinrow">
+        <input type="text" class="ainp" id="woinp" placeholder="Ask the DRO Agent about this work order…" onkeydown="if(event.key==='Enter'){woAsk(this.value);this.value='';}">
+        <button class="sbtn" onclick="woAsk(document.getElementById('woinp').value);document.getElementById('woinp').value=''"><svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg></button>
+      </div>
+      <div class="woresp" id="woresp"><div class="worttl" id="worttl">🤖 DRO Agent</div><div id="worbody"></div></div>
+    </div>
+  </div>
+</div>
+
+</div></div>
+<script>
+// ══════════ PERSONA DATA ══════════
+const PD={
+  supervisor:{nm:'Plant Supervisor — James Kowalski',ds:'Free-form reasoning: fault risk, shift decisions, escalations, run/defer trade-offs',av:'🦺',bg:'var(--odm)',col:'var(--or)',
+    gr:'Good morning James. Sweep complete on Line 4.\n\n<strong style="color:var(--t)">M-104 is your urgent priority</strong> — outer race spall Stage 3, RUL 5–8 days. Without action by Wednesday, failure probability by Saturday reaches 67%.\n\nBelow are your key actions. Ask me anything about risk, decisions, or what-if scenarios.',
+    actions:[
+      {icon:'⚡',lbl:'Critical decision',nm:'Approve WO-2024-1847',col:'rgba(255,77,106,.1)',bc:'rgba(255,77,106,.35)',tc:'var(--rd)',q:"Approve WO-2024-1847 — confirm crew deployment Wednesday 06:00 and release all logistics"},
+      {icon:'📊',lbl:'Risk assessment',nm:'Run-to-Weekend Model',col:'rgba(255,183,64,.1)',bc:'rgba(255,183,64,.35)',tc:'var(--am)',q:"Model the risk of running M-104 to Saturday: failure probability curve, consequence if it seizes, cost difference vs acting Wednesday"},
+      {icon:'📤',lbl:'Management escalation',nm:'Escalate to Plant Manager',col:'rgba(167,139,250,.1)',bc:'rgba(167,139,250,.35)',tc:'var(--pu)',q:"Escalate M-104 to Plant Manager Sarah Chen: fault severity, production exposure $520–750K, recommended action and approval needed"},
+      {icon:'📋',lbl:'Shift management',nm:'Generate Shift Handover',col:'rgba(46,204,138,.1)',bc:'rgba(46,204,138,.35)',tc:'var(--gn)',q:"Generate complete shift handover brief for Line 4: all active alerts, current status, pending approvals, priorities for incoming supervisor"},
+      {icon:'🗓',lbl:'Planning',nm:'This Week\'s Action Plan',col:'rgba(79,142,255,.12)',bc:'rgba(79,142,255,.35)',tc:'var(--ac2)',q:"Give me the complete action plan for this week across M-104, P-207 and C-301 — what do I need to do and by when?"},
+      {icon:'💬',lbl:'Operator communication',nm:'Brief Line 4 Operators',col:'rgba(255,122,53,.1)',bc:'rgba(255,122,53,.3)',tc:'var(--or)',q:"What should I tell the Line 4 operators about M-104? What signs to watch for and when to call me immediately?"}
+    ],
+    qp:['Can M-104 safely run until Saturday?','What happens if M-104 fails catastrophically mid-shift?','Total risk exposure across Line 4 this week?','What is the cost of not acting on M-104 today?'],
+    tags:['📍 Line 4 · M-104','⚠ Outer Race · Stage 3','⏱ RUL ~6 days']
+  },
+  engineer:{nm:'Reliability Engineer — Priya Nair',ds:'Fault diagnostics: FFT analysis, RUL modelling, root cause, fleet comparison, prognostics',av:'🔧',bg:'var(--ag)',col:'var(--ac)',
+    gr:'Hello Priya. M-104 diagnostic summary:\n\n<strong style="color:var(--t)">BPFO 4.02× baseline at 87.4 Hz</strong> — outer race spall Stage 3, 25–40% surface damage estimated. Kurtosis 6.8, Crest Factor 9.2. Three KB case matches retrieved. Ask me anything technical.',
+    actions:[
+      {icon:'📊',lbl:'Spectral analysis',nm:'Full FFT Harmonic Report',col:'rgba(79,142,255,.12)',bc:'rgba(79,142,255,.35)',tc:'var(--ac2)',q:"Full FFT analysis for M-104: BPFO harmonic family at 1×/2×/3×, sideband structure at ±shaft frequency, spectral kurtosis map, and fault stage conclusion"},
+      {icon:'📐',lbl:'Prognosis',nm:'RUL Confidence Intervals',col:'rgba(255,183,64,.1)',bc:'rgba(255,183,64,.35)',tc:'var(--am)',q:"RUL confidence intervals for M-104: median 6.4 days — show 10th/90th percentile bounds and sensitivity to load and temperature"},
+      {icon:'🔍',lbl:'Root cause',nm:'Fault Initiation Analysis',col:'rgba(255,77,106,.1)',bc:'rgba(255,77,106,.35)',tc:'var(--rd)',q:"Root cause analysis for M-104 outer race spall: rank initiation factors — misalignment, overload, lube starvation, installation error, contamination ingress"},
+      {icon:'📁',lbl:'Historical comparison',nm:'Match KB Case Studies',col:'rgba(46,204,138,.1)',bc:'rgba(46,204,138,.35)',tc:'var(--gn)',q:"Compare M-104 signature to 3 KB case matches: similarity score, what happened in those cases, time-to-failure from this stage"},
+      {icon:'⚙',lbl:'Fleet health',nm:'Fleet Bearing Trend Analysis',col:'rgba(167,139,250,.1)',bc:'rgba(167,139,250,.35)',tc:'var(--pu)',q:"Analyse bearing health trends across all monitored rotating assets: which are in degrading trajectories and what is the 30-day outlook?"},
+      {icon:'🎯',lbl:'QA specification',nm:'Post-Repair Baseline Spec',col:'rgba(45,212,191,.1)',bc:'rgba(45,212,191,.3)',tc:'var(--tl)',q:"What vibration and temperature baselines should be set post-repair on M-104? Specify target values for a new SKF 6310-2RS at this operating point"}
+    ],
+    qp:['Full FFT harmonic analysis for M-104','RUL confidence interval and uncertainty band?','Root cause of M-104 outer race initiation?','Compare M-104 to the 3 KB cases'],
+    tags:['📍 M-104 · BPFO 4.02×','🔬 Stage 3 · Kurtosis 6.8','📈 CI: 4.1–9.3d · 82% conf']
+  },
+  maintenance:{nm:'Maintenance Planner — Tom Rodriguez',ds:'Scheduling, parts availability, crew allocation, repair sequencing, MRO logistics',av:'🛠',bg:'var(--gd)',col:'var(--gn)',
+    gr:'Hi Tom. Two active interventions this week:\n\n<strong style="color:var(--t)">M-104 — Urgent:</strong> Wed 06:00–10:00. SKF 6310-2RS in stock (Bin A-14). 2 techs, 4h.\n<strong style="color:var(--t)">P-207 — Scheduled:</strong> Wed 09:00, 2h, lube check. T. Rodriguez assigned.\n\nAsk me about parts, crew, or scheduling.',
+    actions:[
+      {icon:'📦',lbl:'Inventory check',nm:'Confirm All Parts Ready',col:'rgba(46,204,138,.1)',bc:'rgba(46,204,138,.35)',tc:'var(--gn)',q:"Confirm all parts and tools are available for M-104 Wednesday: SKF 6310-2RS, Mobil SHC 100, seal kit, bearing puller, press, torque wrench — anything still to collect?"},
+      {icon:'👥',lbl:'Crew planning',nm:'Assign Crew Wednesday',col:'rgba(79,142,255,.12)',bc:'rgba(79,142,255,.35)',tc:'var(--ac2)',q:"Assign crew for M-104 Wednesday 06:00: confirm T.Rodriguez (lead) and K.Mensah are available and LOTO-qualified. Any gaps to fill?"},
+      {icon:'📅',lbl:'Schedule optimisation',nm:'Optimise Weekly Schedule',col:'rgba(255,183,64,.1)',bc:'rgba(255,183,64,.35)',tc:'var(--am)',q:"Optimise this week's maintenance schedule: M-104 urgent Wed 06:00, P-207 lube Wed 09:00, C-301 cage Thu 14:00 — best sequence to minimise Line 4 disruption"},
+      {icon:'🖨',lbl:'Documentation',nm:'Print M-104 Job Pack',col:'rgba(255,122,53,.1)',bc:'rgba(255,122,53,.3)',tc:'var(--or)',q:"Generate complete job pack for M-104: SOP steps, parts list with bin locations, tools, torque specs (85 Nm), lube type (Mobil SHC 100), LOTO reference"},
+      {icon:'🔄',lbl:'Procurement',nm:'Check Emergency Spare Stock',col:'rgba(255,77,106,.1)',bc:'rgba(255,77,106,.35)',tc:'var(--rd)',q:"Check if additional emergency bearing stock is needed given current RUL projections for M-104, P-207 and C-301. Any reorder points being approached?"},
+      {icon:'📊',lbl:'Cost tracking',nm:'Labour & Cost Estimate',col:'rgba(167,139,250,.1)',bc:'rgba(167,139,250,.35)',tc:'var(--pu)',q:"Estimate total labour and parts cost for all 3 active interventions this week: M-104, P-207, C-301. Compare against preventive maintenance budget."}
+    ],
+    qp:['Confirm SKF 6310-2RS availability for M-104','Who is available Wednesday 06:00 — LOTO qualified?','Best sequence for M-104, P-207 and C-301 this week?','Full job pack for M-104 replacement'],
+    tags:['📍 M-104 · Wed 06:00','📦 SKF 6310-2RS · Bin A-14','👥 2 techs · LOTO req.']
+  },
+  manager:{nm:'Plant Manager — Sarah Chen',ds:'Production impact, cost trade-offs, OEE effects, line-level risk decisions',av:'📊',bg:'var(--pdm)',col:'var(--pu)',
+    gr:'Good morning Sarah. <strong style="color:var(--t)">M-104 needs a decision today.</strong>\n\nUnplanned failure by Saturday: 67%. Line 4 impact: 4–6h stop (~$520–750K). Planned Wednesday: $18K. Net avoidance: <strong style="color:var(--gn)">$601K</strong>. All logistics are ready. Your key actions are below.',
+    actions:[
+      {icon:'✓',lbl:'Approval needed',nm:'Approve WO-2024-1847',col:'rgba(79,142,255,.12)',bc:'rgba(79,142,255,.35)',tc:'var(--ac2)',q:"Approve WO-2024-1847 at Plant Manager level — confirm Wednesday window is authorised and all resources committed"},
+      {icon:'💰',lbl:'Financial decision',nm:'Cost-Benefit Analysis',col:'rgba(46,204,138,.1)',bc:'rgba(46,204,138,.35)',tc:'var(--gn)',q:"Full cost-benefit for M-104: planned $18K vs emergency $619K+ — show detailed breakdown, net avoidance and ROI case"},
+      {icon:'📈',lbl:'OEE modelling',nm:'Line 4 OEE Impact Model',col:'rgba(255,183,64,.1)',bc:'rgba(255,183,64,.35)',tc:'var(--am)',q:"Model Line 4 OEE: 4h planned window Wednesday vs 12–18h unplanned failure. Include monthly target deviation and recovery time"},
+      {icon:'⚠',lbl:'Portfolio risk',nm:'Total Risk Exposure This Week',col:'rgba(255,77,106,.1)',bc:'rgba(255,77,106,.35)',tc:'var(--rd)',q:"Total production risk exposure this week from M-104, P-207 and C-301: combined financial exposure, probability-weighted impact, top priorities"},
+      {icon:'🔄',lbl:'Contingency',nm:'Contingency Plan if M-104 Fails',col:'rgba(167,139,250,.1)',bc:'rgba(167,139,250,.35)',tc:'var(--pu)',q:"What is the contingency plan if M-104 fails before Wednesday? Emergency response, crew mobilisation, production re-routing, customer impact"},
+      {icon:'📰',lbl:'Reporting',nm:'Ops Risk Briefing Report',col:'rgba(255,122,53,.1)',bc:'rgba(255,122,53,.3)',tc:'var(--or)',q:"Draft an operations risk briefing: M-104 situation, production exposure, recommended action and decision needed from leadership"}
+    ],
+    qp:['Full production impact if M-104 fails this week?','Cost comparison: planned vs emergency?','Line 4 OEE model — planned window vs failure?','Total risk exposure across all active alerts?'],
+    tags:['📍 Line 4 · HIGH risk','💰 $601K net avoidance','📈 OEE impact: 0.4–0.7pp']
+  },
+  executive:{nm:'VP Operations — Michael Osei',ds:'Portfolio risk, reliability KPIs, financial returns, board-level metrics, DRO value delivery',av:'👔',bg:'var(--adm)',col:'var(--am)',
+    gr:'Good morning Michael. <strong style="color:var(--t)">Fleet: 2 critical, 5 warnings</strong> across 47 assets. MTD: 3 failures prevented, ~$1.4M avoided. M-104 exposure: $500K–$750K unmanaged. Q3 MTBF up 18%. Key actions below.',
+    actions:[
+      {icon:'📊',lbl:'KPI review',nm:'Q3 Reliability Performance',col:'rgba(79,142,255,.12)',bc:'rgba(79,142,255,.35)',tc:'var(--ac2)',q:"Q3 reliability KPI report: MTBF trend, MTTR, unplanned downtime %, OEE contribution, DRO avoidance value — are we on target?"},
+      {icon:'💼',lbl:'Board preparation',nm:'Board Briefing Pack',col:'rgba(255,183,64,.1)',bc:'rgba(255,183,64,.35)',tc:'var(--am)',q:"Board-ready briefing: DRO deployment impact, YTD financial returns, fleet health, Q3 vs target, forward risk outlook for Q4"},
+      {icon:'💰',lbl:'Financial return',nm:'YTD DRO Value Delivered',col:'rgba(46,204,138,.1)',bc:'rgba(46,204,138,.35)',tc:'var(--gn)',q:"YTD DRO value: avoidance events, total savings, MTBF improvement, maintenance cost reduction — vs deployment investment cost"},
+      {icon:'🌍',lbl:'Portfolio view',nm:'Fleet Risk Heat Map',col:'rgba(255,77,106,.1)',bc:'rgba(255,77,106,.35)',tc:'var(--rd)',q:"Fleet risk map: all 47 assets by health status, combined financial exposure by line, top 5 assets needing leadership attention this month"},
+      {icon:'📉',lbl:'Trend analysis',nm:'Downtime Trend Since DRO',col:'rgba(167,139,250,.1)',bc:'rgba(167,139,250,.35)',tc:'var(--pu)',q:"How has unplanned downtime trended since DRO deployment? Show monthly comparison, bearing MTBF change, unplanned ratio reduction"},
+      {icon:'🏭',lbl:'Strategic',nm:'Expansion Opportunity',col:'rgba(45,212,191,.1)',bc:'rgba(45,212,191,.3)',tc:'var(--tl)',q:"Based on DRO results so far, what is the business case for expanding to adjacent asset classes (pumps, conveyors, gearboxes) across other plants?"}
+    ],
+    qp:['Total financial risk exposure this week?','Q3 reliability KPI performance vs targets?','YTD DRO value delivered — what is the ROI?','Bearing MTBF trend since DRO deployment?'],
+    tags:['📍 47 assets · 2 critical','💰 $1.4M avoided MTD','📈 MTBF +18% vs baseline']
+  },
+  ot:{nm:'OT / Controls — Raj Iyer',ds:'Signal health, historian integrity, CMMS sync, sensor calibration, data pipeline validation',av:'📡',bg:'var(--rdm)',col:'var(--rd)',
+    gr:'Hi Raj. Integration status:\n\n<strong style="color:var(--t)">M-104: 4/4 channels nominal.</strong> Historian: 99.7% coverage last 30d.\n\n<strong style="color:var(--rd)">C-301 CH-31B dropout: 3.2% missing.</strong> Junction box J-301 — probable connector fault. SAP PM: synced 4m ago.',
+    actions:[
+      {icon:'📡',lbl:'Signal audit',nm:'Full Fleet Signal Report',col:'rgba(79,142,255,.12)',bc:'rgba(79,142,255,.35)',tc:'var(--ac2)',q:"Full signal quality audit: all 47 assets, each channel status, historian coverage %, dropout events, calibration currency, immediate issues"},
+      {icon:'🔧',lbl:'Fault diagnosis',nm:'Diagnose C-301 Dropout',col:'rgba(255,77,106,.1)',bc:'rgba(255,77,106,.35)',tc:'var(--rd)',q:"Diagnose C-301 CH-31B dropout: analyse pattern, probable cause at J-301, impact on DRO prediction confidence, recommended fix"},
+      {icon:'🔗',lbl:'Integration health',nm:'CMMS Integration Check',col:'rgba(46,204,138,.1)',bc:'rgba(46,204,138,.35)',tc:'var(--gn)',q:"SAP PM CMMS health: sync frequency, last write, failed writes last 24h, data completeness, outstanding issues to resolve"},
+      {icon:'📏',lbl:'Baseline config',nm:'Post-Repair Baseline Setup',col:'rgba(255,183,64,.1)',bc:'rgba(255,183,64,.35)',tc:'var(--am)',q:"What historian baselines and alert thresholds need configuring after M-104 bearing replacement? Target values for new SKF 6310-2RS"},
+      {icon:'✅',lbl:'Data validation',nm:'Validate M-104 Pipeline',col:'rgba(167,139,250,.1)',bc:'rgba(167,139,250,.35)',tc:'var(--pu)',q:"Validate M-104 data pipeline integrity: check for any gaps, calibration drift, signal anomalies, or CMMS sync issues in the last 30 days"},
+      {icon:'🛎',lbl:'Alert config',nm:'Review Alert Thresholds',col:'rgba(45,212,191,.1)',bc:'rgba(45,212,191,.3)',tc:'var(--tl)',q:"Review vibration and temperature alert thresholds across all critical assets — are they correctly calibrated for each bearing type and operating condition?"}
+    ],
+    qp:['Full signal quality report — all 47 assets?','C-301 CH-31B dropout: cause and fix?','CMMS integration health — any failed writes?','Validate M-104 data pipeline for completeness?'],
+    tags:['📡 M-104 signals: 4/4 OK','⚠ C-301 CH-31B dropout','🔗 SAP PM: synced 4m ago']
+  },
+  safety:{nm:'Safety Officer — Lisa Park',ds:'LOTO procedures, permit validation, PPE requirements, ISO compliance, crew qualifications',av:'🛡',bg:'var(--tdm)',col:'var(--tl)',
+    gr:'Hello Lisa. Safety status for active interventions:\n\n<strong style="color:var(--t)">M-104 — LOTO EL-104-A required.</strong> Zone D — mandatory isolation. PPE: Class B hearing + vibration gloves.\n\n<strong style="color:var(--am)">C-301 Thu:</strong> Verify IL-301-B currency before crew dispatch.',
+    actions:[
+      {icon:'📋',lbl:'Pre-task safety',nm:'M-104 Safety Brief',col:'rgba(45,212,191,.1)',bc:'rgba(45,212,191,.3)',tc:'var(--tl)',q:"Generate pre-task safety briefing for M-104 bearing replacement: hazards, LOTO EL-104-A steps, isolation points, PPE requirements, emergency contacts"},
+      {icon:'🔒',lbl:'Permit validation',nm:'Validate All Active Permits',col:'rgba(79,142,255,.12)',bc:'rgba(79,142,255,.35)',tc:'var(--ac2)',q:"Validate all active safety permits for this week: LOTO EL-104-A (M-104) and IL-301-B (C-301) — are both current and do they cover the planned scope?"},
+      {icon:'✅',lbl:'Compliance audit',nm:'ISO 10816-3 Fleet Audit',col:'rgba(255,183,64,.1)',bc:'rgba(255,183,64,.35)',tc:'var(--am)',q:"ISO 10816-3 compliance audit: which assets are in Zone C or D, what mandatory actions are required, current compliance status across fleet"},
+      {icon:'👷',lbl:'Crew safety',nm:'Crew Qualification Check',col:'rgba(46,204,138,.1)',bc:'rgba(46,204,138,.35)',tc:'var(--gn)',q:"Verify safety qualifications for M-104 crew: LOTO certification status and expiry for T.Rodriguez and K.Mensah, PPE availability, training gaps"},
+      {icon:'⚠',lbl:'Risk assessment',nm:'Pre-Job Risk Assessment',col:'rgba(255,77,106,.1)',bc:'rgba(255,77,106,.35)',tc:'var(--rd)',q:"Conduct pre-job risk assessment for M-104 bearing replacement: all hazards, likelihood, severity, controls in place, residual risk level"},
+      {icon:'📊',lbl:'Compliance reporting',nm:'Weekly Safety Compliance Report',col:'rgba(167,139,250,.1)',bc:'rgba(167,139,250,.35)',tc:'var(--pu)',q:"Weekly safety compliance report: all active jobs this week, permit status, LOTO in place, any near-misses or observations to log"}
+    ],
+    qp:['All safety requirements for M-104 intervention?','Is LOTO EL-104-A current — what does it cover?','ISO 10816-3 compliance status across the fleet?','Pre-task safety brief for M-104 crew?'],
+    tags:['🛡 LOTO EL-104-A req.','⚠ Zone D · ISO 10816-3','✅ No confined space']
+  }
+};
+
+// Agent nodes data with per-asset, per-persona outputs
+const AG_NODES=[
+  {ico:'🗄',nm:'Data Foundation Agent',role:'Validates and contextualises all sensor and enterprise data — ensures every downstream decision is based on trusted, complete inputs.',
+    kpis:{Latency:'0.12s','Signals ingested':'4 channels','Missing intervals':'0.3%','CMMS records':'14 linked','Historian coverage':'99.7%'},
+    assetOut:{
+      'M-104':{supervisor:'4/4 signals validated · CMMS current · Alert confirmed · Asset on critical production path',engineer:'Signal integrity 99.7% · CH-12A,TT-104,CT-104,PT-104 all nominal · No calibration drift',maintenance:'Asset master loaded · Bearing spec confirmed: SKF 6310-2RS · Last replaced 14m ago',manager:'M-104 confirmed Line 4 bottleneck · Production path dependency: HIGH',executive:'47/47 assets streaming · Fleet data quality 99.1% · No historian gaps on critical assets',ot:'M-104: all 4 channels nominal · CMMS records current · Note: C-301 CH-31B 3.2% dropout',safety:'Asset hazard profile loaded · LOTO EL-104-A: current (Nov 2023) · No confined space flag'},
+      'P-207':{supervisor:'4/4 signals validated · P-207 on secondary production path · No data gaps',engineer:'Signal integrity 98.4% · BSF sub-harmonic confirmed genuine feature, not artefact',maintenance:'Asset master: FAG 6206-2RSR · 8 months since last replacement · Lube type: Mobil SHC 100',manager:'P-207 non-bottleneck · Partial throughput risk only if failure occurs',ot:'P-207 signals nominal · No dropout events · Historian coverage 99.1%',safety:'LOTO IL-207-B: current · Zone C vibration · Standard PPE applies'},
+      'C-301':{supervisor:'3/4 signals nominal · CH-31B: 3.2% dropout flagged · Assembly line asset',engineer:'CH-31B dropout reduces RUL confidence from 85% to 71% · Other channels clean',maintenance:'Asset master: NSK 6310 · 11 months since replacement · Cage fault pattern confirmed',ot:'CH-31B intermittent dropout at junction box J-301 · Probable connector fault',safety:'IL-301-B: last reviewed Aug 2023 · Confirm currency before Thursday'}
+    }
+  },
+  {ico:'📡',nm:'Monitoring Agent',role:'Continuously scans live machine behaviour to detect early anomalies before fixed threshold alarms fire — catching faults days earlier.',
+    kpis:{Latency:'0.08s','Detection method':'ML envelope analysis','First detection':'3 days ago','Alert threshold':'3× baseline','False positive rate':'2.1%'},
+    assetOut:{
+      'M-104':{supervisor:'BPFO anomaly 4.02× baseline · Severity HIGH · Alert raised 08:04 · Stage 3 confirmed',engineer:'Envelope spectrum: BPFO 87.4 Hz + 2× 174.8 Hz + 3× 262.2 Hz · Sidebands at ±24.7 Hz',maintenance:'Urgency: HIGH · Planned intervention within 48h · Wednesday window identified',manager:'Critical alert on Line 4 bottleneck · Production risk: HIGH · Decision needed today',executive:'1 critical event active · 2 secondary warnings in queue · All within detection SLA',ot:'M-104 BPFO on clean signal — not artefact · Spectral feature consistent at 3 consecutive scans',safety:'Zone D threshold exceeded · ISO 10816-3 mandatory isolation flag raised · No approach without LOTO'},
+      'P-207':{supervisor:'BSF sub-harmonic at 0.46× · Early-stage indicator · Not imminent · Monitor',engineer:'0.46× BSF pattern: early cage or inner race involvement · Kurtosis 3.1 — below fault threshold',maintenance:'Low urgency · Lubrication check sufficient · No replacement parts needed yet',manager:'Secondary path asset · Low risk currently · Routine maintenance adequate',ot:'P-207 vibration channel clean · Feature genuine · No signal issues',safety:'Zone C · No mandatory isolation · Standard lube check procedure applies'},
+      'C-301':{supervisor:'Cage fault pattern at 0.82× BPFO · Early-stage · ~26 days RUL · Schedule Thursday',engineer:'BSF family with irregular spacing — cage deformation or lube starvation likely · Kurtosis 2.8',maintenance:'Cage inspection + lube top-up · 1.5h job · K. Mensah Thursday',ot:'Note: CH-31B dropout affects detection confidence on C-301 specifically',safety:'Zone C · IL-301-B required for inspection · Confirm currency before crew dispatch'}
+    }
+  },
+  {ico:'📈',nm:'Predictive Risk Agent',role:'Estimates failure probability, remaining useful life and confidence intervals — enabling proactive action before disruption occurs.',
+    kpis:{Latency:'1.4s',Model:'LSTM + Weibull','Training samples':'847 cases','Confidence':'82%','Last retrained':'3 days ago'},
+    assetOut:{
+      'M-104':{supervisor:'RUL: 5–8 days · Failure by Saturday: 67% · Act by Wednesday · Critical',engineer:'LSTM+Weibull · RUL median 6.4d · P10: 4.1d · P90: 9.3d · 82% confidence interval',maintenance:'Optimal intervention window: Wednesday 06:00–10:00 · 4h duration confirmed',manager:'Emergency failure probability by Sat: 67% · Expected cost: $520–750K unmanaged',executive:'M-104 contributes 56% of this week\'s portfolio risk · Approve WO = $601K avoidance',ot:'Model inputs clean · No data quality degradation affecting RUL estimate',safety:'Operating M-104 without intervention: HIGH injury risk if bearing seizes at speed'},
+      'P-207':{supervisor:'RUL ~18 days · Low urgency · Wednesday lube check appropriate · No emergency',engineer:'BSF sub-harmonic: early-stage indicator · RUL estimate: 15–22 days · Conf: 74% · Monitor',maintenance:'No replacement urgency · Lubrication may extend RUL by 5–8 days',manager:'Probability-weighted risk: ~$35K · Non-bottleneck · Routine action sufficient',ot:'P-207 prediction confidence 98% — clean signal inputs',safety:'Low risk · No urgent isolation requirement'},
+      'C-301':{supervisor:'RUL ~26 days · Thursday inspection appropriate · Not urgent vs M-104',engineer:'Cage fault: early stage · RUL 22–32 days · Conf: 71% (reduced by CH-31B dropout)',maintenance:'Inspection + lube adequate · No replacement parts required at this stage',ot:'RUL confidence reduced to 71% due to CH-31B signal dropout · Resolve sensor before Thursday'}
+    }
+  },
+  {ico:'🔬',nm:'Failure Intelligence Agent',role:'Identifies the specific fault mode, severity stage and probable root cause — so teams know exactly what is failing, not just that something is wrong.',
+    kpis:{Latency:'0.61s','Fault class':'Outer race spall','Confidence':'94%','Severity stage':'3 of 4','Similar cases found':'3'},
+    assetOut:{
+      'M-104':{supervisor:'Outer race spall Stage 3 confirmed · 94% confidence · No ambiguity · Replacement required',engineer:'Outer race spall · Kurtosis 6.8 · Crest 9.2 · ~35% surface damage · 3 KB case matches',maintenance:'Replacement confirmed (not just inspection) at Stage 3 · SKF 6310-2RS specified',manager:'Fault identified and unambiguous — planned repair is unequivocally correct response',executive:'Failure avoidable with planned action · No secondary damage expected if acted Wednesday',ot:'Fault confirmed on clean signal data — not a sensor artefact · C-301 separate: cage fault',safety:'Fault mode: outer race spall · No explosive failure risk · Standard LOTO isolation sufficient'},
+      'P-207':{supervisor:'BSF sub-harmonic: cage/inner race — early stage · No immediate action required',engineer:'Stage 1 bearing fault · Not yet BPFI-class · Lubrication degradation most probable cause',maintenance:'Inspection and lube appropriate response · No replacement at this stage',ot:'P-207 fault genuine — not signal artefact'},
+      'C-301':{supervisor:'Cage fault pattern: early stage · 2023 lube starvation likely initiating cause',engineer:'Cage deformation or lube starvation · Kurtosis 2.8 · Stage 1 · Inspection will clarify',ot:'C-301 fault diagnosis confidence: 71% due to CH-31B dropout · Resolve signal for full confidence'}
+    }
+  },
+  {ico:'📚',nm:'Knowledge Agent',role:'Retrieves the right SOPs, manuals, historical cases and repair guidance — making every recommendation immediately actionable in the field.',
+    kpis:{Latency:'0.33s','SOP version':'Rev 4.1','KB coverage':'94%','Cases matched':'3','Parts in stock':'Confirmed'},
+    assetOut:{
+      'M-104':{supervisor:'SOP retrieved · 3 cases avg 4.2h repair · All ended in successful replacement · Parts confirmed',engineer:'SOP M-104-REP-04 Rev 4.1 · FFT benchmarks from 3 KB cases · Torque spec: 85 Nm',maintenance:'Job pack ready: SOP + tools list + lube spec (Mobil SHC 100) + parts bin location A-14',manager:'Precedent: 3 similar cases planned in 4.2h avg · No production overruns in any case',executive:'Historical avoidance on similar cases: $580K avg · This event tracking to $601K',ot:'Post-repair baseline target: ≤2.5 mm/s at operating temp · Set in historian after completion',safety:'SOP includes full safety checklist · PPE spec confirmed · LOTO steps cross-referenced'},
+      'P-207':{supervisor:'Lube check SOP P-207-LUB-02 retrieved · 2h job · 1 tech · All tools in shop',engineer:'Post-lube re-measurement protocol: repeat vibration at 24h · Kurtosis threshold: 4.0',maintenance:'Job pack: lube spec (Mobil SHC 100, 200mL) · Housing cover torque: 35 Nm',safety:'LOTO IL-207-B referenced in SOP · Standard PPE confirmed'},
+      'C-301':{supervisor:'Cage inspection SOP C-301-INS-01 retrieved · 1.5h · 1 tech · No special tools',engineer:'Post-inspection: re-lube with NSK grease (50g) · Recheck vibration baseline after 48h',maintenance:'No additional parts beyond lubricant · K. Mensah has done this inspection before'}
+    }
+  },
+  {ico:'⚡',nm:'Prescriptive Optimisation Agent',role:'Recommends the single best next action by balancing failure risk, production constraints, maintenance windows, parts availability and crew capacity.',
+    kpis:{Latency:'0.82s','Recommended action':'Replace bearing','Optimal window':'Wed 06:00–10:00','Net avoidance value':'$601K','Alternative considered':'Defer (rejected)'},
+    assetOut:{
+      'M-104':{supervisor:'Action: Replace bearing · Window: Wed 06:00 · Approve WO-2024-1847 · $601K net avoidance',engineer:'Replace at Stage 3 — inspection only not sufficient · Same-spec bearing confirmed correct',maintenance:'Wed 06:00 slot · T.Rodriguez + K.Mensah available · All parts reserved · $18K total cost',manager:'Planned Wednesday: $18K · Emergency alternative: $619K+ · Approve WO today',executive:'33× ROI on repair cost · Risk-adjusted NPV: +$583K · Clear approval case',ot:'Post-repair: set historian baseline ≤2.5 mm/s · Update CMMS asset record after completion',safety:'Planned replacement: LOW injury risk · All isolation achievable · No hot work permit needed'},
+      'P-207':{supervisor:'Action: Lubrication check + baseline Wed 09:00 · No urgency beyond scheduled slot',engineer:'Lube + re-measure · Escalate to inspection if kurtosis rises above 4.0 post-lube',maintenance:'2h Wednesday job · T.Rodriguez · Mobil SHC 100 in stock · No bearing replacement needed'},
+      'C-301':{supervisor:'Action: Cage inspection + lube top-up · Thu 14:00 · K. Mensah assigned · Adequate',engineer:'Inspect cage, re-lube, recheck vibration 48h later · May defer replacement to a future WO'}
+    }
+  },
+  {ico:'🚀',nm:'Executor Agent',role:'Turns approved recommendations into concrete actions — creates work orders, reserves parts, assigns crew, updates CMMS, and sends notifications.',
+    kpis:{Latency:'0.19s','WO created':'WO-2024-1847','SAP PM status':'Draft — awaiting approval','Parts reserved':'SKF 6310-2RS x1','Crew notified':'Pending approval'},
+    assetOut:{
+      'M-104':{supervisor:'WO-2024-1847 drafted · Parts reserved at Bin A-14 · Awaiting your approval to release',maintenance:'WO created · SKF 6310-2RS reserved · Wed 06:00 crew slot held · SAP PM: Draft',manager:'WO pending approval — all logistics ready · Zero lead time on approval · Approve now',executive:'WO drafted · On approval: SAP PM → RELEASED, crew notified, parts released',ot:'On approval: SAP PM status → RELEASED · Historian flagged for post-repair baseline setup',safety:'WO includes full safety checklist · LOTO EL-104-A referenced · Crew qualifications verified'},
+      'P-207':{supervisor:'WO-2024-1831 scheduled · T.Rodriguez confirmed · Wed 09:00 slot booked',maintenance:'WO-2024-1831 released · Crew confirmed · Lube in stock · All logistics locked'},
+      'C-301':{supervisor:'WO-2024-1822 scheduled · K.Mensah confirmed · Thu 14:00 slot booked',maintenance:'WO-2024-1822 released · K.Mensah assigned · Verify IL-301-B currency before start'}
+    }
+  },
+  {ico:'🧠',nm:'Learning & Memory Agent',role:'Captures confirmed outcomes, updates fault taxonomy, and continuously improves prediction accuracy — every closed event makes the system smarter.',
+    kpis:{Latency:'—','Events logged MTD':'47','Model accuracy':'91.4%','Accuracy trend':'+1.4% this quarter','Retraining queue':'2 events pending'},
+    assetOut:{
+      'M-104':{supervisor:'Event logged · Outcome capture queued for post-repair · Will improve future RUL estimates',engineer:'Fault pattern added to KB · LSTM retraining queued · Prediction drift monitored',maintenance:'Repair time + parts usage tracked · MRO demand model updating',manager:'Cost avoidance tracked in KPI dashboard · Event added to monthly reliability report',executive:'YTD avoidance: $2.3M tracked · Model accuracy: 91.4% (+1.4% this quarter)',ot:'Signal quality event logged · C-301 dropout incident recorded · Baseline update queued post-repair',safety:'Safety compliance record updating · LOTO completion to be logged after repair'},
+      'P-207':{engineer:'P-207 sub-harmonic pattern logged · Will update lubrication-degradation model',maintenance:'P-207 lube event tracked · Part of MRO lubrication interval optimisation model'},
+      'C-301':{engineer:'Cage fault event logged · Linked to 2023 lube starvation event for root cause model',ot:'CH-31B signal dropout logged as infrastructure issue · Separate from bearing fault model'}
+    }
+  }
+];
+
+// Per-persona tasks for each agent node (persona × asset × agent)
+const PERSONA_TASKS={
+  supervisor:{
+    'M-104':[
+      ['Review alert', 'DRO has raised M-104 as CRITICAL. Review the fault summary: outer race spall Stage 3, RUL 5–8 days, Line 4 bottleneck asset.'],
+      ['Assess run risk', 'Decide: approve Wednesday intervention or run to weekend. Running to Saturday = 67% failure probability and $619K+ exposure.'],
+      ['Approve WO-2024-1847', 'Approve the work order to confirm Wednesday 06:00 crew deployment. All parts and crew are ready — zero lead time on approval.'],
+      ['Brief shift team', 'Notify Line 4 operators: watch for worsening vibration or noise. Call immediately if speed drops or unusual sounds.'],
+      ['Prepare handover', 'Include M-104 status, WO approval decision, and Wednesday window in shift handover brief for incoming supervisor.']
+    ],
+    'P-207':[
+      ['Note secondary warning', 'P-207 BSF sub-harmonic flagged — early stage. RUL ~18 days. Not urgent vs M-104 but keep on watch list.'],
+      ['Confirm Wednesday slot', 'Ensure P-207 lubrication check at Wed 09:00 is not displaced by M-104 work. T.Rodriguez can cover both.']
+    ],
+    'C-301':[
+      ['Note cage fault warning', 'C-301 cage fault pattern at early stage. RUL ~26 days. Thursday 14:00 K.Mensah inspection is appropriate.'],
+      ['Flag sensor issue to OT', 'CH-31B sensor dropout on C-301 — ask Raj to inspect junction box J-301 before Thursday crew visit.']
+    ]
+  },
+  engineer:{
+    'M-104':[
+      ['Analyse FFT signature', 'Review BPFO harmonic family: 1× at 87.4 Hz (4.02×), 2× at 174.8 Hz, 3× at 262.2 Hz. Sidebands at ±24.7 Hz confirm rotational spall modulation.'],
+      ['Validate Stage 3 classification', 'Confirm: Kurtosis 6.8 (>4.0 threshold), Crest Factor 9.2. Pattern consistent with 25–40% outer race surface damage.'],
+      ['Run RUL confidence intervals', 'LSTM+Weibull gives median 6.4 days, P10: 4.1 days, P90: 9.3 days at 82% confidence. Load sensitivity: +20% load → reduces median by 1.4d.'],
+      ['Match KB cases', 'Three KB matches: Cases 2021-047, 2022-183, 2023-092. All reached failure in 4.1–9.3 days from this signature. Average post-repair baseline: 1.4 mm/s.'],
+      ['Specify post-repair QA', 'Set pass/fail criteria: post-repair vibration ≤2.5 mm/s at operating temp, temperature ≤55°C. Recheck at 1h and 24h post-start.']
+    ],
+    'P-207':[
+      ['Characterise BSF pattern', 'P-207 shows 0.46× BSF sub-harmonic — characteristic of early-stage cage or inner race involvement. Kurtosis 3.1 (below 4.0 fault threshold).'],
+      ['Determine lube vs inspect', 'Lubrication degradation is the most probable cause at this stage. Re-lube and recheck kurtosis at 24h. Escalate if kurtosis rises above 4.0.']
+    ],
+    'C-301':[
+      ['Assess cage fault pattern', 'C-301 shows BSF family with irregular spacing — cage deformation or lube starvation. Linked to 2023 lube starvation event (probable cause).'],
+      ['Account for sensor dropout', 'CH-31B 3.2% dropout reduces RUL confidence from 85% to 71%. Resolve sensor before drawing further diagnostic conclusions.']
+    ]
+  },
+  maintenance:{
+    'M-104':[
+      ['Confirm parts ready', 'SKF 6310-2RS: Bin A-14, Qty 3. Mobil SHC 100: 2L in stock. Seal kit: available. Collect to staging area by Tuesday afternoon.'],
+      ['Assign and confirm crew', 'T.Rodriguez (lead, LOTO EL-104-A qualified) + K.Mensah (LOTO qualified). Both available Wednesday 06:00. Send confirmation notifications.'],
+      ['Prepare job pack', 'SOP M-104-REP-04 Rev 4.1: isolation, housing removal, press fit SKF 6310-2RS, pre-lube Mobil SHC 100, torque to 85 Nm, baseline check.'],
+      ['Book Wednesday window', 'Confirm Wed 06:00–10:00 slot in maintenance schedule. Block for 4h + 30min buffer. Production team notified of planned stop.'],
+      ['Log actual vs estimated', 'After repair: log actual hours and parts used vs estimate. Update MRO model for future M-104 class jobs.']
+    ],
+    'P-207':[
+      ['Confirm T.Rodriguez Wed 09:00', 'P-207 lube check at 09:00 after M-104 completes. T.Rodriguez can lead both jobs in sequence.'],
+      ['Prepare lube kit', 'Mobil SHC 100 (200mL), housing cover gasket if needed. Tools: housing wrench, lube gun. Job estimated 2h.']
+    ],
+    'C-301':[
+      ['Confirm K.Mensah Thu 14:00', 'K.Mensah assigned for C-301 cage inspection Thursday. Confirm availability and LOTO awareness for IL-301-B.'],
+      ['Flag J-301 sensor to Raj', 'Ask OT team to check junction box J-301 before Thursday so sensor is repaired before the crew visit.']
+    ]
+  },
+  manager:{
+    'M-104':[
+      ['Review production exposure', 'M-104 is Line 4 bottleneck. Unplanned failure: 4–6h stop at $41K/h = $164–246K/event + emergency repair costs + winding damage risk.'],
+      ['Approve WO from ops level', 'WO-2024-1847 is pending. Approving today: $18K cost, $601K avoidance, Wednesday window available. All logistics ready.'],
+      ['Confirm production plan', 'Notify production planning: 4h planned stop Wednesday 06:00–10:00. Adjust Line 4 daily targets accordingly.'],
+      ['Review contingency', 'If M-104 fails before Wednesday: emergency crew mobilisation plan, production re-route to Line 3 partial capacity, customer communication trigger.']
+    ],
+    'P-207':[
+      ['Confirm secondary path plan', 'P-207 on Line 2 secondary path. Lubrication check Wednesday is adequate. No production plan adjustment needed.']
+    ],
+    'C-301':[
+      ['Note assembly line impact', 'C-301 on assembly line. Thursday inspection causes no production stop. K.Mensah inspection during low-production window.']
+    ]
+  },
+  executive:{
+    'M-104':[
+      ['Review portfolio risk', 'M-104 contributes 56% of this week\'s total portfolio risk at $500K–750K probability-weighted exposure.'],
+      ['Note DRO ROI on this event', '$601K avoidance at $18K repair cost = 33× ROI. Consistent with YTD performance of $2.3M avoidance.'],
+      ['Board impact', 'This event is a strong DRO value example: detection 3 days before alarm threshold, full logistics ready, WO drafted automatically.']
+    ],
+    'P-207':[
+      ['Note portfolio position', 'P-207 is a monitored secondary risk. Not a leadership concern currently. DRO managing through routine schedule.']
+    ]
+  },
+  ot:{
+    'M-104':[
+      ['Confirm M-104 signal health', 'All 4 channels nominal: CH-12A (vib), TT-104 (temp), CT-104 (current), PT-104 (speed). Historian 99.7% last 30d.'],
+      ['Validate fault is real', 'BPFO pattern confirmed across 3 consecutive scans. Not a sensor artefact. Signal quality score: 0.97.'],
+      ['Prepare post-repair baseline', 'After repair: set historian alert at ≤2.5 mm/s. Update CMMS asset record with new bearing install date and model.']
+    ],
+    'C-301':[
+      ['Diagnose CH-31B dropout', '3.2% missing intervals in 30–90s bursts — consistent with loose connector at J-301. Inspect cable and connector before Thursday.'],
+      ['Assess DRO confidence impact', 'Dropout reduces C-301 RUL confidence from 85% to 71%. Resolve before Thursday maintenance visit to restore full diagnostic accuracy.']
+    ],
+    'P-207':[
+      ['Confirm P-207 signals clean', 'P-207 vibration channel clean. Sub-harmonic at 0.46× is a genuine bearing feature confirmed on quality signal data.']
+    ]
+  },
+  safety:{
+    'M-104':[
+      ['Confirm LOTO EL-104-A valid', 'LOTO EL-104-A: issued 2023-11-14, valid to 2024-11-14. Covers MCB-104A, MCB-104B, IL-104-M. Current — no renewal needed.'],
+      ['Verify ISO Zone D compliance', 'M-104 at 14.7 mm/s — Zone D under ISO 10816-3. Mandatory isolation before any approach. No exceptions.'],
+      ['Check crew qualifications', 'T.Rodriguez and K.Mensah: both LOTO EL-104-A certified. Confirm PPE availability: Class B hearing protection + vibration-resistant gloves.'],
+      ['Issue pre-task safety brief', 'Conduct pre-task brief covering: hazards, isolation steps, PPE, emergency stop location, first aid contact, re-energisation procedure.']
+    ],
+    'C-301':[
+      ['Check IL-301-B currency', 'IL-301-B last reviewed Aug 2023. Review due Feb 2024 — confirm it is still current before Thursday crew dispatch.'],
+      ['Confirm Zone C requirements', 'C-301 at 3.2 mm/s — Zone C. No mandatory isolation under ISO 10816-3, but LOTO IL-301-B still required per site procedure.']
+    ],
+    'P-207':[
+      ['Confirm IL-207-B for P-207', 'P-207 LOTO IL-207-B is current (reviewed Sep 2023). Zone C — standard PPE sufficient. Low risk task.']
+    ]
+  }
+};
+
+// Asset configs for agent graph (variable pipeline state per asset)
+const ASSET_AG_STATE={
+  'M-104':[{s:'nd'},{s:'nd'},{s:'nr'},{s:'nd'},{s:'nd'},{s:'ni'},{s:'ni'},{s:'ni'}],
+  'P-207':[{s:'nd'},{s:'nd'},{s:'nd'},{s:'nd'},{s:'nd'},{s:'ni'},{s:'ni'},{s:'ni'}],
+  'C-301':[{s:'nd'},{s:'nd'},{s:'nd'},{s:'ni'},{s:'nd'},{s:'ni'},{s:'ni'},{s:'ni'}],
+  'M-089':[{s:'nd'},{s:'nd'},{s:'nd'},{s:'nd'},{s:'nd'},{s:'ni'},{s:'ni'},{s:'ni'}],
+  'G-112':[{s:'nd'},{s:'nd'},{s:'nd'},{s:'nd'},{s:'nd'},{s:'ni'},{s:'ni'},{s:'ni'}]
+};
+
+// Assets data
+const ASSETS=[
+  {id:'M-104',nm:'Drive Motor — Line 4 Press Station',tp:'Motor',br:'SKF 6310-2RS',kw:45,rpm:1480,ln:'Line 4',st:'critical',rul:'~6 days',vib:14.7,tmp:87.4,bpfo:4.02,last:'14 months',iso:'Zone D',
+    trend:[22,21,20,18,15,13,11,10,8,7,6,5],
+    faults:[{dt:'2024-01-07',ty:'Outer Race Spall',st:'Stage 3 Active',sc:'var(--rd)'},{dt:'2023-03-12',ty:'Rotor Imbalance',st:'Corrected',sc:'var(--gn)'},{dt:'2022-09-01',ty:'Shaft Looseness',st:'Corrected',sc:'var(--gn)'}],
+    insights:{
+      supervisor:[{l:'Can M-104 run safely until Saturday?',c:'r'},{l:'What do I tell Line 4 operators?',c:''},{l:'Consequence if M-104 seizes mid-shift?',c:'r'}],
+      engineer:[{l:'Full FFT analysis for M-104',c:'b'},{l:'RUL confidence interval?',c:''},{l:'Root cause of outer race initiation?',c:''}],
+      maintenance:[{l:'All parts in stock for M-104?',c:'g'},{l:'Labour estimate for replacement?',c:''},{l:'What tools are needed?',c:''}],
+      manager:[{l:'Production impact if M-104 fails?',c:'r'},{l:'Cost: planned vs emergency?',c:'b'},{l:'Line 4 OEE impact?',c:''}],
+      executive:[{l:'Financial exposure from M-104?',c:'r'},{l:'DRO ROI on this event?',c:'g'},{l:'How does M-104 affect Q3?',c:''}],
+      ot:[{l:'All M-104 signals healthy?',c:'g'},{l:'Any historian gaps last 48h?',c:''},{l:'CMMS current for M-104?',c:''}],
+      safety:[{l:'LOTO EL-104-A — is it current?',c:'b'},{l:'ISO 10816-3 status for M-104?',c:'r'},{l:'PPE for bearing replacement?',c:''}]
+    },
+    chatResp:{
+      supervisor:'<strong style="color:var(--t)">M-104 — Critical. Approve WO-2024-1847 today.</strong><br>Running to Saturday: 67% failure probability, 12–18h unplanned stop, $619K+ cost. Wednesday planned action: $18K. Net avoidance: $601K. Parts ready, crew available, window available. The decision is clear.',
+      engineer:'<strong style="color:var(--t)">M-104 FFT — outer race spall Stage 3.</strong><br>BPFO 4.02× at 87.4 Hz, harmonics at 2× and 3×. Sidebands at ±24.7 Hz (shaft frequency) confirm rotational spall modulation. Kurtosis 6.8, Crest Factor 9.2. Estimated 25–40% surface damage. Three KB cases failed in 4.1–9.3 days from this stage.',
+      maintenance:'<strong style="color:var(--gn)">Parts confirmed.</strong> SKF 6310-2RS: Bin A-14, Qty 3, $340. Mobil SHC 100: 2L in stock. Seal kit available. All tools in shop. Collect to staging Tuesday afternoon. Wednesday crew: T.Rodriguez (lead) + K.Mensah, both LOTO-qualified.',
+      manager:'<strong style="color:var(--rd)">Line 4 bottleneck risk: HIGH.</strong> Unplanned failure: 4–6h × $41K/h = $164–246K + emergency costs + possible winding damage = $619K+. Planned Wednesday: $18K. Net avoidance: $601K. Approve WO today — all logistics are ready.',
+      executive:'M-104 is the highest-value risk event this week. 67% × $619K = $415K expected-value loss without action. Planned approval delivers $601K avoidance at 33× ROI. YTD: 3 similar events prevented = $1.4M. This is textbook DRO value delivery.',
+      ot:'<strong style="color:var(--gn)">M-104: all 4 channels nominal.</strong> CH-12A clean signal — BPFO confirmed genuine, not artefact. TT-104: 87.4°C consistent with increased friction load. CT-104: +2.3% current vs baseline. PT-104: speed stable at 1474 RPM. Historian: 99.7% last 30d.',
+      safety:'<strong style="color:var(--rd)">Zone D exceeded — mandatory isolation required.</strong> LOTO EL-104-A is current (Nov 2023, valid Nov 2024). MCB-104A, MCB-104B, IL-104-M must all be locked out. No confined space, no hot work. PPE: Class B hearing + vibration-resistant gloves. T.Rodriguez and K.Mensah are both LOTO-certified.'
+    }
+  },
+  {id:'P-207',nm:'Feed Pump — Station 2',tp:'Pump',br:'FAG 6206-2RSR',kw:22,rpm:2900,ln:'Line 2',st:'warning',rul:'~18 days',vib:4.1,tmp:61.2,bpfo:0.46,last:'8 months',iso:'Zone C',
+    trend:[5,5,4.8,4.7,4.5,4.4,4.3,4.2,4.2,4.1,4.1,4.1],
+    faults:[{dt:'2024-01-05',ty:'Inner Race Sub-harmonic',st:'Monitor',sc:'var(--am)'},{dt:'2023-07-19',ty:'Cavitation Pattern',st:'Corrected',sc:'var(--gn)'}],
+    insights:{
+      supervisor:[{l:'P-207 urgency vs M-104?',c:''},{l:'Can P-207 wait until Wednesday?',c:'g'}],
+      engineer:[{l:'Inner race vs cage — how to tell on P-207?',c:'b'},{l:'P-207 stage — early or mid?',c:''}],
+      maintenance:[{l:'P-207 lube check — what is involved?',c:'g'},{l:'Can P-207 share crew with M-104?',c:''}],
+      ot:[{l:'P-207 signal quality check',c:'g'}],
+      safety:[{l:'LOTO for P-207 lube check?',c:'b'}]
+    },
+    chatResp:{
+      supervisor:'P-207 is <strong style="color:var(--am)">secondary — watch, not act urgently.</strong> BSF sub-harmonic at 0.46× is early-stage. RUL ~18 days. Wednesday 09:00 lube check is the right response. Watch for: vibration above 5 mm/s or temperature above 70°C.',
+      engineer:'P-207 shows <strong style="color:var(--am)">0.46× BSF sub-harmonic</strong> — early cage or inner race involvement, not yet BPFI-class. Kurtosis 3.1 (below 4.0 fault threshold). Likely lubrication degradation. Lube check first, recheck kurtosis at 24h post-lube.',
+      maintenance:'P-207 lube check: 2h, 1 tech (T.Rodriguez after M-104 at 09:00). Job: remove housing cover, inspect, re-lube with Mobil SHC 100 (200mL). Post-lube vibration target: ≤3.5 mm/s.',
+      manager:'P-207 is non-bottleneck on Line 2 secondary path. ~$35K probability-weighted risk. Routine Wednesday lube check is adequate. No management action needed.',
+      executive:'P-207 contributes ~$35K to weekly portfolio risk. Non-bottleneck, managed through routine maintenance. Not a leadership concern.',
+      ot:'P-207 signals nominal. 0.46× BSF is genuine bearing feature on clean signal. No historian gaps. TT-207 at 61.2°C — expected range.',
+      safety:'P-207 lube check: standard low-risk. LOTO IL-207-B required (current Sep 2023). Zone C — no mandatory isolation under ISO 10816-3 but LOTO per site procedure. Standard PPE.'
+    }
+  },
+  {id:'C-301',nm:'Conveyor Drive — Assembly Line',tp:'Conveyor',br:'NSK 6310',kw:15,rpm:960,ln:'Assembly',st:'warning',rul:'~26 days',vib:3.2,tmp:54.8,bpfo:0.82,last:'11 months',iso:'Zone C',
+    trend:[3,3,3.1,3.0,3.2,3.1,3.2,3.2,3.1,3.3,3.2,3.2],
+    faults:[{dt:'2024-01-06',ty:'Cage Fault Pattern',st:'Monitor',sc:'var(--am)'},{dt:'2023-05-22',ty:'Lube Starvation',st:'Corrected',sc:'var(--gn)'}],
+    insights:{
+      supervisor:[{l:'C-301 urgency vs M-104?',c:''},{l:'Can C-301 wait until Thursday?',c:'g'}],
+      engineer:[{l:'Cage fault vs inner race on C-301?',c:'b'},{l:'C-301 lube history — related fault?',c:''}],
+      maintenance:[{l:'What does C-301 inspection involve?',c:'g'}],
+      ot:[{l:'C-301 CH-31B dropout — likely cause?',c:'r'},{l:'Impact on DRO confidence?',c:''}],
+      safety:[{l:'Safety req. for C-301 inspection',c:''},{l:'IL-301-B currency check',c:'b'}]
+    },
+    chatResp:{
+      supervisor:'C-301 is <strong style="color:var(--gn)">low urgency</strong> vs M-104. Cage fault at early stage, ~26 days RUL. Thursday 14:00 K.Mensah inspection is right. Separate: ask Raj to inspect J-301 sensor before Thursday.',
+      engineer:'C-301 shows <strong style="color:var(--am)">cage fault at 0.82× BPFO</strong>. BSF family with irregular spacing — cage deformation or lube starvation (2023 event is probable cause). Kurtosis 2.8 — below fault threshold. Note: CH-31B dropout reduces RUL confidence to 71%.',
+      maintenance:'C-301 inspection: 1.5h, K.Mensah Thursday. Inspect cage, check debris, top up NSK grease. No parts needed. Also flag J-301 sensor to Raj before Thursday.',
+      ot:'<strong style="color:var(--rd)">C-301 CH-31B dropout is the priority.</strong> 3.2% missing in 30–90s bursts — probable loose connector at J-301. Reduces DRO confidence from 85% to 71%. Inspect J-301 before Thursday.',
+      safety:'C-301 inspection: standard risk. IL-301-B required — check currency (last Aug 2023, review due Feb 2024). Zone C — standard PPE sufficient.',
+      manager:'C-301 on assembly line — non-bottleneck. Thursday inspection causes no production stop. Minimal financial risk.',
+      executive:'C-301 is a monitored low-risk event. Managed through routine schedule. No leadership action needed.'
+    }
+  },
+  {id:'M-089',nm:'Drive Motor — Line 2',tp:'Motor',br:'FAG 6309-2Z',kw:37,rpm:1480,ln:'Line 2',st:'healthy',rul:'~37 days',vib:1.8,tmp:48.2,bpfo:0.9,last:'2 months',iso:'Zone A',
+    trend:[8,7,5,3,2.2,2,1.9,1.8,1.8,1.8,1.8,1.8],
+    faults:[{dt:'2023-12-29',ty:'Emergency Seizure Failure',st:'Bearing replaced',sc:'var(--t3)'}],
+    insights:{
+      supervisor:[{l:'M-089 health post-replacement?',c:'g'}],
+      engineer:[{l:'M-089 run-in vibration normal?',c:'g'},{l:'Installation issues to watch for?',c:''}],
+      maintenance:[{l:'M-089 next inspection milestone?',c:''}],
+      safety:[{l:'M-089 post-repair safety clearance?',c:'g'}]
+    },
+    chatResp:{
+      supervisor:'M-089 is <strong style="color:var(--gn)">healthy</strong>. Vibration settled to 1.8 mm/s, temp 48.2°C, Zone A. New FAG 6309-2Z running normally at 2 months. Note: this asset failed in December as an emergency — $87K, 10.5h downtime — the DRO warning 6 days prior was not actioned. M-104 is now at the same point.',
+      engineer:'M-089 run-in normal. Vibration settled from 8 mm/s at install to 1.8 mm/s at 2 months — consistent with seat conformance. Kurtosis 1.8, no BPFO activity. Next inspection: 6-month milestone June 2024.',
+      maintenance:'M-089: clear. Next action June 2024 6-month inspection. No parts to pre-order.',
+      safety:'M-089 safety clearance confirmed. LOTO de-issued post-repair. Zone A — no restrictions.',
+      manager:'M-089 healthy — no action needed.',
+      executive:'M-089 healthy. Its December emergency failure at $87K (vs DRO warning not actioned) is a key reference case for the M-104 approval decision.',
+      ot:'M-089 historian baseline: 1.8 mm/s, 48.2°C. All channels nominal. No issues.'
+    }
+  },
+  {id:'G-112',nm:'Gearbox — Line 3',tp:'Gearbox',br:'SKF 22318E',kw:55,rpm:720,ln:'Line 3',st:'healthy',rul:'~43 days',vib:1.2,tmp:45.1,bpfo:0.7,last:'1 week',iso:'Zone A',
+    trend:[6,5.5,4,3,2.5,2,1.8,1.5,1.3,1.2,1.2,1.2],
+    faults:[{dt:'2023-12-18',ty:'Gear Mesh Anomaly',st:'Replaced (SKF 22318E)',sc:'var(--t3)'}],
+    insights:{
+      engineer:[{l:'G-112 gear mesh frequency post-replacement?',c:''},{l:'Settling rate normal for SKF 22318E?',c:'g'}],
+      maintenance:[{l:'G-112 next oil sample due?',c:''}],
+      ot:[{l:'G-112 historian baseline updated?',c:'g'}]
+    },
+    chatResp:{
+      supervisor:'G-112 is <strong style="color:var(--gn)">healthy</strong> — 1 week post-replacement. Settling normally. No action needed.',
+      engineer:'G-112 post-replacement run-in normal. Vibration 1.2 mm/s, settling curve consistent with SKF 22318E characteristics. Gear mesh 252 Hz nominal, no sidebands. First oil sample at 500h (~3 weeks).',
+      maintenance:'G-112: next oil sample at 500h (~3 weeks). No other action.',
+      ot:'G-112 historian baseline: 1.2 mm/s, 45.1°C. Thresholds set. All 3 channels nominal.',
+      safety:'G-112 safe. Zone A. No restrictions.',
+      manager:'G-112 healthy — no management concern.',
+      executive:'G-112 healthy.'
+    }
+  }
+];
+
+// Work Orders
+const WOS=[
+  {id:'WO-2024-1847',pr:'URGENT',st:'Pending',ti:'M-104 Drive-End Bearing Replacement',as:'M-104 · Drive Motor Line 4',asgn:'Pending',due:'Wed 06:00',by:'DRO Agent',tp:'Corrective',est:'4h',parts:'SKF 6310-2RS (Bin A-14)',rul:'~6 days',risk:'HIGH',cost:'$18K planned · $619K+ if emergency',
+    cl:[{ck:true,tx:'LOTO permit EL-104-A obtained and valid',tg:'Safety'},{ck:false,tx:'Assign crew: T.Rodriguez (lead) + K.Mensah',tg:'Crew'},{ck:false,tx:'Confirm SKF 6310-2RS at Bin A-14',tg:'Parts'},{ck:false,tx:'Collect tools: bearing puller, press, torque wrench',tg:'Tools'},{ck:false,tx:'Brief crew on SOP M-104-REP-04 Rev 4.1',tg:'Safety'},{ck:false,tx:'Isolate M-104 per LOTO EL-104-A — all 3 points',tg:'LOTO'},{ck:false,tx:'Remove drive-end bearing housing',tg:'Technical'},{ck:false,tx:'Fit SKF 6310-2RS — press fit, pre-lube Mobil SHC 100',tg:'Technical'},{ck:false,tx:'Reassemble to torque spec: 85 Nm',tg:'Technical'},{ck:false,tx:'Remove LOTO and run 15-min vibration baseline',tg:'QA'}],
+    tl:[{dot:'var(--am)',ev:'WO awaiting Plant Supervisor approval',tm:'Today 08:14'},{dot:'var(--pu)',ev:'WO auto-created by DRO Agent — M-104 critical alert',tm:'Today 08:04'},{dot:'var(--t3)',ev:'Failure Intel confirmed outer race spall Stage 3',tm:'Today 08:00'},{dot:'var(--t3)',ev:'BPFO anomaly detected by Monitoring Agent',tm:'Today 07:58'},{dot:'var(--t3)',ev:'M-104 vibration exceeded Stage 3 threshold',tm:'Today 07:41'}]
+  },
+  {id:'WO-2024-1831',pr:'MEDIUM',st:'Scheduled',ti:'P-207 Feed Pump — Lubrication & Vibration Check',as:'P-207 · Feed Pump Station 2',asgn:'T. Rodriguez',due:'Wed 09:00',by:'DRO Agent',tp:'Preventive',est:'2h',parts:'Mobil SHC 100 (1L)',rul:'~18 days',risk:'MEDIUM',cost:'~$2K planned',
+    cl:[{ck:true,tx:'LOTO IL-207-B issued and current',tg:'Safety'},{ck:true,tx:'Mobil SHC 100 collected from stores',tg:'Parts'},{ck:false,tx:'Isolate P-207 per IL-207-B',tg:'LOTO'},{ck:false,tx:'Remove bearing housing cover',tg:'Technical'},{ck:false,tx:'Inspect bearing and lubrication state',tg:'Technical'},{ck:false,tx:'Re-lubricate and reassemble',tg:'Technical'},{ck:false,tx:'Post-lube vibration check — log baseline',tg:'QA'}],
+    tl:[{dot:'var(--gn)',ev:'T.Rodriguez confirmed for Wednesday 09:00',tm:'Today 09:15'},{dot:'var(--ac)',ev:'WO approved and scheduled',tm:'Today 08:31'},{dot:'var(--pu)',ev:'WO auto-created by DRO Agent',tm:'Today 08:14'}]
+  },
+  {id:'WO-2024-1822',pr:'LOW',st:'Scheduled',ti:'C-301 Conveyor — Cage Fault Inspection',as:'C-301 · Conveyor Drive Assembly',asgn:'K. Mensah',due:'Thu 14:00',by:'DRO Agent',tp:'Inspection',est:'1.5h',parts:'None',rul:'~26 days',risk:'LOW',cost:'~$800 planned',
+    cl:[{ck:false,tx:'Confirm IL-301-B is current',tg:'Safety'},{ck:false,tx:'Inspect cage condition and lube state',tg:'Technical'},{ck:false,tx:'Check for debris or contamination',tg:'Technical'},{ck:false,tx:'Log findings in CMMS and close WO',tg:'Admin'}],
+    tl:[{dot:'var(--ac)',ev:'K.Mensah assigned — Thursday 14:00',tm:'Today 10:02'},{dot:'var(--pu)',ev:'WO created by DRO Agent',tm:'Today 08:14'}]
+  },
+  {id:'WO-2024-1810',pr:'MEDIUM',st:'Closed',ti:'G-112 Gearbox Bearing Replacement',as:'G-112 · Gearbox Line 3',asgn:'T. Rodriguez',due:'Mon 07:00',by:'DRO Agent',tp:'Corrective',est:'6h',parts:'SKF 22318E',rul:'Replaced',risk:'Resolved',cost:'$24K',
+    cl:[{ck:true,tx:'LOTO completed',tg:'Safety'},{ck:true,tx:'Parts collected',tg:'Parts'},{ck:true,tx:'Bearing replaced per SOP',tg:'Technical'},{ck:true,tx:'Post-repair QA passed — 1.2 mm/s',tg:'QA'},{ck:true,tx:'Asset returned to production',tg:'Ops'}],
+    tl:[{dot:'var(--gn)',ev:'WO closed — G-112 returned to production',tm:'Mon 14:10'},{dot:'var(--gn)',ev:'Post-repair: 1.2 mm/s baseline confirmed',tm:'Mon 13:45'},{dot:'var(--gn)',ev:'Bearing replacement completed',tm:'Mon 12:20'},{dot:'var(--ac)',ev:'Approved by Plant Supervisor',tm:'Mon 06:50'},{dot:'var(--pu)',ev:'WO auto-created by DRO Agent',tm:'Fri 15:30'}]
+  },
+  {id:'WO-2024-1795',pr:'URGENT',st:'Closed',ti:'M-089 Emergency Bearing Replacement',as:'M-089 · Drive Motor Line 2',asgn:'D. Park + T. Rodriguez',due:'Fri 15:00',by:'Operator (emergency)',tp:'Emergency',est:'8h',parts:'FAG 6309-2Z',rul:'Replaced',risk:'Resolved',cost:'$87K — $69K avoidable',
+    cl:[{ck:true,tx:'Emergency isolation completed',tg:'Safety'},{ck:true,tx:'Emergency parts procured (+$8K premium)',tg:'Parts'},{ck:true,tx:'Bearing replaced',tg:'Technical'},{ck:true,tx:'M-089 returned after 10.5h downtime',tg:'Ops'}],
+    tl:[{dot:'var(--gn)',ev:'WO closed — M-089 returned after 10.5h downtime',tm:'Fri 23:20'},{dot:'var(--gn)',ev:'Bearing replaced successfully',tm:'Fri 21:40'},{dot:'var(--am)',ev:'Emergency parts procured — $8K expedite premium',tm:'Fri 17:15'},{dot:'var(--rd)',ev:'M-089 bearing seized — Line 2 stopped',tm:'Fri 15:02'},{dot:'var(--rd)',ev:'DRO WARNING raised 6 days prior — NOT ACTIONED',tm:'Sat 08:30 (prev week)'}]
+  }
+];
+
+// ══════════ STATE ══════════
+let P='supervisor', selNode=0, agAsset='M-104', selAsset=ASSETS[0], selWO=WOS[0], curView='chat', curAgTab='overview';
+
+// ══════════ VIEW SWITCH ══════════
+function sv(v,btn){
+  document.querySelectorAll('.view').forEach(e=>e.classList.remove('on'));
+  document.getElementById('view-'+v).classList.add('on');
+  document.querySelectorAll('.nt').forEach(t=>t.classList.remove('on'));
+  btn.classList.add('on'); curView=v;
+  if(v==='agents'){syncAgSelectors();renderAG();}
+  if(v==='assets'){renderAR();}
+  if(v==='workorders') renderWO();
+}
+
+// ══════════ PERSONA SWITCH ══════════
+function sp(el,pid){
+  document.querySelectorAll('.pi').forEach(i=>i.classList.remove('on'));
+  el.classList.add('on'); P=pid;
+  const p=PD[pid];
+  document.getElementById('chav').textContent=p.av;
+  document.getElementById('chav').style.background=p.bg;
+  document.getElementById('chnm').textContent=p.nm;
+  document.getElementById('chds').textContent=p.ds;
+  document.getElementById('ctags').innerHTML=p.tags.map((t,i)=>`<span class="ctag ${i===0?'ctb':i===1?'ctr':'cta'}">${t}</span>`).join('');
+  document.getElementById('msgs').innerHTML='';
+  renderChatHome();
+  document.getElementById('qps').innerHTML=p.qp.map(q=>`<button class="qpb" onclick="sq('${q.replace(/'/g,"\\'")}')">${q}</button>`).join('');
+  const b=el.querySelector('.pnotif'); if(b)b.remove();
+  if(curView==='agents'){syncAgSelectors();renderAG();}
+  if(curView==='assets'){renderAChatPersona();renderAChips();}
+  if(curView==='workorders'){renderWOPersonaActs();renderWAIChips();}
+  document.getElementById('cinp').placeholder=`Ask as ${p.nm.split(' — ')[0]}: faults, risk, decisions, what-if…`;
+}
+
+// ══════════ CHAT WITH ACTION CARD HOME SCREEN ══════════
+function renderChatHome(){
+  const p=PD[P]; const msgs=document.getElementById('msgs');
+  msgs.innerHTML='';
+  // Agent greeting bubble
+  const d=document.createElement('div'); d.className='mg fi';
+  d.innerHTML=`<div class="mav" style="background:var(--ag)">🤖</div>
+    <div class="mb">
+      <div class="mmeta"><span class="msndr">DRO Agent</span><span class="mtm">${ts()}</span></div>
+      <div class="bbl a">${p.gr.replace(/\n/g,'<br>')}</div>
+      <div class="act-cards" id="act-cards">${p.actions.map(a=>`
+        <button class="act-card" style="background:${a.col};border-color:${a.bc};color:${a.tc}" onclick="sq('${a.q.replace(/'/g,"\\'")}')" >
+          <div class="ac-icon">${a.icon}</div>
+          <div class="ac-lbl">${a.lbl}</div>
+          <div class="ac-nm">${a.nm}</div>
+        </button>`).join('')}
+      </div>
+    </div>`;
+  msgs.appendChild(d); msgs.scrollTop=99999;
+}
+
+const CHAT_KB={
+  'Can M-104 safely run until Saturday?':{r:['Predictive Risk Agent','Failure Intel Agent'],c:'Running M-104 to Saturday increases failure probability to <strong style="color:var(--t)">67%</strong> (from 22% today). Degradation is nonlinear at Stage 3 — the next 72h are the fastest-accelerating window.\n\nExpected consequence: outer race seizure at speed, 12–18h unplanned stop, risk of secondary winding damage (~$80K). That converts a $18K planned repair into $619K+ emergency.\n\n<strong style="color:var(--rd)">Recommendation: Do not run past Wednesday.</strong>'},
+};
+const DFLT=[
+  {r:['Monitoring Agent','Failure Intel Agent','Knowledge Agent'],c:'M-104 outer race spall is at <strong style="color:var(--t)">Stage 3 — 25–40% surface damage</strong>. BPFO family at 4.02× is consistent with ISO 13373-1 Stage 3. Three KB cases at this level showed failure in 4.1–9.3 days. Wednesday is the last low-risk window.'},
+  {r:['Prescriptive Optimisation Agent'],c:'<strong style="color:var(--t)">Prescriptive recommendation: Replace bearing Wednesday 06:00.</strong>\n\nRisk-adjusted analysis: defer to Friday → 67% failure probability. Net avoidance $601K. Parts confirmed, crew available, window available — the decision has a clear answer.'}
+];
+function appendA(html,routes,chips){
+  const m=document.getElementById('msgs');
+  const d=document.createElement('div'); d.className='mg fi';
+  let rh=routes&&routes.length?`<div class="rrow"><span class="rtx">via →</span>${routes.map((r,i)=>`<span class="rs">${r}</span>${i<routes.length-1?'<span class="rra">›</span>':''}`).join('')}</div>`:'';
+  let ch=chips&&chips.length?`<div class="qbrow">${chips.map(c=>`<button class="qb b" onclick="sq('${c.replace(/'/g,"\\'")}')">${c}</button>`).join('')}</div>`:'';
+  d.innerHTML=`<div class="mav" style="background:var(--ag)">🤖</div><div class="mb"><div class="mmeta"><span class="msndr">DRO Agent</span><span class="mtm">${ts()}</span></div>${rh}<div class="bbl a">${html.replace(/\n/g,'<br>')}</div>${ch}</div>`;
+  m.appendChild(d); m.scrollTop=99999;
+}
+function appendU(txt){
+  const p=PD[P]; const m=document.getElementById('msgs');
+  const d=document.createElement('div'); d.className='mg u fi';
+  d.innerHTML=`<div class="mav" style="background:${p.bg}">${p.av}</div><div class="mb"><div class="mmeta" style="justify-content:flex-end"><span class="mtm">${ts()}</span><span class="msndr">${p.nm.split(' — ')[0]}</span></div><div class="bbl u">${txt}</div></div>`;
+  document.getElementById('msgs').appendChild(d); document.getElementById('msgs').scrollTop=99999;
+}
+async function sendMsg(){
+  const inp=document.getElementById('cinp');
+  const t=inp?inp.value.trim():'';
+  if(!t)return;
+  inp.value=''; if(inp.style)inp.style.height='auto';
+  appendU(t);
+  const lower=t.toLowerCase();
+  // Asset keyword → real pipeline API
+  if(typeof ASSET_SCENARIO!=='undefined'&&typeof runRealPipeline!=='undefined'){
+    for(const [asid,sc] of Object.entries(ASSET_SCENARIO)){
+      if(lower.includes(asid.toLowerCase())){
+        thnk(async()=>{await runRealPipeline(sc,-1,P);});
+        return;
+      }
+    }
+    // No asset match → try /api/chat
+    if(typeof API!=='undefined'){
+      if(CHAT_KB[t]){thnk(()=>appendA(CHAT_KB[t].c,CHAT_KB[t].r));return;}
+      thnk(async()=>{
+        try{
+          const resp=await fetch(API+'/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:t,persona:P})});
+          if(resp.ok){const d=await resp.json();appendA(d.response,d.agents||[]);}
+          else{const r=DFLT[Math.floor(Math.random()*DFLT.length)];appendA(r.c,r.r);}
+        }catch(e){const r=DFLT[Math.floor(Math.random()*DFLT.length)];appendA(r.c,r.r);}
+      });
+      return;
+    }
+  }
+  // Fallback static
+  const r=CHAT_KB[t]||DFLT[Math.floor(Math.random()*DFLT.length)];
+  thnk(()=>appendA(r.c,r.r));
+}
+function sq(t){document.getElementById('cinp').value=t;sendMsg();}
+function hk(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMsg();}}
+function ar(el){el.style.height='auto';el.style.height=Math.min(el.scrollHeight,90)+'px';}
+function clearChat(){document.getElementById('msgs').innerHTML='';renderChatHome();}
+function thnk(cb){const m=document.getElementById('msgs');const d=document.createElement('div');d.className='tdg fi';d.id='thdiv';d.innerHTML=`<div class="mav" style="background:var(--ag)">🤖</div><div class="tdts"><span></span><span></span><span></span></div>`;m.appendChild(d);m.scrollTop=99999;setTimeout(()=>{d.remove();cb();},1100);}
+
+// ══════════ AGENT GRAPH ══════════
+function syncAgSelectors(){
+  const as=document.getElementById('ag-asset-sel');
+  const ps=document.getElementById('ag-persona-sel');
+  if(as) as.value=agAsset;
+  if(ps) ps.value=P;
+}
+function onAgAssetChange(v){agAsset=v;selNode=0;renderAG();}
+function onAgPersonaChange(v){P=v;document.querySelectorAll('.pi').forEach(i=>i.classList.remove('on'));const el=document.getElementById('pp-'+v);if(el)el.classList.add('on');renderAG();}
+
+function renderAG(){
+  syncAgSelectors();
+  const states=ASSET_AG_STATE[agAsset]||ASSET_AG_STATE['M-104'];
+  // Pipeline
+  const col=document.getElementById('ag-pipe'); col.innerHTML='';
+  AG_NODES.forEach((ag,i)=>{
+    const st=states[i]?.s||'ni';
+    const stTxt=st==='nd'?'COMPLETE':st==='nr'?'RUNNING':'STANDBY';
+    const stCls=st==='nd'?'std':st==='nr'?'str2':'sti';
+    const pcCls=st==='nd'?'pcl-d':st==='nr'?'pcl-r':'pcl-i';
+    const n=document.createElement('div');
+    // Get output for this asset+persona
+    const out=(ag.assetOut[agAsset]&&ag.assetOut[agAsset][P])||ag.assetOut['M-104']?.[P]||ag.assetOut['M-104']?.supervisor||'Processing…';
+    n.innerHTML=`<div class="pnode ${st}${i===selNode?' sel':''}" onclick="selN(${i})">
+      <div class="pntop"><div class="pnico">${ag.ico}</div><div class="pnnm">${ag.nm.replace(' Agent','')}</div><div class="pnst ${stCls}">${stTxt}</div></div>
+      <div class="pnout">${out}</div>
+    </div>${i<AG_NODES.length-1?`<div class="pconn"><div class="pcline ${pcCls}"></div></div>`:''}`;
+    col.appendChild(n);
+  });
+  renderAgTabs();
+}
+
+function selN(i){selNode=i;renderAG();}
+
+function agTab(btn,id){
+  document.querySelectorAll('.agtab').forEach(t=>t.classList.remove('on'));
+  btn.classList.add('on');
+  curAgTab=id;
+  renderAgTabs();
+}
+
+function renderAgTabs(){
+  // Overview
+  renderAgOverview();
+  // Node detail
+  renderAgNodeDet();
+  // Persona tasks
+  renderAgTasks();
+  // Actions
+  renderAgActions();
+  // Show correct panel
+  document.querySelectorAll('.ag-tab-panel').forEach(p=>p.classList.remove('on'));
+  const cur=document.getElementById('ag-panel-'+curAgTab);
+  if(cur) cur.classList.add('on');
+}
+
+function renderAgOverview(){
+  const states=ASSET_AG_STATE[agAsset]||ASSET_AG_STATE['M-104'];
+  const asObj=ASSETS.find(a=>a.id===agAsset)||ASSETS[0];
+  const sc=asObj.st==='critical'?'var(--rd)':asObj.st==='warning'?'var(--am)':'var(--gn)';
+  const fstrip=AG_NODES.map((a,i)=>{
+    const st=states[i]?.s||'ni';
+    const out=(a.assetOut[agAsset]&&a.assetOut[agAsset][P])||a.assetOut['M-104']?.[P]||'';
+    return `<div class="fstep"><div class="fsbx" style="background:${i===selNode?'rgba(79,142,255,.15)':st==='nd'?'rgba(46,204,138,.07)':st==='nr'?'rgba(255,183,64,.07)':'rgba(255,255,255,.04)'};border-color:${i===selNode?'var(--ac)':st==='nd'?'rgba(46,204,138,.3)':st==='nr'?'rgba(255,183,64,.3)':'var(--b)'};color:${i===selNode?'var(--ac2)':st==='nd'?'var(--gn)':st==='nr'?'var(--am)':'var(--t3)'}" onclick="selN(${i})" title="${out}">${a.ico} ${a.nm.split(' ')[0]}</div></div>${i<AG_NODES.length-1?'<span class="fsarr">›</span>':''}`;
+  }).join('');
+  const confCards=[
+    {l:'Fault Classification',v:'94%',s:'Outer race spall',c:'var(--gn)'},
+    {l:'RUL Confidence',v:'82%',s:'5–8 day window',c:'var(--am)'},
+    {l:'Data Quality',v:'99.7%',s:'Signal completeness',c:'var(--gn)'},
+    {l:'Action Optimality',v:'88%',s:'Replace vs inspect',c:'var(--ac2)'},
+    {l:'KB Matches Found',v:'3',s:'Historical cases',c:'var(--pu)'},
+    {l:'End-to-End Latency',v:'2.3s',s:'Alert → WO draft',c:'var(--t)'}
+  ];
+  document.getElementById('ag-panel-overview').innerHTML=`
+    <div class="dsec">
+      <div class="sttl">Asset: ${agAsset} · ${asObj.nm}</div>
+      <div class="dg3" style="margin-bottom:8px">
+        <div class="dc"><div class="dcl">Status</div><div class="dcv" style="color:${sc}">${asObj.st.toUpperCase()}</div></div>
+        <div class="dc"><div class="dcl">Est. RUL</div><div class="dcv" style="color:${sc}">${asObj.rul}</div></div>
+        <div class="dc"><div class="dcl">ISO Zone</div><div class="dcv" style="color:${sc}">${asObj.iso}</div></div>
+        <div class="dc"><div class="dcl">Vibration RMS</div><div class="dcv">${asObj.vib} <span style="font-size:10px;color:var(--t3)">mm/s</span></div></div>
+        <div class="dc"><div class="dcl">Temperature</div><div class="dcv">${asObj.tmp} <span style="font-size:10px;color:var(--t3)">°C</span></div></div>
+        <div class="dc"><div class="dcl">BPFO Ratio</div><div class="dcv">${asObj.bpfo}<span style="font-size:10px;color:var(--t3)">×</span></div></div>
+      </div>
+    </div>
+    <div class="dsec"><div class="sttl" style="margin-bottom:8px">Pipeline Execution Flow — click any stage</div><div class="fstrip">${fstrip}</div></div>
+    <div class="dsec"><div class="sttl" style="margin-bottom:8px">Pipeline Confidence Metrics</div>
+      <div class="conf-grid">${confCards.map(c=>`<div class="ccard"><div class="cclbl">${c.l}</div><div class="ccval" style="color:${c.c}">${c.v}</div><div class="ccsub">${c.s}</div></div>`).join('')}</div>
+    </div>`;
+}
+
+function renderAgNodeDet(){
+  const ag=AG_NODES[selNode];
+  const states=ASSET_AG_STATE[agAsset]||ASSET_AG_STATE['M-104'];
+  const st=states[selNode]?.s||'ni';
+  const stTxt=st==='nd'?'COMPLETE':st==='nr'?'RUNNING':'STANDBY';
+  const out=(ag.assetOut[agAsset]&&ag.assetOut[agAsset][P])||ag.assetOut['M-104']?.[P]||ag.assetOut['M-104']?.supervisor||'Processing…';
+  const prevNm=selNode>0?AG_NODES[selNode-1].nm:'Historian / SCADA / CMMS / ERP';
+  const nextNm=AG_NODES[selNode+1]?AG_NODES[selNode+1].nm:'—';
+  document.getElementById('ag-panel-node').innerHTML=`
+    <div class="dsec">
+      <div class="agdttl">${ag.ico} ${ag.nm} <span class="pnst ${st==='nd'?'std':st==='nr'?'str2':'sti'}" style="font-size:9px;padding:2px 7px">${stTxt}</span></div>
+      <div class="agdrow"><span style="color:var(--t3);font-size:11px">Role</span><span style="font-family:var(--m);font-size:10.5px;color:var(--t2);max-width:65%;text-align:right">${ag.role}</span></div>
+      <div class="agdrow"><span style="color:var(--t3);font-size:11px">Output for ${PD[P].nm.split(' — ')[0]}</span><span style="font-family:var(--m);font-size:10.5px;color:var(--t2);max-width:65%;text-align:right">${out}</span></div>
+      ${Object.entries(ag.kpis).map(([k,v])=>`<div class="agdrow"><span style="color:var(--t3);font-size:11px">${k}</span><span style="font-family:var(--m);font-size:10.5px;color:var(--t2)">${v}</span></div>`).join('')}
+      <div class="agdrow"><span style="color:var(--t3);font-size:11px">Receives from</span><span style="font-family:var(--m);font-size:10.5px;color:var(--t2)">${prevNm}</span></div>
+      <div class="agdrow"><span style="color:var(--t3);font-size:11px">Passes to</span><span style="font-family:var(--m);font-size:10.5px;color:var(--t2)">${nextNm}</span></div>
+    </div>`;
+}
+
+function renderAgTasks(){
+  const allTasks=PERSONA_TASKS[P]||PERSONA_TASKS.supervisor;
+  const tasks=allTasks[agAsset]||allTasks['M-104']||[];
+  if(!tasks.length){
+    document.getElementById('ag-panel-tasks').innerHTML=`<div class="dsec"><div style="font-size:12px;color:var(--t3)">No specific tasks for ${PD[P].nm.split(' — ')[0]} on ${agAsset} at current status.</div></div>`;
+    return;
+  }
+  const cols={supervisor:'var(--or)',engineer:'var(--ac)',maintenance:'var(--gn)',manager:'var(--pu)',executive:'var(--am)',ot:'var(--rd)',safety:'var(--tl)'};
+  const col=cols[P]||'var(--ac)';
+  document.getElementById('ag-panel-tasks').innerHTML=`
+    <div class="dsec">
+      <div class="sttl">Tasks for ${PD[P].nm.split(' — ')[0]} — Asset ${agAsset}</div>
+      ${tasks.map((t,i)=>`
+        <div class="ptask-step">
+          <div class="ptask-num" style="background:${col}22;color:${col}">${i+1}</div>
+          <div class="ptask-content">
+            <div class="ptask-label">${t[0]}</div>
+            <div style="font-size:11.5px;color:var(--t2)">${t[1]}</div>
+          </div>
+        </div>`).join('')}
+    </div>
+    <div class="dsec">
+      <div class="sttl">Relevant Agent for This Task: ${AG_NODES[selNode].nm}</div>
+      <div style="font-size:11.5px;color:var(--t2);line-height:1.6">${AG_NODES[selNode].role}</div>
+    </div>`;
+}
+
+function renderAgActions(){
+  const acts=PD[P]?.actions||[];
+  const col=document.getElementById('ag-panel-actions');
+  const agRespHtml=`<div class="ag-resp" id="ag-resp"><div class="ag-resp-ttl" id="ag-resp-ttl">🤖 DRO Agent</div><div class="ag-resp-body" id="ag-resp-body"></div></div>`;
+  col.innerHTML=`
+    <div class="dsec" style="margin-bottom:0">
+      <div class="sttl">Available Actions — ${PD[P].nm.split(' — ')[0]}</div>
+      ${acts.map(a=>`<button class="ag-act-btn" style="background:${a.col};border-color:${a.bc};color:${a.tc}" onclick="agAct('${a.q.replace(/'/g,"\\'")}')" >
+        <div class="ag-act-nm">${a.icon} ${a.nm}</div>
+        <div class="ag-act-sub">${a.lbl}</div>
+      </button>`).join('')}
+    </div>
+    ${agRespHtml}`;
+}
+
+function agAct(q){
+  const r=DFLT[Math.floor(Math.random()*DFLT.length)];
+  const resp=document.getElementById('ag-resp');
+  const body=document.getElementById('ag-resp-body');
+  const ttl=document.getElementById('ag-resp-ttl');
+  if(!resp||!body) return;
+  resp.style.display='none';
+  if(ttl) ttl.textContent=`🤖 DRO Agent · ${ts()}`;
+  setTimeout(()=>{body.innerHTML=r.c.replace(/\n/g,'<br>');resp.style.display='block';resp.scrollIntoView({behavior:'smooth',block:'nearest'});},900);
+}
+
+function replayAg(){
+  const states=ASSET_AG_STATE[agAsset];
+  if(!states)return;
+  const orig=states.map(s=>({...s}));
+  states.forEach(s=>s.s='ni');
+  renderAG();
+  orig.forEach((o,i)=>setTimeout(()=>{states[i].s=o.s;renderAG();},i*400+300));
+}
+
+// ══════════ ASSET REGISTRY ══════════
+function renderAR(){renderAList(ASSETS);renderADet(selAsset);renderAChatPersona();renderAChips();}
+function renderAList(assets){
+  document.getElementById('alist').innerHTML=assets.map(a=>{
+    const c=a.st==='critical'?'var(--rd)':a.st==='warning'?'var(--am)':'var(--gn)';
+    return `<div class="ait${a.id===selAsset.id?' on':''}" onclick="selA('${a.id}')">
+      <div class="aih" style="background:${c}"></div>
+      <div class="aii"><div class="aiid">${a.id}</div><div class="ainm">${a.nm}</div></div>
+      <div class="airl" style="color:${c}">${a.rul}</div>
+    </div>`;
+  }).join('');
+}
+function selA(id){selAsset=ASSETS.find(a=>a.id===id);renderAList(ASSETS);renderADet(selAsset);renderAChips();renderAChatPersona();}
+function renderADet(a){
+  const sc=a.st==='critical'?'var(--rd)':a.st==='warning'?'var(--am)':'var(--gn)';
+  document.getElementById('adetid').textContent=a.id;
+  document.getElementById('adetnm').textContent=a.nm;
+  document.getElementById('adetmt').textContent=`${a.br} · ${a.kw}kW · ${a.rpm} RPM · ${a.ln}`;
+  document.getElementById('adetbdg').innerHTML=`
+    <span class="pill" style="background:${a.st==='critical'?'var(--rdm)':a.st==='warning'?'var(--adm)':'var(--gd)'};color:${sc};border:1px solid ${sc}40">${a.st.toUpperCase()}</span>
+    <span class="pill" style="background:rgba(255,255,255,.04);color:var(--t3);border:1px solid var(--b)">${a.tp}</span>
+    <span class="pill" style="background:var(--ag);color:var(--ac2);border:1px solid rgba(79,142,255,.2)">RUL ${a.rul}</span>
+    <span class="pill" style="background:${a.iso==='Zone D'?'var(--rdm)':a.iso==='Zone C'?'var(--adm)':'rgba(255,255,255,.04)'};color:${a.iso==='Zone D'?'var(--rd)':a.iso==='Zone C'?'var(--am)':'var(--t3)'};border:1px solid ${a.iso==='Zone D'?'rgba(255,77,106,.3)':a.iso==='Zone C'?'rgba(255,183,64,.3)':'var(--b)'}">${a.iso}</span>`;
+  const pts=a.trend,W=300,H=46,mx=Math.max(...pts),mn=Math.min(...pts);
+  const px=i=>(i/(pts.length-1))*W;
+  const py=v=>H-((v-mn)/(mx-mn||1))*(H-8)-4;
+  const pl=pts.map((v,i)=>`${px(i)},${py(v)}`).join(' ');
+  const tc=a.st==='critical'?'var(--rd)':a.st==='warning'?'var(--am)':'var(--gn)';
+  const faults=a.faults.map(f=>`<div class="fhrow"><div class="fhdt">${f.dt}</div><div class="fhty">${f.ty}</div><div class="fhst" style="color:${f.sc}">${f.st}</div></div>`).join('');
+  document.getElementById('adetbody').innerHTML=`
+    <div class="dsec"><div class="sttl">Live Condition</div>
+      <div class="dg3">
+        <div class="dc"><div class="dcl">Vibration RMS</div><div class="dcv" style="color:${a.vib>8?'var(--rd)':a.vib>3?'var(--am)':'var(--gn)'}">${a.vib}<span style="font-size:10px;color:var(--t3)"> mm/s</span></div><div class="dcs">${a.vib>8?'⚠ ISO Zone D':a.vib>3?'Zone C':'Zone A/B'}</div></div>
+        <div class="dc"><div class="dcl">Temperature</div><div class="dcv" style="color:${a.tmp>80?'var(--rd)':a.tmp>60?'var(--am)':'var(--gn)'}">${a.tmp}<span style="font-size:10px;color:var(--t3)"> °C</span></div><div class="dcs">${a.tmp>80?'⚠ Elevated':a.tmp>60?'Warm':'Normal'}</div></div>
+        <div class="dc"><div class="dcl">BPFO Ratio</div><div class="dcv" style="color:${a.bpfo>3?'var(--rd)':a.bpfo>1?'var(--am)':'var(--gn)'}">${a.bpfo}<span style="font-size:10px;color:var(--t3)">×</span></div><div class="dcs">${a.bpfo>3?'Fault confirmed':a.bpfo>1?'Elevated':'Normal'}</div></div>
+      </div>
+    </div>
+    <div class="dsec"><div class="sttl">12h Vibration Trend</div>
+      <svg style="width:100%;height:${H}px;display:block" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+        <polygon points="0,${H} ${pl} ${W},${H}" fill="${tc}" opacity=".07"/>
+        <polyline points="${pl}" fill="none" stroke="${tc}" stroke-width="1.8" opacity=".85"/>
+        <circle cx="${px(pts.length-1)}" cy="${py(pts[pts.length-1])}" r="3" fill="${tc}"/>
+      </svg>
+      <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--t3);font-family:var(--m);margin-top:2px"><span>12h ago</span><span>Now · ${a.vib} mm/s</span></div>
+    </div>
+    <div class="dsec"><div class="sttl">Asset Specifications</div>
+      <div class="dg2">
+        <div class="dc"><div class="dcl">Bearing Model</div><div class="dcv" style="font-size:12px">${a.br}</div></div>
+        <div class="dc"><div class="dcl">Last Replaced</div><div class="dcv" style="font-size:12px">${a.last} ago</div></div>
+        <div class="dc"><div class="dcl">Power Rating</div><div class="dcv" style="font-size:12px">${a.kw} kW</div></div>
+        <div class="dc"><div class="dcl">ISO 10816-3 Zone</div><div class="dcv" style="font-size:12px;color:${a.iso==='Zone D'?'var(--rd)':a.iso==='Zone C'?'var(--am)':'var(--gn)'}">${a.iso}</div></div>
+      </div>
+    </div>
+    <div class="dsec"><div class="sttl">Fault & Condition History</div>${faults||'<div style="font-size:11px;color:var(--t3)">No prior faults on record</div>'}</div>`;
+}
+function filterA(q){renderAList(ASSETS.filter(a=>a.id.toLowerCase().includes(q.toLowerCase())||a.nm.toLowerCase().includes(q.toLowerCase())));}
+function fltA(btn,st){document.querySelectorAll('.asfb').forEach(b=>b.classList.remove('on'));btn.classList.add('on');renderAList(st==='all'?ASSETS:ASSETS.filter(a=>a.st===st));}
+function renderAChatPersona(){
+  const ttls={supervisor:'Operational Insights',engineer:'Diagnostic Analysis',maintenance:'Maintenance Planning',manager:'Risk & Impact',executive:'Portfolio View',ot:'Data & Signal Health',safety:'Safety & Compliance'};
+  document.getElementById('achdr-ttl').textContent=`DRO — ${ttls[P]||'Insights'}`;
+  document.getElementById('achdr-sub').textContent=`${PD[P].nm.split(' — ')[0]} asking about ${selAsset.id}`;
+  document.getElementById('ainp').placeholder=`Ask about ${selAsset.id}…`;
+  document.getElementById('achip-ttl').textContent=`Questions for ${PD[P].nm.split(' — ')[0]}`;
+  const am=document.getElementById('amsgs'); am.innerHTML='';
+  const init=document.createElement('div');init.className='amg fi';
+  init.innerHTML=`<div class="amav" style="background:var(--ag)">🤖</div><div class="ambd"><div class="amsn">DRO Agent</div><div class="ambb a">${selAsset.chatResp[P]||'Ask me about this asset.'}</div></div>`;
+  am.appendChild(init);
+}
+function renderAChips(){
+  const ins=(selAsset.insights[P]||selAsset.insights.supervisor)||[];
+  document.getElementById('achip-row').innerHTML=ins.map(i=>`<button class="ach ${i.c}" onclick="askA('${i.l.replace(/'/g,"\\'")}')">${i.l}</button>`).join('');
+}
+function askA(txt){
+  if(!txt.trim())return;
+  document.getElementById('ainp').value='';
+  const am=document.getElementById('amsgs');
+  const p=PD[P];
+  const ud=document.createElement('div');ud.className='amg u fi';
+  ud.innerHTML=`<div class="amav" style="background:${p.bg}">${p.av}</div><div class="ambd"><div class="amsn" style="text-align:right">${p.nm.split(' — ')[0]}</div><div class="ambb u">${txt}</div></div>`;
+  am.appendChild(ud);am.scrollTop=99999;
+  const tk=document.createElement('div');tk.className='amg fi';tk.id='atk';
+  tk.innerHTML=`<div class="amav" style="background:var(--ag)">🤖</div><div class="tdts"><span></span><span></span><span></span></div>`;
+  am.appendChild(tk);am.scrollTop=99999;
+  setTimeout(()=>{
+    tk.remove();
+    const resp=selAsset.chatResp[P]||`${selAsset.id}: vib ${selAsset.vib} mm/s (${selAsset.iso}), temp ${selAsset.tmp}°C. ${selAsset.st==='critical'?'<strong style="color:var(--rd)">Immediate action required.</strong>':selAsset.st==='warning'?'<strong style="color:var(--am)">Monitor closely.</strong>':'<strong style="color:var(--gn)">Asset is healthy.</strong>'}`;
+    const rd=document.createElement('div');rd.className='amg fi';
+    rd.innerHTML=`<div class="amav" style="background:var(--ag)">🤖</div><div class="ambd"><div class="amsn">DRO Agent</div><div class="ambb a">${resp}</div></div>`;
+    am.appendChild(rd);am.scrollTop=99999;
+  },950);
+}
+
+// ══════════ WORK ORDERS ══════════
+function renderWO(){renderWCards(WOS);renderWODet(selWO);renderWOPersonaActs();renderWAIChips();}
+function renderWCards(wos){
+  document.getElementById('wocards').innerHTML=wos.map(wo=>{
+    const pc=wo.pr==='URGENT'?'var(--rd)':wo.pr==='MEDIUM'?'var(--am)':'var(--gn)';
+    const pb=wo.pr==='URGENT'?'var(--rdm)':wo.pr==='MEDIUM'?'var(--adm)':'var(--gd)';
+    return `<div class="wcard${wo.id===selWO.id?' on':''}" onclick="selW('${wo.id}')">
+      <div class="wctop"><div class="wcid">${wo.id}</div><div class="wcpr" style="background:${pb};color:${pc}">${wo.pr}</div></div>
+      <div class="wcti">${wo.ti}</div><div class="wcas">${wo.as}</div>
+      <div class="wcft"><div class="wcag">👤 ${wo.asgn}</div><div class="wcdu" style="color:${wo.st==='Closed'?'var(--t3)':'var(--am)'}">${wo.due}</div></div>
+    </div>`;
+  }).join('');
+}
+function selW(id){selWO=WOS.find(w=>w.id===id);renderWCards(WOS);renderWODet(selWO);renderWOPersonaActs();renderWAIChips();}
+function renderWODet(wo){
+  const pc=wo.pr==='URGENT'?'var(--rd)':wo.pr==='MEDIUM'?'var(--am)':'var(--gn)';
+  const pb=wo.pr==='URGENT'?'var(--rdm)':wo.pr==='MEDIUM'?'var(--adm)':'var(--gd)';
+  const sc=wo.st==='Pending'?'var(--am)':wo.st==='Scheduled'?'var(--ac2)':wo.st==='Closed'?'var(--t3)':'var(--gn)';
+  const sb=wo.st==='Pending'?'var(--adm)':wo.st==='Scheduled'?'var(--ag)':'rgba(255,255,255,.04)';
+  document.getElementById('wodbdg').innerHTML=`<span class="pill" style="background:${pb};color:${pc};border:1px solid ${pc}40">${wo.pr}</span><span class="pill" style="background:${sb};color:${sc};border:1px solid ${sc}40">${wo.st.toUpperCase()}</span><span class="pill" style="background:rgba(255,255,255,.04);color:var(--t3);border:1px solid var(--b)">${wo.tp}</span>`;
+  document.getElementById('wodtt').textContent=`${wo.id} — ${wo.ti}`;
+  document.getElementById('wodsu').textContent=`Created by ${wo.by} · ${wo.as} · Est. ${wo.est}`;
+  const cl=wo.cl.map(ci=>`<div class="clitem"><div class="clcb${ci.ck?' ck':''}" onclick="tglCL(this)"></div><span class="cltx${ci.ck?' dk':''}">${ci.tx}</span><span class="cltg">${ci.tg}</span></div>`).join('');
+  const tl=wo.tl.map((e,i,arr)=>`<div class="tlrow"><div class="tldc"><div class="tldot" style="background:${e.dot}"></div>${i<arr.length-1?'<div class="tlline"></div>':''}</div><div class="tlct"><div class="tlev">${e.ev}</div><div class="tltm">${e.tm}</div></div></div>`).join('');
+  document.getElementById('wodbody').innerHTML=`
+    <div class="dsec"><div class="sttl">Work Order Summary</div>
+      <div class="dg3">
+        <div class="dc"><div class="dcl">Asset RUL</div><div class="dcv" style="color:${wo.rul.includes('6')?'var(--rd)':wo.rul.includes('~')?'var(--am)':'var(--t3)'}">${wo.rul}</div></div>
+        <div class="dc"><div class="dcl">Risk Level</div><div class="dcv" style="color:${wo.risk==='HIGH'?'var(--rd)':wo.risk==='MEDIUM'?'var(--am)':wo.risk==='LOW'?'var(--gn)':'var(--t3)'}">${wo.risk}</div></div>
+        <div class="dc"><div class="dcl">Duration Est.</div><div class="dcv">${wo.est}</div></div>
+        <div class="dc"><div class="dcl">Parts</div><div class="dcv" style="font-size:11px">${wo.parts}</div></div>
+        <div class="dc"><div class="dcl">Assigned To</div><div class="dcv" style="font-size:11px">${wo.asgn}</div></div>
+        <div class="dc"><div class="dcl">Cost</div><div class="dcv" style="font-size:11px">${wo.cost}</div></div>
+      </div>
+    </div>
+    <div class="dsec"><div class="sttl">Task Checklist</div>${cl}</div>
+    <div class="dsec"><div class="sttl">Activity Timeline</div>${tl}</div>`;
+  document.getElementById('woresp').style.display='none';
+}
+function renderWOPersonaActs(){
+  const wo=selWO;
+  const st=wo.st==='Closed'?'closed':wo.st==='Pending'?'pending':'scheduled';
+  const maps={
+    supervisor:{pending:[{l:'✓ Approve WO',cls:'wpablu',q:`Approve WO-2024-1847 — confirm Wednesday 06:00 crew deployment and release all logistics`},{l:'🤖 Why this WO?',cls:'wpagry',q:`Why did DRO create ${wo.id}? Explain the fault evidence and urgency`},{l:'✗ Reject',cls:'wpared',q:`Reject ${wo.id} — what further evidence or conditions are needed before resubmitting?`}],
+      scheduled:[{l:'▶ Mark In Progress',cls:'wpablu',q:`Mark ${wo.id} as in progress — confirm crew is on site and work has started`},{l:'📅 Reschedule',cls:'wpagry',q:`Reschedule ${wo.id} — what is the next available window without increasing M-104 failure risk?`}],
+      closed:[{l:'📋 Closure Report',cls:'wpagry',q:`Full closure report for ${wo.id}: fault found on teardown, repair performed, post-repair baseline, outcome`},{l:'↻ Follow-up WO',cls:'wpagrn',q:`Create a follow-up 6-month inspection WO from the ${wo.id} closure`}]},
+    engineer:{pending:[{l:'🔬 Review Technical Evidence',cls:'wpablu',q:`What fault data confirms ${wo.id} is the right action? Show FFT evidence, kurtosis, crest factor, KB matches`},{l:'📐 Set QA Baseline',cls:'wpagrn',q:`What post-repair vibration and temperature baselines should be set for ${wo.id}? Target for new SKF 6310-2RS`}],
+      scheduled:[{l:'📊 Export Pre-Repair Data',cls:'wpablu',q:`Export pre-repair vibration and temperature data for ${wo.id} to compare against post-repair baseline`},{l:'📋 Verify SOP Specs',cls:'wpagry',q:`SOP for ${wo.id}: confirm torque spec, press fit procedure, lubrication type and volume`}],
+      closed:[{l:'📈 Compare Pre/Post Signature',cls:'wpablu',q:`Compare M-104 pre-repair (14.7 mm/s, BPFO 4.02×) vs post-repair baseline. Did it normalise as expected?`},{l:'🔁 Update Model',cls:'wpagrn',q:`How should ${wo.id} outcome data update the RUL prediction model? What was actual vs predicted fault stage?`}]},
+    maintenance:{pending:[{l:'📦 Confirm Parts Ready',cls:'wpagrn',q:`Confirm all parts and tools are staged for ${wo.id}: bearing, lube, seals, tools. Anything still to collect?`},{l:'👥 Assign Crew',cls:'wpablu',q:`Assign T.Rodriguez + K.Mensah to ${wo.id} Wednesday 06:00 — confirm both available and LOTO-qualified`}],
+      scheduled:[{l:'🖨 Print Job Pack',cls:'wpablu',q:`Complete job pack for ${wo.id}: SOP steps, parts with bin locations, tools, torque specs, LOTO reference`},{l:'⏱ Check Duration',cls:'wpagry',q:`Is the ${wo.est} estimate accurate for ${wo.id}? Should we allow more buffer?`}],
+      closed:[{l:'⏱ Log Actual Hours',cls:'wpagry',q:`Log actual hours and parts used for ${wo.id} vs estimate. Update duration benchmark for similar future jobs`},{l:'📦 Reorder Parts',cls:'wpagrn',q:`Do any parts consumed in ${wo.id} need reordering? Check SKF 6310-2RS stock at Bin A-14 vs reorder threshold`}]},
+    manager:{pending:[{l:'✓ Approve from Ops Level',cls:'wpablu',q:`Approve ${wo.id} at Plant Manager level — confirm Wednesday window is authorised`},{l:'💰 Cost-Benefit Model',cls:'wpagrn',q:`Full cost-benefit for ${wo.id}: planned $18K vs emergency $619K+ — detailed breakdown and net avoidance case`}],
+      scheduled:[{l:'📊 Line Impact',cls:'wpablu',q:`How does ${wo.id} Wednesday window affect Line 4 throughput and daily OEE targets?`},{l:'🔄 Contingency',cls:'wpagry',q:`Contingency if ${wo.id} overruns its ${wo.est} window: backup crew, schedule recovery, production re-route`}],
+      closed:[{l:'💵 Final Cost vs Budget',cls:'wpagry',q:`Final cost of ${wo.id} vs $18K estimate — any overruns? Update maintenance budget tracker`},{l:'📈 OEE Impact Report',cls:'wpablu',q:`How did the ${wo.id} planned window affect Line 4 monthly OEE vs an unplanned failure scenario?`}]},
+    executive:{pending:[{l:'💰 Financial Exposure',cls:'wpared',q:`Probability-weighted financial exposure if ${wo.id} is not approved today. Show expected value calculation`},{l:'✓ Executive Approval',cls:'wpablu',q:`Approve ${wo.id} at executive level — confirm strategic priority and resource commitment`}],
+      scheduled:[{l:'📊 KPI Contribution',cls:'wpablu',q:`How does ${wo.id} contribute to Q3 reliability KPIs and DRO ROI metrics for executive scorecard?`},{l:'📰 Add to Exec Report',cls:'wpagry',q:`Add ${wo.id} as a DRO value example in the next executive reliability report`}],
+      closed:[{l:'💵 Avoidance Value',cls:'wpagrn',q:`Total downtime avoidance value from completing ${wo.id} as planned vs the emergency scenario`},{l:'📊 Update YTD Metrics',cls:'wpablu',q:`Add ${wo.id} outcome to YTD DRO performance metrics and avoidance tracker`}]},
+    ot:{pending:[{l:'📡 Sensor Readiness',cls:'wpablu',q:`All sensors on M-104 healthy and ready for Wednesday maintenance? Any calibration or data quality issues?`},{l:'🔗 CMMS Pre-Check',cls:'wpagrn',q:`Is SAP PM ready to receive ${wo.id} approval update? Any integration issues?`}],
+      scheduled:[{l:'📊 Data Continuity',cls:'wpablu',q:`Ensure data logging continuity on M-104 during the Wednesday maintenance window for ${wo.id}`},{l:'📏 Configure Baselines',cls:'wpagrn',q:`Historian baselines and alert thresholds to configure after ${wo.id} completion. Specify target values.`}],
+      closed:[{l:'📈 Signals Normalised?',cls:'wpagrn',q:`Did M-104 readings normalise as expected after ${wo.id}? Compare pre vs post across all 4 channels`},{l:'📚 Archive Event',cls:'wpagry',q:`Archive the complete data record for ${wo.id}: vibration trend, fault event, post-repair baseline`}]},
+    safety:{pending:[{l:'🛡 Permit Validation',cls:'wpablu',q:`Validate all safety permits for ${wo.id}: LOTO EL-104-A current, full scope, crew LOTO-certified?`},{l:'📋 Safety Brief',cls:'wpagrn',q:`Pre-task safety brief for ${wo.id} crew: hazards, LOTO steps, PPE, isolation points, emergency contacts`}],
+      scheduled:[{l:'✅ Pre-Task Sign-off',cls:'wpablu',q:`Safety sign-off for ${wo.id}: LOTO in place, crew briefed, PPE available, cleared to start?`},{l:'🔒 Energy Isolation Check',cls:'wpagry',q:`Verify LOTO EL-104-A covers all energy sources for ${wo.id}: MCB-104A, MCB-104B, IL-104-M`}],
+      closed:[{l:'✅ Compliance Record',cls:'wpagrn',q:`Log safety compliance record for ${wo.id}: all permits completed, LOTO de-issued, no incidents`},{l:'⚠ Near-Miss Check',cls:'wpagry',q:`Any near-misses, LOTO deviations or safety observations during ${wo.id} to document?`}]}
+  };
+  const acts=(maps[P]||maps.supervisor)[st]||(maps[P]||maps.supervisor).pending;
+  document.getElementById('wod-pacts').innerHTML=acts.map(a=>`<button class="wpa ${a.cls}" onclick="woAsk('${a.q.replace(/'/g,"\\'")}')">${a.l}</button>`).join('');
+}
+function renderWAIChips(){
+  const wo=selWO;
+  const st=wo.st==='Closed'?'closed':wo.st==='Pending'?'pending':'scheduled';
+  const ttls={supervisor:'Supervisor Guidance',engineer:'Technical Guidance',maintenance:'Logistics Guidance',manager:'Operations Guidance',executive:'Executive Guidance',ot:'Integration Guidance',safety:'Safety Guidance'};
+  document.getElementById('waitl').textContent=`${ttls[P]||'Agent Guidance'} — ${wo.id}`;
+  const m={
+    supervisor:{pending:[`Risk of deferring ${wo.id} by 48h?`,`What to tell Line 4 operators about this WO?`,`If M-104 fails before this WO runs — what happens?`],scheduled:[`${wo.id} on track for ${wo.due}?`,`Who to notify about the Wednesday window?`],closed:[`Did ${wo.id} repair fully resolve the fault?`,`Lessons learned from ${wo.id} closure?`]},
+    engineer:{pending:[`Fault evidence confirming ${wo.id} is correct?`,`Post-repair QA pass/fail criteria?`],scheduled:[`Which SOP version applies to ${wo.id}?`,`What should teardown confirm?`],closed:[`Pre vs post repair signature comparison?`,`Update fault model with ${wo.id} outcome?`]},
+    maintenance:{pending:[`All parts and tools ready for ${wo.id}?`,`Optimal crew for ${wo.id}?`],scheduled:[`Full job pack for ${wo.id}?`,`Crew briefing completed?`],closed:[`Actual vs estimated time for ${wo.id}?`,`Parts to reorder after ${wo.id}?`]},
+    manager:{pending:[`Net avoidance value of approving ${wo.id}?`,`Production impact if ${wo.id} delayed?`],scheduled:[`Line impact of ${wo.id} window?`,`Contingency if ${wo.id} overruns?`],closed:[`Final cost vs budget for ${wo.id}?`,`OEE impact of ${wo.id} closure?`]},
+    executive:{pending:[`Expected-value risk of not approving ${wo.id}?`,`${wo.id} contribution to Q3 DRO ROI?`],scheduled:[`${wo.id} in executive KPI metrics?`],closed:[`Avoidance value from ${wo.id}?`,`Add ${wo.id} to YTD tracker?`]},
+    ot:{pending:[`M-104 signal readiness before ${wo.id}?`,`CMMS ready for ${wo.id} approval?`],scheduled:[`Data logging continuity during ${wo.id}?`,`Post-repair baselines for ${wo.id}?`],closed:[`Signals normalised after ${wo.id}?`,`Archive ${wo.id} event data?`]},
+    safety:{pending:[`All permits valid for ${wo.id}?`,`Crew LOTO-qualified for ${wo.id}?`],scheduled:[`Pre-task sign-off for ${wo.id}?`,`All energy isolation confirmed?`],closed:[`Safety compliance record for ${wo.id}?`,`Near-misses during ${wo.id}?`]}
+  };
+  const chips=(m[P]||m.supervisor)[st]||[];
+  document.getElementById('waichips').innerHTML=chips.map((c,i)=>`<button class="waic${i===0?' b':' g'}" onclick="woAsk('${c.replace(/'/g,"\\'")}')">${c}</button>`).join('');
+  document.getElementById('wocc').innerHTML=`<span class="ctag ctb">${wo.id}</span><span class="ctag ctb">${wo.as.split('·')[0].trim()}</span><span class="ctag ${wo.st==='Pending'?'ctr':'cta'}">${wo.st}</span>`;
+  document.getElementById('woinp').placeholder={supervisor:'Ask about approval, risk, crew, escalation…',engineer:'Ask about fault evidence, SOP, QA baseline…',maintenance:'Ask about parts, crew, schedule, job pack…',manager:'Ask about cost, OEE, production plan…',executive:'Ask about financial exposure, ROI, KPI…',ot:'Ask about signals, CMMS, data continuity…',safety:'Ask about permits, LOTO, PPE, compliance…'}[P]||'Ask about this work order…';
+}
+function woAsk(txt){
+  if(!txt.trim())return;
+  document.getElementById('woinp').value='';
+  document.getElementById('woresp').style.display='none';
+  document.getElementById('worttl').textContent=`🤖 DRO Agent · ${ts()}`;
+  const resp=getWOResp(txt);
+  setTimeout(()=>{document.getElementById('worbody').innerHTML=resp;document.getElementById('woresp').style.display='block';document.getElementById('woresp').scrollIntoView({behavior:'smooth',block:'nearest'});},900);
+}
+function getWOResp(txt){
+  const wo=selWO;
+  if(/approv/i.test(txt)) return `<strong style="color:var(--gn)">✓ ${wo.id} approved and released.</strong><br>SAP PM: RELEASED. T.Rodriguez + K.Mensah notified. SKF 6310-2RS reserved (Bin A-14). Wednesday 06:00 slot confirmed. Alert will fire when post-repair vibration baseline check passes.`;
+  if(/why|reason|evidence|trigger/i.test(txt)) return `${wo.id} created because M-104 exceeded <strong style="color:var(--t)">ISO 13373-1 Stage 3</strong> — BPFO 4.02×, Kurtosis 6.8, Crest Factor 9.2, RUL 5–8 days (82% conf). Three KB cases failed in 4.1–9.3 days from this level. Prescriptive Agent identified Wednesday 06:00 as the optimal window: $601K net avoidance at 33× ROI.`;
+  if(/defer|delay|risk|weekend|saturday/i.test(txt)) return `Deferring ${wo.id} by 48h raises failure probability to <strong style="color:var(--rd)">67%</strong>. Consequence: bearing seizure, 12–18h stop, possible winding damage ($80K). Emergency total: $619K+. Net additional exposure vs Wednesday: $601K.`;
+  if(/parts|sku|stock|SKF|bearing|stores/i.test(txt)) return `Parts confirmed: <strong style="color:var(--t)">SKF 6310-2RS</strong> Bin A-14, Qty 3, $340. Mobil SHC 100: 2L. Seal kit: available. All tools in shop. 1 unit reserved for ${wo.id}.`;
+  if(/crew|assign|who|rodriguez|mensah/i.test(txt)) return `Crew for ${wo.id}: <strong style="color:var(--t)">T.Rodriguez</strong> (Lead, LOTO EL-104-A ✓, M-104 prior experience ✓) + <strong style="color:var(--t)">K.Mensah</strong> (LOTO ✓). Both available Wednesday 06:00.`;
+  if(/cost|financ|saving|avoidance/i.test(txt)) return `${wo.id} cost analysis:<br>• Planned: <strong style="color:var(--gn)">$18K</strong> (4h labour + $340 parts)<br>• Emergency alternative: <strong style="color:var(--rd)">$619K+</strong><br>• <strong style="color:var(--gn)">Net avoidance: $601K · 33× ROI</strong>`;
+  if(/LOTO|permit|safety|PPE|isolat/i.test(txt)) return `Safety for ${wo.id}: <strong style="color:var(--gn)">LOTO EL-104-A current</strong> (Nov 2023, valid Nov 2024). MCB-104A, MCB-104B, IL-104-M. No confined space, no hot work. PPE: Class B hearing + vibration gloves. Both crew LOTO-qualified.`;
+  if(/closure|teardown|outcome|post.repair/i.test(txt)) return `${wo.id} closure: outer race spall Stage 3 confirmed (~35% surface damage). SKF 6310-2RS installed. Post-repair baseline: <strong style="color:var(--gn)">1.4 mm/s, 46°C</strong>. No secondary damage. Total elapsed: 3h 52min.`;
+  if(/oee|production|throughput|line/i.test(txt)) return `${wo.id} production impact: 4h planned stop Wednesday 06:00–10:00 (~$164K). Alternative unplanned: 12–18h × $41K/h = $492–738K. Planned window is already in the production schedule.`;
+  return `Processing ${wo.id}: full context available — fault evidence, logistics, cost case, crew, safety. Ask anything specific.`;
+}
+function wflt(btn,f){document.querySelectorAll('.wofb').forEach(b=>b.classList.remove('on'));btn.classList.add('on');renderWCards(f==='all'?WOS:WOS.filter(w=>w.st.toLowerCase()===f));}
+function tglCL(el){el.classList.toggle('ck');const tx=el.nextElementSibling;if(tx)tx.classList.toggle('dk');}
+function newWO(){woAsk('What is the next highest priority unscheduled asset that needs a work order? Create a draft WO.');}
+
+// ══════════ UTILS ══════════
+function ts(){return new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});}
+setInterval(()=>{const v=(14.7+(Math.random()-.3)*.35).toFixed(1);const t=(87.4+(Math.random()-.2)*.7).toFixed(1);const e1=document.getElementById('sv1');if(e1)e1.textContent=v;const e2=document.getElementById('sv2');if(e2)e2.textContent=t;},4200);
+let ac=0;setInterval(()=>{const tag=document.getElementById('rptag');if(tag)tag.textContent=['RUNNING','UPDATING','RUNNING'][ac++%3];},3500);
+
+// ══════════ INIT ══════════
+(function(){
+  renderChatHome();
+  document.getElementById('qps').innerHTML=PD['supervisor'].qp.map(q=>`<button class="qpb" onclick="sq('${q.replace(/'/g,"\\'")}')">${q}</button>`).join('');
+  document.getElementById('ctags').innerHTML=PD['supervisor'].tags.map((t,i)=>`<span class="ctag ${i===0?'ctb':i===1?'ctr':'cta'}">${t}</span>`).join('');
+})();
+</script>
+
+<!-- ════════════════════════════════════════════════════════════════════════
+     DRO API INTEGRATION  –  connects this UI to the Python FastAPI backend
+     Base URL auto-detects: same-origin when served by uvicorn, or explicit.
+     ════════════════════════════════════════════════════════════════════════ -->
+<script>
+const API = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+  ? `http://${window.location.hostname}:${window.location.port || 8000}`
+  : '';   // same-origin when served by FastAPI
+
+// ── Live sensor WebSocket ────────────────────────────────────────────────────
+let _sensorWS = null;
+function connectSensorWS(assetId) {
+  if (_sensorWS) { try { _sensorWS.close(); } catch(e){} }
+  const wsBase = API.replace('http','ws');
+  _sensorWS = new WebSocket(`${wsBase}/ws/sensors/${encodeURIComponent(assetId)}`);
+  _sensorWS.onmessage = (ev) => {
+    try {
+      const d = JSON.parse(ev.data);
+      const e1 = document.getElementById('sv1');
+      const e2 = document.getElementById('sv2');
+      if (e1) e1.textContent = d.vib_rms_mms;
+      if (e2) e2.textContent = d.temp_c;
+    } catch(e) {}
+  };
+  _sensorWS.onerror = () => {};   // fallback to the existing setInterval ticker
+}
+// Connect on load for the default critical asset
+try { connectSensorWS('M-104'); } catch(e) {}
+
+// ── Real pipeline runner ────────────────────────────────────────────────────────────
+async function runRealPipeline(scenario, rowIndex, persona, demoHITL) {
+  persona = persona || P || 'supervisor';
+  const payload = { scenario, row_index: rowIndex ?? -1, persona };
+  if (demoHITL) payload.demo_hitl = true;
+  try {
+    const resp = await fetch(`${API}/api/pipeline/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ signal: {}, ...payload }),
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+
+    // DFA HITL gate — show remediation card, skip normal pipeline card
+    if (data.hitl_required && data.hitl_required.type === 'remediation') {
+      _renderHITLRemediationCard(data, scenario, persona);
+      return data;
+    }
+
+    // Monitoring HITL gate (true pause — don't show pipeline card yet)
+    if (data.hitl_monitoring) {
+      _renderMonitoringHITLCard(data, scenario, persona);
+      return data;
+    }
+
+    // FI HITL gate (true pause — don't show pipeline card yet)
+    if (data.hitl_diagnosis) {
+      _renderDiagnosisHITLCard(data, scenario, persona);
+      return data;
+    }
+
+    // Normal pipeline result
+    _renderPipelineCard(data);
+
+    // PRA advisory HITL — follow-up card after the result
+    if (data.hitl_advisory && data.hitl_advisory.advisory_note) {
+      _renderAdvisoryHITLCard(data);
+    }
+
+    // Knowledge HITL — informational card after pipeline result (last agent)
+    if (data.hitl_knowledge) {
+      _renderKnowledgeHITLCard(data, persona);
+    }
+
+    if (curView === 'agents') renderAG();
+    return data;
+  } catch(err) {
+    console.warn('Pipeline API unavailable, using static responses:', err.message);
+    return null;
+  }
+}
+
+function _renderPipelineCard(data) {
+  var ms = data.pipeline_log ? data.pipeline_log.reduce(function(s,n){ return s+(n.latency_ms||0); },0) : 0;
+  var nodes = data.pipeline_log ? data.pipeline_log.length : 0;
+  var html = '<div style="margin-bottom:4px"><span style="font-size:9px;font-weight:600;color:var(--ac2);font-family:var(--m)">'
+    + '▶ REAL PIPELINE · ' + nodes + ' agents · ' + ms + 'ms</span></div>'
+    + '<strong style="color:var(--t)">' + data.headline + '</strong><br><br>'
+    + data.details.map(function(d){ return '• ' + d; }).join('<br>')
+    + (data.actions && data.actions.length
+        ? '<br><br><strong>Recommended actions:</strong><br>' + data.actions.map(function(a){ return '→ ' + a; }).join('<br>')
+        : '');
+  appendA(html, data.pipeline_log ? data.pipeline_log.map(function(n){ return n.node ? n.node.replace(/_/g,' ') : ''; }) : []);
+}
+
+function _renderHITLRemediationCard(data, scenario, persona) {
+  var h = data.hitl_required;
+  var rid = h.run_id;
+  var qPct = h.quality_score != null ? Math.round(h.quality_score * 100) + '%' : 'Low';
+  var canImpute = h.imputable_fields && h.imputable_fields.length > 0;
+  var impFields = canImpute
+    ? 'Imputable from bearing baseline: <strong style="color:#22c55e">' + h.imputable_fields.join(', ') + '</strong>'
+    : '<span style="color:#ef4444">No baseline available - imputation not possible</span>';
+  var missingStr = h.missing_fields ? h.missing_fields.join(', ') : 'unknown';
+  var impBg = canImpute ? '#22c55e' : '#374151';
+  var impCursor = canImpute ? 'pointer' : 'not-allowed';
+  var impOpacity = canImpute ? '1' : '0.4';
+  var impDisabled = canImpute ? '' : 'disabled';
+  var html = [
+    '<div style="border:1.5px solid #f59e0b;border-radius:10px;padding:14px;background:rgba(245,158,11,0.07)">',
+    '<div style="font-size:9px;font-weight:700;color:#f59e0b;font-family:var(--m);margin-bottom:10px">',
+    'HITL - DATA FOUNDATION AGENT - Signal Quality Gate</div>',
+    '<strong style="color:var(--t)">Signal flagged - operator decision required before analysis continues</strong>',
+    '<div style="margin:10px 0;font-size:12px;color:var(--t2);line-height:1.8">',
+    'Quality score: <strong style="color:#f59e0b">' + qPct + '</strong><br>',
+    'Missing fields: <strong>' + missingStr + '</strong><br>' + impFields + '</div>',
+    '<div style="font-size:11px;color:var(--t3);margin-bottom:12px">Choose how to handle this signal before the pipeline continues:</div>',
+    '<div id="hitl-rem-' + rid + '" style="display:flex;gap:8px;flex-wrap:wrap">',
+    '<button ' + impDisabled + ' onclick="resolveHITL(this)" data-rid="' + rid + '" data-action="IMPUTE" data-sc="' + scenario + '" data-persona="' + persona + '"',
+    ' style="padding:7px 16px;border-radius:6px;border:none;background:' + impBg + ';color:#fff;font-weight:700;cursor:' + impCursor + ';font-size:12px;opacity:' + impOpacity + '">',
+    'Impute from baseline</button>',
+    '<button onclick="resolveHITL(this)" data-rid="' + rid + '" data-action="KEEP" data-sc="' + scenario + '" data-persona="' + persona + '"',
+    ' style="padding:7px 16px;border-radius:6px;border:none;background:#f59e0b;color:#fff;font-weight:700;cursor:pointer;font-size:12px">',
+    'Keep with quality flag</button>',
+    '<button onclick="resolveHITL(this)" data-rid="' + rid + '" data-action="DROP" data-sc="' + scenario + '" data-persona="' + persona + '"',
+    ' style="padding:7px 16px;border-radius:6px;border:none;background:#ef4444;color:#fff;font-weight:700;cursor:pointer;font-size:12px">',
+    'Drop this signal</button>',
+    '</div></div>'
+  ].join('');
+  appendA(html, ['data foundation - HITL gate']);
+}
+
+function _renderAdvisoryHITLCard(data) {
+  var h = data.hitl_advisory;
+  var cid = 'hitl-adv-' + h.run_id;
+  var html = [
+    '<div id="' + cid + '" style="border:1.5px solid #8b5cf6;border-radius:10px;padding:14px;background:rgba(139,92,246,0.07)">',
+    '<div style="font-size:9px;font-weight:700;color:#8b5cf6;font-family:var(--m);margin-bottom:10px">',
+    'HITL - PREDICTIVE RISK AGENT - LLM Advisory Review</div>',
+    '<strong style="color:var(--t)">LLM generated an advisory - review before committing to assessment</strong>',
+    '<div style="margin:10px 0;font-size:12px;color:var(--t2);background:rgba(139,92,246,0.08);padding:10px 12px;border-radius:6px;border-left:3px solid #8b5cf6;line-height:1.7">',
+    '&ldquo;' + h.advisory_note + '&rdquo;</div>',
+    '<div style="font-size:11px;color:var(--t3);margin-bottom:10px">Accept to include in the assessment, or reject to use deterministic rules only.</div>',
+    '<div id="' + cid + '-btns" style="display:flex;gap:8px">',
+    '<button onclick="resolveAdvisory(this)" data-cid="' + cid + '" data-decision="accept"',
+    ' style="padding:7px 16px;border-radius:6px;border:none;background:#8b5cf6;color:#fff;font-weight:700;cursor:pointer;font-size:12px">',
+    'Accept advisory</button>',
+    '<button onclick="resolveAdvisory(this)" data-cid="' + cid + '" data-decision="reject"',
+    ' style="padding:7px 16px;border-radius:6px;border:1px solid #8b5cf6;background:transparent;color:#8b5cf6;font-weight:700;cursor:pointer;font-size:12px">',
+    'Reject - rules only</button>',
+    '</div></div>'
+  ].join('');
+  appendA(html, ['predictive risk - LLM advisory gate']);
+}
+
+async function resolveHITL(btn) {
+  var runId = btn.dataset.rid, action = btn.dataset.action, scenario = btn.dataset.sc, persona = btn.dataset.persona;
+  var grp = document.getElementById('hitl-rem-' + runId);
+  if (grp) grp.querySelectorAll('button').forEach(function(b){ b.disabled = true; b.style.opacity = '0.5'; });
+  thnk(async function() {
+    try {
+      var resp = await fetch(API + '/api/pipeline/hitl/remediation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ run_id: runId, action: action, persona: persona || P }),
+      });
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      var data = await resp.json();
+      var label = action === 'IMPUTE' ? '✓ Imputed from baseline'
+                : action === 'DROP'   ? '✗ Signal dropped'
+                :                      '~ Kept with quality flag';
+      var ms = data.pipeline_log ? data.pipeline_log.reduce(function(s,n){ return s+(n.latency_ms||0); },0) : 0;
+      var html = '<div style="margin-bottom:4px"><span style="font-size:9px;font-weight:700;color:#22c55e;font-family:var(--m)">'
+        + '✓ HITL RESOLVED · ' + label + ' · Pipeline resumed · ' + ms + 'ms</span></div>'
+        + '<strong style="color:var(--t)">' + data.headline + '</strong><br><br>'
+        + data.details.map(function(d){ return '• ' + d; }).join('<br>')
+        + (data.actions && data.actions.length
+            ? '<br><br><strong>Recommended actions:</strong><br>' + data.actions.map(function(a){ return '→ ' + a; }).join('<br>')
+            : '');
+      appendA(html, data.pipeline_log ? data.pipeline_log.map(function(n){ return n.node ? n.node.replace(/_/g,' ') : ''; }) : []);
+      if (data.hitl_advisory && data.hitl_advisory.advisory_note) _renderAdvisoryHITLCard(data);
+    } catch(err) {
+      appendA('HITL resolution failed: ' + err.message, []);
+    }
+  });
+}
+
+function resolveAdvisory(btn) {
+  var cardId = btn.dataset.cid, decision = btn.dataset.decision;
+  var card = document.getElementById(cardId);
+  var btns = document.getElementById(cardId + '-btns');
+  if (!card) return;
+  if (decision === 'accept') {
+    card.style.borderColor = '#22c55e';
+    card.style.background = 'rgba(34,197,94,0.06)';
+    if (btns) btns.innerHTML = '<span style="font-size:11px;color:#22c55e;font-weight:700">✓ Advisory accepted — included in risk assessment</span>';
+  } else {
+    card.style.borderColor = '#6b7280';
+    card.style.background = 'rgba(107,114,128,0.04)';
+    if (btns) btns.innerHTML = '<span style="font-size:11px;color:#6b7280;font-weight:700">✗ Advisory rejected — deterministic rules result retained</span>';
+  }
+}
+
+// ── Agent 2: Monitoring HITL card (EWMA-only borderline anomaly) ─────────────
+
+function _renderMonitoringHITLCard(data, scenario, persona) {
+  var h = data.hitl_monitoring;
+  var rid = h.run_id;
+  var scorePct = h.anomaly_score != null ? (h.anomaly_score * 100).toFixed(0) + '%' : '—';
+  var ewmaSignals = (h.ewma_triggered && h.ewma_triggered.length > 0)
+    ? h.ewma_triggered.join(', ') : 'multiple signals';
+  var html = [
+    '<div style="border:1.5px solid #f59e0b;border-radius:10px;padding:14px;background:rgba(245,158,11,0.06)">',
+    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">',
+    '<span style="font-size:9px;font-weight:700;color:#f59e0b;font-family:var(--m)">HITL · MONITORING AGENT · Borderline EWMA Alert</span>',
+    '<span style="font-size:9px;font-weight:600;color:#64748b;margin-left:auto">FOR: OT Controls / Supervisor</span>',
+    '</div>',
+    '<strong style="color:var(--t)">Borderline anomaly — operator confirmation required before fault diagnosis proceeds</strong>',
+    '<div style="margin:10px 0;font-size:12px;color:var(--t2);line-height:1.9">',
+    'Anomaly score: <strong style="color:#f59e0b">' + scorePct + '</strong><br>',
+    'Trigger: <strong>EWMA control chart only</strong> — Hotelling T² multivariate detector did not fire<br>',
+    'EWMA signals: <strong>' + ewmaSignals + '</strong><br>',
+    'Regime: ' + (h.regime || 'normal running'),
+    '</div>',
+    '<div style="font-size:11px;color:var(--t3);margin-bottom:12px;padding:8px;background:rgba(245,158,11,0.06);border-radius:6px;border-left:2px solid #f59e0b">',
+    (h.reason || 'EWMA fired on a single signal dimension but the joint multivariate detector did not trigger, which may indicate a startup transient or sensor noise rather than a real bearing defect.'),
+    '</div>',
+    '<div id="hitl-mon-' + rid + '" style="display:flex;gap:8px;flex-wrap:wrap">',
+    '<button onclick="resolveMonitoringHITL(this)" data-rid="' + rid + '" data-action="SUPPRESS"',
+    ' data-sc="' + (scenario || '') + '" data-persona="' + (persona || P) + '"',
+    ' style="padding:7px 18px;border-radius:6px;border:none;background:#f59e0b;color:#fff;font-weight:700;cursor:pointer;font-size:12px">',
+    'Suppress — expected transient</button>',
+    '<button onclick="resolveMonitoringHITL(this)" data-rid="' + rid + '" data-action="CONFIRM"',
+    ' data-sc="' + (scenario || '') + '" data-persona="' + (persona || P) + '"',
+    ' style="padding:7px 18px;border-radius:6px;border:none;background:#ef4444;color:#fff;font-weight:700;cursor:pointer;font-size:12px">',
+    'Confirm — proceed with diagnosis</button>',
+    '</div></div>'
+  ].join('');
+  appendA(html, ['monitoring · HITL gate']);
+}
+
+async function resolveMonitoringHITL(btn) {
+  var runId = btn.dataset.rid, action = btn.dataset.action, scenario = btn.dataset.sc, persona = btn.dataset.persona;
+  var grp = document.getElementById('hitl-mon-' + runId);
+  if (grp) grp.querySelectorAll('button').forEach(function(b){ b.disabled = true; b.style.opacity = '0.5'; });
+  thnk(async function() {
+    try {
+      var resp = await fetch(API + '/api/pipeline/hitl/monitoring', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ run_id: runId, action: action, persona: persona || P }),
+      });
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      var data = await resp.json();
+      var label = action === 'SUPPRESS' ? '✓ Anomaly suppressed — no fault analysis' : '✓ Anomaly confirmed — proceeding with diagnosis';
+      var ms = data.pipeline_log ? data.pipeline_log.reduce(function(s,n){ return s+(n.latency_ms||0); },0) : 0;
+
+      // After confirmation, FI HITL may fire for low-confidence
+      if (data.hitl_diagnosis) {
+        appendA('<span style="font-size:10px;color:#22c55e;font-weight:700">✓ ' + label + '</span>', []);
+        _renderDiagnosisHITLCard(data, scenario, persona);
+        return;
+      }
+
+      var html = '<div style="margin-bottom:4px"><span style="font-size:9px;font-weight:700;color:#22c55e;font-family:var(--m)">'
+        + '✓ HITL RESOLVED · ' + label + ' · ' + ms + 'ms</span></div>'
+        + '<strong style="color:var(--t)">' + data.headline + '</strong><br><br>'
+        + data.details.map(function(d){ return '• ' + d; }).join('<br>')
+        + (data.actions && data.actions.length
+            ? '<br><br><strong>Recommended actions:</strong><br>' + data.actions.map(function(a){ return '→ ' + a; }).join('<br>')
+            : '');
+      appendA(html, data.pipeline_log ? data.pipeline_log.map(function(n){ return n.node ? n.node.replace(/_/g,' ') : ''; }) : []);
+      if (data.hitl_advisory && data.hitl_advisory.advisory_note) _renderAdvisoryHITLCard(data);
+      if (data.hitl_knowledge) _renderKnowledgeHITLCard(data, persona);
+    } catch(err) {
+      appendA('Monitoring HITL resolution failed: ' + err.message, []);
+    }
+  });
+}
+
+// ── Agent 3: Failure Intelligence HITL card (low-confidence fault) ───────────
+
+function _renderDiagnosisHITLCard(data, scenario, persona) {
+  var h = data.hitl_diagnosis;
+  var rid = h.run_id;
+  var confPct = h.confidence != null ? (h.confidence * 100).toFixed(0) + '%' : '—';
+  var faultLabel = (h.fault_mode || 'unknown').replace(/_/g, ' ');
+  var stageLabel = h.iso_stage > 0 ? 'ISO Stage ' + h.iso_stage : 'Stage unknown';
+  var html = [
+    '<div style="border:1.5px solid #f97316;border-radius:10px;padding:14px;background:rgba(249,115,22,0.06)">',
+    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">',
+    '<span style="font-size:9px;font-weight:700;color:#f97316;font-family:var(--m)">HITL · FAILURE INTELLIGENCE AGENT · Low Confidence Classification</span>',
+    '<span style="font-size:9px;font-weight:600;color:#64748b;margin-left:auto">FOR: Reliability Engineer</span>',
+    '</div>',
+    '<strong style="color:var(--t)">Low-confidence fault classification — engineer confirmation required before risk proceeds</strong>',
+    '<div style="margin:10px 0;font-size:12px;color:var(--t2);line-height:1.9">',
+    'Classified fault: <strong>' + faultLabel + '</strong>' + (h.fault_code ? ' <span style="color:var(--t3)">(' + h.fault_code + ')</span>' : '') + '<br>',
+    'Stage: <strong>' + stageLabel + '</strong><br>',
+    'Confidence: <strong style="color:#f97316">' + confPct + '</strong> <span style="color:var(--t3)">(threshold: 60%)</span>',
+    '</div>',
+    '<div style="font-size:11px;color:var(--t2);margin-bottom:12px;padding:8px 10px;background:rgba(249,115,22,0.06);border-radius:6px;border-left:2px solid #f97316">',
+    h.narrative || 'Insufficient signal evidence for a conclusive fault classification.',
+    '</div>',
+    '<div style="font-size:11px;color:var(--t3);margin-bottom:12px">',
+    'Confirm to proceed with this classification, or override to undetermined to trigger manual inspection.',
+    '</div>',
+    '<div id="hitl-diag-' + rid + '" style="display:flex;gap:8px;flex-wrap:wrap">',
+    '<button onclick="resolveDiagnosisHITL(this)" data-rid="' + rid + '" data-action="CONFIRM"',
+    ' data-sc="' + (scenario || '') + '" data-persona="' + (persona || P) + '"',
+    ' style="padding:7px 18px;border-radius:6px;border:none;background:#f97316;color:#fff;font-weight:700;cursor:pointer;font-size:12px">',
+    'Confirm — ' + faultLabel + '</button>',
+    '<button onclick="resolveDiagnosisHITL(this)" data-rid="' + rid + '" data-action="MARK_UNDETERMINED"',
+    ' data-sc="' + (scenario || '') + '" data-persona="' + (persona || P) + '"',
+    ' style="padding:7px 18px;border-radius:6px;border:1px solid #6b7280;background:transparent;color:var(--t2);font-weight:700;cursor:pointer;font-size:12px">',
+    'Override — mark undetermined</button>',
+    '</div></div>'
+  ].join('');
+  appendA(html, ['failure intelligence · HITL gate']);
+}
+
+async function resolveDiagnosisHITL(btn) {
+  var runId = btn.dataset.rid, action = btn.dataset.action, scenario = btn.dataset.sc, persona = btn.dataset.persona;
+  var grp = document.getElementById('hitl-diag-' + runId);
+  if (grp) grp.querySelectorAll('button').forEach(function(b){ b.disabled = true; b.style.opacity = '0.5'; });
+  thnk(async function() {
+    try {
+      var resp = await fetch(API + '/api/pipeline/hitl/diagnosis', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ run_id: runId, action: action, persona: persona || P }),
+      });
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      var data = await resp.json();
+      var label = action === 'CONFIRM' ? '✓ Classification confirmed' : '✓ Overridden to undetermined — manual inspection';
+      var ms = data.pipeline_log ? data.pipeline_log.reduce(function(s,n){ return s+(n.latency_ms||0); },0) : 0;
+      var html = '<div style="margin-bottom:4px"><span style="font-size:9px;font-weight:700;color:#22c55e;font-family:var(--m)">'
+        + '✓ HITL RESOLVED · ' + label + ' · Pipeline resumed · ' + ms + 'ms</span></div>'
+        + '<strong style="color:var(--t)">' + data.headline + '</strong><br><br>'
+        + data.details.map(function(d){ return '• ' + d; }).join('<br>')
+        + (data.actions && data.actions.length
+            ? '<br><br><strong>Recommended actions:</strong><br>' + data.actions.map(function(a){ return '→ ' + a; }).join('<br>')
+            : '');
+      appendA(html, data.pipeline_log ? data.pipeline_log.map(function(n){ return n.node ? n.node.replace(/_/g,' ') : ''; }) : []);
+      if (data.hitl_advisory && data.hitl_advisory.advisory_note) _renderAdvisoryHITLCard(data);
+      if (data.hitl_knowledge) _renderKnowledgeHITLCard(data, persona);
+    } catch(err) {
+      appendA('Diagnosis HITL resolution failed: ' + err.message, []);
+    }
+  });
+}
+
+// ── Agent 5: Knowledge HITL card (no SOP found) ──────────────────────────────
+
+function _renderKnowledgeHITLCard(data, persona) {
+  var h = data.hitl_knowledge;
+  var rid = h.run_id;
+  var faultLabel = (h.fault_mode || 'unknown').replace(/_/g, ' ');
+  var assetId = h.asset_id || 'unknown';
+  var html = [
+    '<div style="border:1.5px solid #06b6d4;border-radius:10px;padding:14px;background:rgba(6,182,212,0.06)">',
+    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">',
+    '<span style="font-size:9px;font-weight:700;color:#06b6d4;font-family:var(--m)">HITL · KNOWLEDGE AGENT · No SOP Found</span>',
+    '<span style="font-size:9px;font-weight:600;color:#64748b;margin-left:auto">FOR: Safety Officer / Maintenance</span>',
+    '</div>',
+    '<strong style="color:var(--t)">No standard operating procedure found — manual SOP lookup required</strong>',
+    '<div style="margin:10px 0;font-size:12px;color:var(--t2);line-height:1.9">',
+    'Asset: <strong>' + assetId + '</strong><br>',
+    'Fault mode: <strong>' + faultLabel + '</strong><br>',
+    '<span style="color:#ef4444;font-weight:600">No SOP found in the catalog for this fault / asset combination.</span>',
+    '</div>',
+    '<div style="font-size:11px;color:var(--t3);margin-bottom:12px">',
+    'A Safety Officer or Maintenance lead must confirm the correct procedure before any work begins. ',
+    'Alternatively, accept and apply general site maintenance guidelines.',
+    '</div>',
+    '<div id="hitl-know-' + rid + '" style="display:flex;gap:8px;flex-wrap:wrap">',
+    '<button onclick="resolveKnowledgeHITL(this)" data-rid="' + rid + '" data-action="FLAG_MANUAL"',
+    ' data-persona="' + (persona || P) + '"',
+    ' style="padding:7px 18px;border-radius:6px;border:none;background:#ef4444;color:#fff;font-weight:700;cursor:pointer;font-size:12px">',
+    'Flag for manual SOP lookup</button>',
+    '<button onclick="resolveKnowledgeHITL(this)" data-rid="' + rid + '" data-action="ACCEPT_EMPTY"',
+    ' data-persona="' + (persona || P) + '"',
+    ' style="padding:7px 18px;border-radius:6px;border:1px solid #06b6d4;background:transparent;color:#06b6d4;font-weight:700;cursor:pointer;font-size:12px">',
+    'Proceed without SOP</button>',
+    '</div></div>'
+  ].join('');
+  appendA(html, ['knowledge · HITL gate']);
+}
+
+async function resolveKnowledgeHITL(btn) {
+  var runId = btn.dataset.rid, action = btn.dataset.action, persona = btn.dataset.persona;
+  var grp = document.getElementById('hitl-know-' + runId);
+  if (grp) grp.querySelectorAll('button').forEach(function(b){ b.disabled = true; b.style.opacity = '0.5'; });
+  thnk(async function() {
+    try {
+      var resp = await fetch(API + '/api/pipeline/hitl/knowledge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ run_id: runId, action: action, persona: persona || P }),
+      });
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      var data = await resp.json();
+      var label = action === 'FLAG_MANUAL' ? '✓ Flagged for manual SOP lookup' : '✓ Proceeding without SOP';
+      var ms = data.pipeline_log ? data.pipeline_log.reduce(function(s,n){ return s+(n.latency_ms||0); },0) : 0;
+      var html = '<div style="margin-bottom:4px"><span style="font-size:9px;font-weight:700;color:#22c55e;font-family:var(--m)">'
+        + '✓ HITL RESOLVED · ' + label + ' · ' + ms + 'ms</span></div>'
+        + '<strong style="color:var(--t)">' + data.headline + '</strong><br><br>'
+        + data.details.map(function(d){ return '• ' + d; }).join('<br>')
+        + (data.actions && data.actions.length
+            ? '<br><br><strong>Recommended actions:</strong><br>' + data.actions.map(function(a){ return '→ ' + a; }).join('<br>')
+            : '');
+      appendA(html, data.pipeline_log ? data.pipeline_log.map(function(n){ return n.node ? n.node.replace(/_/g,' ') : ''; }) : []);
+    } catch(err) {
+      appendA('Knowledge HITL resolution failed: ' + err.message, []);
+    }
+  });
+}
+
+// ── Scenario → pipeline mapping for quick-fire buttons ──────────────────────
+const ASSET_SCENARIO = {
+  'low confidence': 'fi_hitl_test',        // Gate 3: early inner-race, weak evidence
+  'no sop':         'knowledge_hitl_test', // Gate 5: undetermined fault, no SOP match
+  'inner race': 'inner_race_fault',        // must be before M-104 to match first
+  'unknown asset': 'unknown_asset',
+  'M-104': 'outer_race_fault',
+  'P-207': 'lubrication_issue',
+  'C-301': 'signal_dropout',
+  'M-089': 'healthy',
+  'G-112': 'gearbox_fault',
+};
+
+// sendMsg is defined in the main script block above (async, API-aware)
+
+// ── "Run Real Pipeline" button in Agent Graph view ──────────────────────────
+let _pipelineRunning = false;
+
+const _origReplayAg = replayAg;
+async function replayAg() {
+  if (_pipelineRunning) return;   // ignore double-clicks while in flight
+  _pipelineRunning = true;
+  _origReplayAg();
+  const sc = ASSET_SCENARIO[agAsset] || 'outer_race_fault';
+  try { await runRealPipeline(sc, -1, P); } finally { _pipelineRunning = false; }
+}
+
+// ── Load work orders from API on WO view ─────────────────────────────────────
+const _origRenderWO = renderWO;
+async function renderWO() {
+  _origRenderWO();  // render with static data first
+  try {
+    const resp = await fetch(`${API}/api/workorders`);
+    if (!resp.ok) return;
+    const data = await resp.json();
+    // Merge API WOs into the static WOS array (don't replace — just update status)
+    (data.workorders || []).forEach(apiWO => {
+      const existing = WOS.find(w => w.id === apiWO.id);
+      if (existing) {
+        existing.st = apiWO.status;
+        existing.asgn = apiWO.assigned_to || existing.asgn;
+      }
+    });
+  } catch(e) {}
+}
+
+// ── WO approve button patches PATCH /api/workorders/{id} ────────────────────
+const _origWoAsk = woAsk;
+async function woAsk(txt) {
+  _origWoAsk(txt);  // show static response first
+  if (/approv/i.test(txt) && selWO) {
+    try {
+      await fetch(`${API}/api/workorders/${selWO.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'Approved' }),
+      });
+    } catch(e) {}
+  }
+}
+
+// ── Add "▶ Run Real Pipeline" chip to the Agent Graph action area ────────────
+document.addEventListener('DOMContentLoaded', () => {
+  const tbr = document.querySelector('.tb-r');
+  if (tbr) {
+    const btn = document.createElement('button');
+    btn.className = 'chip';
+    btn.textContent = '⚡ Live Pipeline';
+    btn.title = 'Run actual Python agents on the current asset scenario';
+    btn.style.cssText = 'margin-left:8px;background:rgba(79,142,255,.15);border-color:var(--ac);color:var(--ac2);font-size:10px';
+    btn.onclick = async () => {
+      if (_pipelineRunning) return;
+      _pipelineRunning = true;
+      btn.disabled = true;
+      btn.textContent = '⏳ Running…';
+      const sc = ASSET_SCENARIO[agAsset] || 'outer_race_fault';
+      try {
+        document.querySelector('.nt').click();  // switch to chat first
+        await runRealPipeline(sc, -1, P);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '⚡ Live Pipeline';
+        _pipelineRunning = false;
+      }
+    };
+    tbr.insertBefore(btn, tbr.firstChild);
+
+    // ── Executor HITL demo button ─────────────────────────────────────
+    const exBtn = document.createElement('button');
+    exBtn.className = 'chip';
+    exBtn.textContent = '⚙ Test Executor';
+    exBtn.title = 'Phase 9 — simulate executor approval HITL with sample recommendation';
+    exBtn.style.cssText = 'margin-left:6px;background:rgba(16,185,129,.12);border-color:#10b981;color:#10b981;font-size:10px';
+    exBtn.onclick = () => {
+      document.querySelector('.nt').click();  // switch to chat view
+      _renderExecutorHITLCard();
+    };
+    tbr.insertBefore(exBtn, tbr.firstChild);
+  }
+});
+
+// ── Phase 9: Executor HITL card ───────────────────────────────────────────────
+
+const _SAMPLE_REC = {
+  case_id: 'DEMO-004',
+  asset_id: 'AST_PMP_001',
+  bearing_id: 'BRG_005',
+  recommended_action: {
+    name: 'lubrication_service',
+    description: 'lubrication_service (in_window) per SOP_003',
+    estimated_duration_hours: 3.0,
+  },
+  urgency: 'planned',
+  required_parts: [{ part_number: 'MOBIL-DTE-25', quantity: 1, lead_time_days: 0 }],
+  window_chosen: 'WIN_005',
+  rationale: 'Lubrication Issue detected at severity \'stage_2\' on bearing BRG_005 (asset AST_PMP_001). Remaining useful life estimate: ~14 days. Stage 2 indicates active degradation — action required soon.',
+  recommendation_status: 'ok',
+  approval_status: 'pending',
+  responsible_person: 'Plant Supervisor – James Kowalski',
+  responsible_person_id: 'PERSONA_SUP',
+  responsible_approver: 'Plant Supervisor – James Kowalski',
+  responsible_approver_id: 'PERSONA_SUP',
+  contributors: [{ role: 'Maintenance Planner', name: 'Tom Rodriguez', concern: 'confirms parts and crew readiness' }],
+  generated_at_utc: new Date().toISOString(),
+};
+
+const _URGENCY_COLOR = { immediate: '#ef4444', urgent: '#f97316', planned: '#3b82f6', monitor: '#6b7280' };
+
+function _renderExecutorHITLCard() {
+  const rec = _SAMPLE_REC;
+  const action = rec.recommended_action;
+  const urgencyColor = _URGENCY_COLOR[rec.urgency] || '#6b7280';
+  const partsHtml = rec.required_parts.map(p =>
+    '<span style="background:rgba(16,185,129,.1);border:1px solid #10b981;border-radius:4px;padding:2px 8px;font-size:11px;color:#10b981">'
+    + p.part_number + ' ×' + p.quantity + '</span>'
+  ).join(' ');
+
+  const html = [
+    '<div style="border:1.5px solid #10b981;border-radius:10px;padding:14px;background:rgba(16,185,129,0.06)">',
+    '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">',
+    '<span style="font-size:9px;font-weight:700;color:#10b981;font-family:var(--m)">HITL · EXECUTOR AGENT · Execution Approval</span>',
+    '<span style="font-size:9px;font-weight:600;color:#64748b;margin-left:auto">FOR: Plant Supervisor</span>',
+    '</div>',
+    '<strong style="color:var(--t)">Maintenance recommendation awaiting approval before execution</strong>',
+    '<div style="margin:10px 0;font-size:12px;color:var(--t2);line-height:2">',
+    'Case: <strong>' + rec.case_id + '</strong> &nbsp;|&nbsp; Asset: <strong>' + rec.asset_id + '</strong><br>',
+    'Action: <strong>' + action.name.replace(/_/g, ' ') + '</strong>',
+    ' &nbsp;<span style="font-size:10px;color:var(--t3)">(' + action.description + ')</span><br>',
+    'Urgency: <strong style="color:' + urgencyColor + '">' + rec.urgency.toUpperCase() + '</strong>',
+    ' &nbsp;|&nbsp; Est. duration: <strong>' + action.estimated_duration_hours + 'h</strong>',
+    ' &nbsp;|&nbsp; Window: <strong>' + rec.window_chosen + '</strong><br>',
+    'Parts required: ' + (partsHtml || '<span style="color:var(--t3)">none</span>') + '<br>',
+    'Approver: <strong>' + rec.responsible_approver + '</strong>',
+    '</div>',
+    '<div style="font-size:11px;color:var(--t2);background:rgba(16,185,129,0.06);padding:9px 11px;border-radius:6px;border-left:2px solid #10b981;margin-bottom:12px;line-height:1.6">',
+    rec.rationale,
+    '</div>',
+    '<div id="hitl-exec-btns" style="display:flex;gap:8px;flex-wrap:wrap">',
+    '<button onclick="resolveExecutorHITL(this)" data-approved="true"',
+    ' style="padding:7px 18px;border-radius:6px;border:none;background:#10b981;color:#fff;font-weight:700;cursor:pointer;font-size:12px">',
+    'Approve &amp; Execute</button>',
+    '<button onclick="resolveExecutorHITL(this)" data-approved="false"',
+    ' style="padding:7px 18px;border-radius:6px;border:1px solid #ef4444;background:transparent;color:#ef4444;font-weight:700;cursor:pointer;font-size:12px">',
+    'Reject</button>',
+    '</div></div>',
+  ].join('');
+  appendA(html, ['executor · approval gate']);
+}
+
+async function resolveExecutorHITL(btn) {
+  const approved = btn.dataset.approved === 'true';
+  const grp = document.getElementById('hitl-exec-btns');
+  if (grp) grp.querySelectorAll('button').forEach(b => { b.disabled = true; b.style.opacity = '0.5'; });
+
+  thnk(async function() {
+    try {
+      const resp = await fetch(API + '/api/executor/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recommendation: _SAMPLE_REC, approved }),
+      });
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const data = await resp.json();
+      _renderExecutionResultCard(data, approved);
+    } catch(err) {
+      appendA('Executor call failed: ' + err.message, []);
+    }
+  });
+}
+
+function _renderExecutionResultCard(r, approved) {
+  const statusColor = { success: '#10b981', partial: '#f59e0b', blocked: '#6b7280', failed: '#ef4444' };
+  const color = statusColor[r.status] || '#6b7280';
+  const label = approved ? '✓ APPROVED & EXECUTED' : '✗ REJECTED';
+  const partsRows = (r.parts_status || []).map(p => {
+    const ok = p.status === 'reserved';
+    return '<div style="display:flex;gap:6px;align-items:center;font-size:11px">'
+      + '<span style="color:' + (ok ? '#10b981' : '#ef4444') + '">' + (ok ? '✓' : '✗') + '</span>'
+      + '<span style="color:var(--t2)">' + p.part_number + ' ×' + (p.reserved_qty || p.requested_qty || 1) + '</span>'
+      + '<span style="color:' + (ok ? '#10b981' : '#ef4444') + ';font-weight:600">' + p.status + '</span>'
+      + (ok ? '<span style="color:var(--t3);font-size:10px">' + (p.reservation_id || '') + '</span>' : '')
+      + '</div>';
+  }).join('');
+
+  const html = [
+    '<div style="border:1.5px solid ' + color + ';border-radius:10px;padding:14px;background:rgba(16,185,129,0.04)">',
+    '<div style="font-size:9px;font-weight:700;color:' + color + ';font-family:var(--m);margin-bottom:10px">',
+    label + ' · EXECUTOR RESULT</div>',
+    '<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap">',
+    '<span style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:4px;background:' + color + ';color:#fff">' + r.status.toUpperCase() + '</span>',
+    '<span style="font-size:11px;color:var(--t2)">action: <strong>' + (r.action_taken || '—').replace(/_/g,' ') + '</strong></span>',
+    '</div>',
+    r.status === 'blocked'
+      ? '<div style="font-size:12px;color:#6b7280;margin-bottom:8px">⛔ ' + (r.blocked_reason || 'Execution blocked') + '</div>'
+      : [
+          '<div style="font-size:12px;color:var(--t2);line-height:2;margin-bottom:8px">',
+          'Work order: <strong style="color:#10b981">' + (r.work_order_id || '—') + '</strong>',
+          r.work_order_details && r.work_order_details.priority
+            ? ' &nbsp;<span style="font-size:10px;color:var(--t3)">(' + r.work_order_details.priority + ')</span>'
+            : '',
+          '<br>Notification: <strong>' + (r.notification_status || '—') + '</strong>',
+          '<br>Audit ref: <span style="font-family:var(--m);font-size:10px;color:var(--t3)">' + (r.audit_reference || '—') + '</span>',
+          '</div>',
+          partsRows ? '<div style="margin-bottom:6px"><div style="font-size:10px;font-weight:600;color:var(--t3);margin-bottom:4px">PARTS</div>' + partsRows + '</div>' : '',
+        ].join(''),
+    '</div>',
+  ].join('');
+  appendA(html, ['executor · result']);
+}
+</script>
+</body>
+</html>

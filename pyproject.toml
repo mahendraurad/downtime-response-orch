@@ -1,0 +1,29 @@
+[project]
+name = "dro"
+version = "0.2.0"
+description = "Downtime Response Orchestrator multi-agent bearing predictive-maintenance backend"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=2.0.0",
+  "pydantic>=2.7.0,<3.0.0",
+  "pdfplumber>=0.10.0",
+  "openai>=1.0.0,<3.0.0",
+  "langgraph>=1.0.0,<2.0.0",
+  "langchain-core>=0.1.0,<2.0.0",
+  "fastapi>=0.100.0,<1.0.0",
+  "uvicorn[standard]>=0.20.0,<1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=7.0.0,<10.0.0",
+  "httpx>=0.24.0,<1.0.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "src"]
+# Keep pytest temporary files inside the repository. Some managed Windows
+# profiles deny access to %LOCALAPPDATA%\Temp\pytest-of-<user>.
+addopts = "--basetemp=.pytest-tmp -p no:cacheprovider"

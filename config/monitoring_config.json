@@ -1,0 +1,82 @@
+{
+  "_comment": "Monitoring Agent — Hotelling T² anomaly detection. Edit values here, no code changes. Signal order must match the four baseline-backed fields in bearing_master.",
+
+  "anomaly": {
+    "method": "hotelling_t2",
+    "_method_comment": "Primary score = T² normalised to 0-1 via chi-square CDF. Z-scores are retained for evidence and triggered_features only.",
+
+    "anomaly_threshold": 0.85,
+    "_threshold_comment": "chi2_CDF(T², p) >= threshold -> emit AnomalyEvent. 0.85 ≈ 85th percentile of the null distribution — well above healthy noise but sensitive enough to catch early faults.",
+
+    "min_signals_for_t2": 2,
+    "_min_comment": "Minimum number of non-null, non-imputed signals needed to compute T². Below this, return None (cannot assess).",
+
+    "signal_order": ["vib_rms_mm_s", "kurtosis", "temp_c", "bpfo_energy"],
+    "_order_comment": "Must match the order used to build the 4x4 correlation matrix from bearing_master.",
+
+    "signal_baselines": {
+      "vib_rms_mm_s": {"mean": "baseline_vib_rms_mean",  "std": "baseline_vib_rms_std"},
+      "kurtosis":     {"mean": "baseline_kurtosis_mean", "std": "baseline_kurtosis_std"},
+      "temp_c":       {"mean": "baseline_temp_mean",     "std": "baseline_temp_std"},
+      "bpfo_energy":  {"mean": "baseline_bpfo_mean",     "std": "baseline_bpfo_std"}
+    },
+
+    "trigger_z": 3.0,
+    "_trigger_comment": "A signal whose |z| >= trigger_z is listed in triggered_features. Used for evidence only — not for the primary score.",
+
+    "exclude_imputed_fields": true,
+    "_impute_comment": "Fields filled by the remediation step are excluded from T² — we never raise an anomaly against a value we invented."
+  },
+
+  "regime": {
+    "_comment": "Detection is suppressed unless the machine is in a running regime.",
+    "running_states":          ["running", "fault"],
+    "running_min_rpm":         50,
+    "rated_rpm_tolerance_pct": 15,
+    "low_load_max_pct":        40,
+    "high_load_min_pct":       85
+  },
+
+  "ewma": {
+    "_comment": "EWMA control-chart drift detector. Runs in parallel to T². Either method can fire AnomalyEvent. Catches slow degradation that T² (point-in-time) misses.",
+    "enabled":               true,
+    "alpha":                 0.2,
+    "_alpha_comment":        "Smoothing factor (0,1]. Lower = more smoothing / slower response. 0.2 is a standard choice for slow drift.",
+    "control_limit_L":       3.0,
+    "_L_comment":            "Out-of-control when |EWMA - mean| >= L * sigma_ewma, where sigma_ewma = std * sqrt(alpha/(2-alpha)). L=3 ~ 3-sigma control chart.",
+    "signals":               ["vib_rms_mm_s", "kurtosis", "temp_c", "bpfo_energy"],
+    "state_file":            "data/ewma_state.json",
+    "exclude_imputed_fields": true
+  },
+
+  "confidence": {
+    "_comment": "Weights should sum to ~1.0.",
+    "weights": {
+      "signal_quality": 0.34,
+      "coverage":       0.33,
+      "data_quality":   0.33
+    }
+  },
+
+  "_comment_prateek_added_start": "************** Added by Prateek Mittal on 17th July 2026 ****************** - Agent 2 state versioning, alert policy, and decision persistence.",
+
+  "state": {
+    "namespace_version": "monitoring-state-v2"
+  },
+
+  "alert_policy": {
+    "min_consecutive_anomalies": 1,
+    "cooldown_seconds": 0
+  },
+
+  "decision_repository": {
+    "sqlite_path": "data/monitoring_decisions.db"
+  },
+
+  "_comment_prateek_added_end": "***********************",
+
+  "logging": {
+    "log_anomalies": true,
+    "log_healthy":   false
+  }
+}
