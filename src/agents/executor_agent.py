@@ -82,11 +82,13 @@ class ExecutorAgent:
 
     # ************** Added by Prateek Mittal on 20th July 2026 ******************
     def __init__(self, cfg: ExecutorConfig = None, repository=None,
-                 cmms_fn=None, inventory_fn=None, now_fn=None):
+                 cmms_fn=None, inventory_fn=None, notification_fn=None,
+                 now_fn=None):
         self._cfg = cfg or load_executor_config(); self._cfg.validate()
         self._repository = repository
         self._cmms_fn = cmms_fn
         self._inventory_fn = inventory_fn
+        self._notification_fn = notification_fn
         self._now_fn = now_fn or (lambda: datetime.now(tz=timezone.utc))
         self._version = hashlib.sha256(json.dumps(asdict(self._cfg), sort_keys=True).encode()).hexdigest()[:16]
 
@@ -304,6 +306,10 @@ class ExecutorAgent:
         In Phase 11, replace with email / Teams / PagerDuty calls.
         Always returns 'sent' in dev (notifications are fire-and-forget).
         """
+        # The default adapter powers the frontend inbox. Injection keeps this
+        # boundary replaceable and makes notifier failures independently testable.
+        from src.tools.notification_mock_service import send_notifications
+
         contributors = ", ".join(
             f"{c.name} ({c.role})" for c in recommendation.contributors
         ) or "on-call team"
@@ -327,4 +333,9 @@ class ExecutorAgent:
                 recommendation.asset_id,
                 recommendation.responsible_approver,
             )
-        return "sent"
+        try:
+            (self._notification_fn or send_notifications)(recommendation, work_order_id)
+            return "sent"
+        except Exception as exc:
+            logger.error("[executor][notify] delivery failed: %s", exc)
+            return "failed"

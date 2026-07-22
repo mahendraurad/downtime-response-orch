@@ -917,6 +917,31 @@ def executor_run(req: ExecutorRunRequest):
         raise HTTPException(400, f"Executor error: {exc}")
 
 
+@app.get("/api/notifications/counts")
+def notification_counts():
+    """Return unread notification counts for every supported frontend persona."""
+    from src.tools.notification_mock_service import get_unread_counts
+    return get_unread_counts()
+
+
+@app.get("/api/notifications/{persona_id}")
+def persona_notifications(persona_id: str):
+    from src.tools.notification_mock_service import PERSONAS, get_notifications
+    if persona_id not in PERSONAS:
+        raise HTTPException(404, f"Unknown persona: {persona_id}")
+    notifications = get_notifications(persona_id)
+    return {"persona_id": persona_id, "notifications": notifications, "count": len(notifications)}
+
+
+@app.post("/api/notifications/{persona_id}/read")
+def read_persona_notifications(persona_id: str):
+    from src.tools.notification_mock_service import PERSONAS, mark_all_read
+    if persona_id not in PERSONAS:
+        raise HTTPException(404, f"Unknown persona: {persona_id}")
+    mark_all_read(persona_id)
+    return {"status": "ok", "persona_id": persona_id}
+
+
 @app.get("/api/pipeline/scenarios")
 def list_scenarios():
     """Return available demo scenario names."""

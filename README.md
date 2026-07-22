@@ -14,7 +14,7 @@ The repository is ready for frontend integration in deterministic local mode. Az
 | Human approval and HITL gates | Implemented |
 | Reflexion and graceful error envelopes | Implemented |
 | Local persistence and mock connectors | Implemented |
-| Automated tests | `630 passed` |
+| Automated tests | `634 passed` before the frontend merge |
 | Real CMMS/ERP/historian and Azure services | Next phase |
 
 ## Agent flow
@@ -103,6 +103,9 @@ The frontend can generate its API client from `/openapi.json`. The principal end
 | `POST` | `/api/pipeline/hitl/diagnosis` | Resolve Agent 3 low-confidence diagnosis |
 | `POST` | `/api/pipeline/hitl/knowledge` | Resolve missing-SOP gate |
 | `POST` | `/api/executor/run` | Execute a typed recommendation after approval |
+| `GET` | `/api/notifications/counts` | Unread counts for frontend personas |
+| `GET` | `/api/notifications/{persona_id}` | Persona notification inbox |
+| `POST` | `/api/notifications/{persona_id}/read` | Mark a persona inbox as read |
 | `GET/POST/PATCH` | `/api/workorders` | Demo work-order UI operations |
 | `WS` | `/ws/sensors/{asset_id}` | Simulated live sensor stream |
 
@@ -207,7 +210,7 @@ python -m pytest tests/test_agent1_to_agent8_integration.py -q
 Current certification:
 
 ```text
-630 passed
+634 passed (backend compatibility checkpoint before React branch merge)
 0 failed
 ```
 
