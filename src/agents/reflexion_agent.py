@@ -2,6 +2,7 @@
 from copy import deepcopy
 from pydantic import BaseModel, Field
 from typing import Any, Dict, List
+from langsmith import traceable
 
 # ************** Added by Prateek Mittal on 20th July 2026 ******************
 class ReflectionResult(BaseModel):
@@ -14,6 +15,7 @@ class ReflectionResult(BaseModel):
 class ReflexionAgent:
     def __init__(self, llm_client=None, max_characters=4000):
         self._llm=llm_client; self._max=max_characters
+    @traceable(name="Reflexion Agent", run_type="chain", tags=["dro", "reflexion"])
     def process(self, draft: dict, state: dict = None, call_plan=None) -> ReflectionResult:
         if not isinstance(draft, dict):
             return ReflectionResult(status="blocked", issues=["response draft must be a dictionary"])

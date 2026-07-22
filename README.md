@@ -14,7 +14,7 @@ The repository is ready for frontend integration in deterministic local mode. Az
 | Human approval and HITL gates | Implemented |
 | Reflexion and graceful error envelopes | Implemented |
 | Local persistence and mock connectors | Implemented |
-| Automated backend tests | `659 passed` |
+| Automated backend tests | `683 passed` |
 | React frontend from `feature/8agents_frontend` | Integrated on `dev` |
 | Real CMMS/ERP/historian and Azure services | Next phase |
 
@@ -146,6 +146,18 @@ Recent-failure and lessons-learned questions route directly to Agent 8's
 validated closed-case memory. Arbitrary canonical telemetry supplied in
 `context.signal` routes by question intent and need not match a demo scenario.
 
+Chat responses include `conversation_id`, `clarification_required`, and, when
+needed, a `clarification` object containing `missing_fields` and targeted
+questions. The frontend must return the same `conversation_id` on follow-up
+turns so the pending question and collected context can be continued safely.
+Conceptual questions such as "What is RUL?" use the controlled glossary without
+asset data; asset-specific and fleet questions wait for their required context.
+
+Multi-asset questions name every requested asset in `multi_asset_results`. Each
+asset is evaluated independently through the required pipeline depth, receives
+an action and deadline, and carries asset-labelled pipeline logs. A failure or
+data-quality rejection for one asset does not suppress results for the others.
+
 ### Pipeline example
 
 ```javascript
@@ -230,13 +242,25 @@ python -m pytest tests/test_agent1_to_agent8_integration.py -q
 Current certification:
 
 ```text
-659 passed
+683 passed
 0 failed
 ```
 
 The test-client stack currently emits one non-functional Starlette/httpx deprecation warning.
 
 ## Configuration
+
+### Optional LangSmith tracing
+
+Set `LANGSMITH_TRACING=true`, `LANGSMITH_ENDPOINT`, `LANGSMITH_API_KEY`, and
+`LANGSMITH_PROJECT=DRO` in the ignored local `.env` (or as process environment
+variables). Traces are nested as Chat API → orchestrator → individual agents →
+Reflexion and contain the actual agent inputs, outputs, routing, latency, and
+errors. Because telemetry and user questions may be sensitive, enable remote
+tracing only in an organisation-approved LangSmith workspace. A tracing outage
+does not change pipeline decisions or API responses.
+
+PowerShell uses `$env:LANGSMITH_TRACING="true"`; `export` is Bash syntax.
 
 All policy files live under `config/`. Important frontend-visible controls include freshness/routing, alert cooldown, retrieval grounding, recommendation approval actions, execution allowlists, learning validation, chat length and reflection limits.
 

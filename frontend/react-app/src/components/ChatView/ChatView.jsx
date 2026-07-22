@@ -29,6 +29,7 @@ export default function ChatView() {
   const [thinking, setThinking] = useState(false);
   const msgsRef = useRef(null);
   const inpRef = useRef(null);
+  const conversationIdRef = useRef(null);
   const p = PD[persona];
 
   // Scroll to bottom whenever messages change
@@ -141,7 +142,12 @@ export default function ChatView() {
     appendU(t);
     const lower = t.toLowerCase();
 
-    for (const [asid, sc] of Object.entries(ASSET_SCENARIO)) {
+    const matchedAssets = Object.entries(ASSET_SCENARIO)
+      .filter(([asid]) => lower.includes(asid.toLowerCase()));
+    // A single asset can use the focused pipeline card. Multi-asset questions
+    // must reach /api/chat intact so the backend can plan every requested asset.
+    if (matchedAssets.length === 1) {
+      const [asid, sc] = matchedAssets[0];
       if (lower.includes(asid.toLowerCase())) {
         doThink(async () => {
           try {
@@ -174,11 +180,16 @@ export default function ChatView() {
         const resp = await fetch(API + '/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: t, persona }),
+          body: JSON.stringify({ message: t, persona, conversation_id: conversationIdRef.current }),
         });
         if (resp.ok) {
           const d = await resp.json();
-          appendA(d.response, d.agents || []);
+          conversationIdRef.current = d.conversation_id || conversationIdRef.current;
+          const details = d.details && d.details.length ? '<br><br>' + d.details.map(x => '• ' + x).join('<br>') : '';
+          const actions = d.actions && d.actions.length ? '<br><br><strong>Actions:</strong><br>' + d.actions.map(x => '→ ' + x).join('<br>') : '';
+          const questions = d.clarification && d.clarification.questions ? '<br><br><strong>Needed:</strong><br>' + d.clarification.questions.map(x => '? ' + x).join('<br>') : '';
+          appendA(d.response + details + actions + questions,
+            d.pipeline_log ? d.pipeline_log.map(n => n.node ? n.node.replace(/_/g, ' ') : '') : []);
         } else {
           const r = DFLT[Math.floor(Math.random() * DFLT.length)];
           appendA(r.c, r.r);

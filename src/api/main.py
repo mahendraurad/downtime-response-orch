@@ -21,6 +21,7 @@ import json
 import math
 import os
 import random
+import re
 import sys
 import uuid
 from copy import deepcopy
@@ -32,9 +33,24 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
+from langsmith import traceable
 
 # Make repo root importable when run as: python -m src.api.main
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+_ENV_PATH = os.path.join(os.path.dirname(__file__), "..", "..", ".env")
+try:
+    from dotenv import load_dotenv
+    load_dotenv(_ENV_PATH)
+except ImportError:
+    # Keep existing environments runnable before requirements are refreshed.
+    if os.path.exists(_ENV_PATH):
+        with open(_ENV_PATH, "r", encoding="utf-8") as _env_file:
+            for _line in _env_file:
+                _line = _line.strip()
+                if not _line or _line.startswith("#") or "=" not in _line:
+                    continue
+                _name, _value = _line.split("=", 1)
+                os.environ.setdefault(_name.strip(), _value.strip().strip('"').strip("'"))
 
 from src.orchestrator.graph import run_pipeline
 from src.api.persona_formatter import format_for_persona
@@ -58,6 +74,7 @@ def _learning_agent():
     return LearningMemoryAgent()
 
 
+@traceable(name="Agent 8 - Learning History Query", run_type="retriever", tags=["dro", "agent-8"])
 def _learning_history_draft(persona: str, limit: int = 3):
     cases = _learning_agent().recent_cases(limit)
     if not cases:
@@ -78,6 +95,112 @@ def _learning_history_draft(persona: str, limit: int = 3):
         "case_references": [f"Learned case {case.get('case_id', '')}" for case in cases],
         "call_plan": ["agent_8"], "needs_context": False,
         "agent_outputs": {"learned_cases": cases}}, cases)
+
+
+_CONCEPTS = {
+    "rul": "Remaining Useful Life (RUL) is the estimated time or operating usage before an asset reaches a defined failure or maintenance threshold. An asset-specific RUL requires current telemetry, operating context, and a validated model.",
+    "signals": "Vibration helps reveal mechanical impacts, imbalance, looseness, and bearing-frequency patterns; temperature helps reveal friction, lubrication, and load-related heating. Their trends must be compared with an asset-specific baseline before a decision is made.",
+}
+
+_MULTI_ASSET_SCENARIOS = {
+    "M-104": ("AST_MTR_001", "outer_race_fault"),
+    "P-207": ("AST_PMP_001", "lubrication_issue"),
+    "C-301": ("AST_CON_001", "signal_dropout"),
+    "M-089": ("AST_MTR_002", "healthy"),
+    "G-112": ("AST_GBX_001", "gearbox_fault"),
+}
+
+
+def _concept_draft(message: str, persona: str):
+    text = message.lower()
+    answer = _CONCEPTS["rul"] if ("rul" in text or "remaining useful life" in text) else _CONCEPTS["signals"]
+    return {"persona": persona, "response": answer, "details": [], "actions": [],
+        "call_plan": [], "needs_context": False, "clarification_required": False,
+        "source_type": "controlled_glossary"}
+
+
+def _clarification_draft(persona: str, intent: str, missing: list[str],
+                         questions: list[str], reason: str, asset_id: str = ""):
+    return {"persona": persona, "response": reason, "details": [], "actions": [],
+        "call_plan": [], "needs_context": True, "clarification_required": True,
+        "clarification": {"intent": intent, "missing_fields": missing,
+                           "questions": questions, "asset_id": asset_id},
+        "agent_outputs": {"recommendation": None, "execution_result": None}}
+
+
+def _asset_from_message(message: str) -> str:
+    upper = str(message).upper()
+    known = next((asset_id for asset_id in load_asset_master() if asset_id in upper), "")
+    if known:
+        return known
+    match = re.search(r"\bAST_[A-Z0-9_]+\b", upper)
+    return match.group(0) if match else ""
+
+
+def _assets_from_message(message: str) -> list[tuple[str,str,str]]:
+    """Return ordered, deduplicated (display, canonical, scenario) matches."""
+    upper = str(message).upper()
+    positions = []
+    for display,(asset_id,scenario) in _MULTI_ASSET_SCENARIOS.items():
+        candidates = [(upper.find(display),display)]
+        candidates.append((upper.find(asset_id),display))
+        valid = [(pos,label) for pos,label in candidates if pos >= 0]
+        if valid: positions.append((min(pos for pos,_ in valid),display,asset_id,scenario))
+    positions.sort(key=lambda item:item[0])
+    return [(display,asset_id,scenario) for _,display,asset_id,scenario in positions]
+
+
+def _deadline_for_recommendation(recommendation) -> str:
+    if recommendation.window_chosen: return recommendation.window_chosen
+    return {"immediate":"today","urgent":"within 48 hours","planned":"this week",
+            "monitor":"continue monitoring"}.get(recommendation.urgency,"review this week")
+
+
+def _multi_asset_plan(requested_assets, persona: str, run_id: str):
+    results=[]; combined_log=[]; details=[]; actions=[]
+    for display,asset_id,scenario in requested_assets:
+        try:
+            signal=_get_demo_signal(scenario,-1)
+            state=run_pipeline(deepcopy(signal),run_id=f"{run_id}-{display}",intent="full",
+                approval_status="pending")
+            log=[{**row,"asset":display} for row in state.get("pipeline_log",[])]
+            combined_log.extend(log)
+            recommendation=state.get("recommendation")
+            trusted=state.get("trusted_signal")
+            if recommendation is not None and getattr(recommendation,"recommendation_eligible",False):
+                deadline=_deadline_for_recommendation(recommendation)
+                action=recommendation.recommended_action.name.replace("_"," ")
+                status="action_required"
+                reason=recommendation.rationale
+                actions.append(f"{display}: {action} — {deadline}")
+            elif trusted is not None and not getattr(trusted,"downstream_eligible",False):
+                deadline="before any maintenance decision"
+                action="resolve telemetry/data-quality issue"
+                status="data_review"
+                reason=getattr(trusted,"routing_reason","") or "signal did not pass Agent 1"
+                actions.append(f"{display}: {action} — {deadline}")
+            else:
+                deadline="ongoing"
+                action="continue monitoring"
+                status="no_action_required"
+                reason="no actionable recommendation was produced"
+                actions.append(f"{display}: {action}")
+            details.append(f"{display}: {action}; due {deadline}. {reason}")
+            results.append({"display_asset_id":display,"asset_id":asset_id,"scenario":scenario,
+                "status":status,"action":action,"deadline":deadline,"reason":reason,
+                "recommendation":recommendation.to_dict() if recommendation else None,
+                "pipeline_log":log})
+        except Exception as exc:
+            results.append({"display_asset_id":display,"asset_id":asset_id,"scenario":scenario,
+                "status":"unavailable","action":"manual review","deadline":"before planning",
+                "reason":"asset analysis was unavailable","recommendation":None,"pipeline_log":[]})
+            details.append(f"{display}: analysis unavailable; manual review required before planning.")
+            actions.append(f"{display}: manual review — before planning")
+    draft={"persona":persona,"response":f"Weekly action plan prepared for {len(results)} requested assets.",
+        "details":details,"actions":actions,"call_plan":["agents_1_to_6_per_asset"],
+        "needs_context":False,"clarification_required":False,
+        "multi_asset_results":results,"agent_outputs":{"recommendation":None,"execution_result":None}}
+    return draft,{"pipeline_log":combined_log}
 
 # ************** Added by Prateek Mittal on 20th July 2026 ******************
 @app.exception_handler(Exception)
@@ -147,6 +270,14 @@ _WO_INDEX = {wo["id"]: wo for wo in _WORKORDERS}
 
 # In-memory HITL session store — keyed by run_id, holds partial pipeline state
 _HITL_STORE: Dict[str, Dict[str, Any]] = {}
+_CHAT_CONTEXT_STORE: Dict[str, Dict[str, Any]] = {}
+_MAX_CHAT_CONTEXTS = int(_ORCH_CONFIG["chat"].get("max_context_sessions",500))
+
+
+def _remember_chat_context(conversation_id: str, context: dict) -> None:
+    if conversation_id not in _CHAT_CONTEXT_STORE and len(_CHAT_CONTEXT_STORE) >= _MAX_CHAT_CONTEXTS:
+        _CHAT_CONTEXT_STORE.pop(next(iter(_CHAT_CONTEXT_STORE)))
+    _CHAT_CONTEXT_STORE[conversation_id] = deepcopy(context)
 
 # Confidence threshold below which the FI HITL gate fires (Agent 3)
 _DIAGNOSIS_CONFIDENCE_THRESHOLD = 0.60
@@ -214,6 +345,7 @@ class ChatRequest(BaseModel):
     persona: str = "supervisor"
     asset_id: Optional[str] = None
     context: Optional[Dict] = None
+    conversation_id: Optional[str] = None
 
 
 class WOUpdateRequest(BaseModel):
@@ -1031,32 +1163,86 @@ _CANNED = {
 
 
 @app.post("/api/chat")
+@traceable(name="DRO Chat API", run_type="chain", tags=["dro", "chat-api"])
 def chat(req: ChatRequest):
     """Simple persona-aware chat — keyword matching + optional pipeline context."""
-    run_id=f"CHAT-{uuid.uuid4().hex[:10].upper()}"; context=req.context or {}
+    run_id=f"CHAT-{uuid.uuid4().hex[:10].upper()}"
+    conversation_id=req.conversation_id or f"CONV-{uuid.uuid4().hex[:10].upper()}"
+    context=deepcopy(_CHAT_CONTEXT_STORE.get(conversation_id,{}))
+    context.update(deepcopy(req.context or {}))
+    supplied_asset=req.asset_id or context.get("asset_id") or _asset_from_message(req.message)
+    requested_assets=_assets_from_message(req.message)
+    if supplied_asset: context["asset_id"]=supplied_asset
+    _remember_chat_context(conversation_id,context)
     if not req.message or not req.message.strip(): raise HTTPException(422,"Chat message must not be empty.")
     if len(req.message)>_ORCH_CONFIG["chat"]["max_message_characters"]: raise HTTPException(422,"Chat message exceeds the configured length limit.")
     signal=context.get("signal"); scenario=context.get("scenario")
     if scenario and signal is None:
         try: signal=_get_demo_signal(str(scenario),int(context.get("row_index",-1)))
         except (KeyError,ValueError,TypeError) as exc: raise HTTPException(404,f"Scenario unavailable: {scenario}") from exc
-    plan=plan_query(req.message,signal is not None); state={"pipeline_log":[]}
-    if plan.intent == "learning_history":
+    effective_message=req.message
+    if context.get("_pending_message") and (req.context or req.asset_id or _asset_from_message(req.message)):
+        effective_message=context["_pending_message"]
+    plan=plan_query(effective_message,signal is not None); state={"pipeline_log":[]}
+    if len(requested_assets)>1:
+        draft,state=_multi_asset_plan(requested_assets,req.persona,run_id)
+        plan_intent="multi_asset_plan"
+    elif plan.intent == "concept":
+        draft=_concept_draft(effective_message,req.persona)
+        plan_intent=plan.intent
+    elif plan.intent == "fleet":
+        missing=[]
+        if not context.get("timeframe"): missing.append("timeframe")
+        if not context.get("fleet_snapshot"): missing.append("fleet_snapshot")
+        draft=_clarification_draft(req.persona,"fleet",missing,
+            ["What timeframe should be assessed?","Which approved fleet snapshot or live fleet source should be used?"],
+            "This is a fleet-level question. I need an approved timeframe and fleet data source before comparing assets.")
+        plan_intent=plan.intent
+    elif plan.intent == "learning_history":
         draft,cases=_learning_history_draft(req.persona,3)
         state={"pipeline_log":[{"node":"learning_memory","status":"history_query","latency_ms":0,"count":len(cases)}]}
+        plan_intent=plan.intent
     elif plan.needs_signal and signal is None:
-        draft={"persona":req.persona,"response":f"I can answer this {plan.intent} question once telemetry or a named scenario is supplied. No agent decision was fabricated.","call_plan":list(plan.agents),"needs_context":True}
+        if supplied_asset and supplied_asset not in load_asset_master():
+            draft=_clarification_draft(req.persona,plan.intent,["asset_registration"],
+                [f"Please register and validate {supplied_asset} with its bearing and channel mappings before resubmitting."],
+                f"Asset {supplied_asset} is not registered. No analytical agent has been run.",supplied_asset)
+        else:
+            missing=["telemetry_or_scenario"]
+            questions=["Please provide current telemetry or a validated scenario for the asset."]
+            if not supplied_asset:
+                missing.insert(0,"asset_id"); questions.insert(0,"Which asset should be assessed?")
+            draft=_clarification_draft(req.persona,plan.intent,missing,questions,
+                f"I need clarification before answering this {plan.intent} question. No agent decision was fabricated.",supplied_asset or "")
+        plan_intent=plan.intent
     elif signal is not None:
-        state=run_pipeline(deepcopy(signal),run_id=run_id,intent=plan.pipeline_intent,
-            inventory_lookup=context.get("inventory_lookup"),context_lookup=context.get("operations_context"),approval_status="pending")
-        formatted=format_for_persona(state,req.persona)
-        draft={"persona":req.persona,"response":formatted.get("headline","Analysis complete."),"details":formatted.get("details",[]),"actions":formatted.get("actions",[]),"call_plan":list(plan.agents),"needs_context":False,
-               "agent_outputs":{"recommendation":state["recommendation"].to_dict() if state.get("recommendation") else None,
-                                "execution_result":state["execution_result"].to_dict() if state.get("execution_result") else None}}
+        required={"telemetry_id","timestamp_utc","asset_id","bearing_id","channel_id"}
+        missing=sorted(field for field in required if not signal.get(field)) if isinstance(signal,dict) else sorted(required)
+        if missing:
+            draft=_clarification_draft(req.persona,plan.intent,missing,
+                [f"Please provide {field}." for field in missing],
+                "The telemetry payload is incomplete, so the agent pipeline has not been started.",
+                str(signal.get("asset_id",supplied_asset or "")) if isinstance(signal,dict) else supplied_asset or "")
+        else:
+            state=run_pipeline(deepcopy(signal),run_id=run_id,intent=plan.pipeline_intent,
+                inventory_lookup=context.get("inventory_lookup"),context_lookup=context.get("operations_context"),approval_status="pending")
+            formatted=format_for_persona(state,req.persona)
+            draft={"persona":req.persona,"response":formatted.get("headline","Analysis complete."),"details":formatted.get("details",[]),"actions":formatted.get("actions",[]),"call_plan":list(plan.agents),"needs_context":False,"clarification_required":False,
+                   "agent_outputs":{"recommendation":state["recommendation"].to_dict() if state.get("recommendation") else None,
+                                    "execution_result":state["execution_result"].to_dict() if state.get("execution_result") else None}}
+        plan_intent=plan.intent
     else:
-        draft={"persona":req.persona,"response":"This is an open-ended reliability question. I can explain the workflow, but an asset-specific decision requires telemetry or a named scenario.","call_plan":list(plan.agents),"needs_context":True}
+        draft=_clarification_draft(req.persona,"general",["objective","timeframe"],
+            ["What decision or explanation do you need?","What timeframe or operational scope applies?"],
+            "This question is broad. Please clarify the objective and scope before I answer.")
+        plan_intent=plan.intent
     reflected=_REFLEXION.process(draft,state,plan)
-    result={**reflected.response,"run_id":run_id,"intent":plan.intent,"reflection_status":reflected.status,"pipeline_log":state.get("pipeline_log",[])}
+    if draft.get("clarification_required"):
+        context["_pending_message"]=effective_message
+    else:
+        context.pop("_pending_message",None)
+    _remember_chat_context(conversation_id,context)
+    result={**reflected.response,"run_id":run_id,"conversation_id":conversation_id,"intent":plan_intent,"reflection_status":reflected.status,"pipeline_log":state.get("pipeline_log",[])}
     try: result["audit"]=write_audit(_AUDIT_PATH,event="chat",run_id=run_id,status="ok",intent=plan.intent,agents=plan.agents)
     except Exception: result["audit"]={"status":"audit_write_failed"}
     return result
