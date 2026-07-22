@@ -1070,7 +1070,10 @@ def chat(req: ChatRequest):
     plan = plan_query(req.message, signal is not None)
     state: dict = {"pipeline_log": []}
 
-    if plan.needs_signal and signal is None:
+    # When the query_router detects a scenario entity in the message, skip the
+    # needs_context gate and return scenario_detected so the frontend runs the
+    # full pipeline (preserving HITL card rendering) via /api/pipeline/run.
+    if plan.needs_signal and signal is None and not plan.scenario:
         draft = {"persona": req.persona,
                  "response": f"I can answer this {plan.intent} question once telemetry or a named scenario is supplied. No agent decision was fabricated.",
                  "call_plan": list(plan.agents), "needs_context": True}
@@ -1092,6 +1095,15 @@ def chat(req: ChatRequest):
                      "recommendation": rec.to_dict() if rec and hasattr(rec, "to_dict") else (rec.model_dump() if rec else None),
                      "execution_result": exec_result.to_dict() if exec_result and hasattr(exec_result, "to_dict") else None,
                  }}
+    elif plan.scenario:
+        # Backend scenario detection: entity found in message — tell the frontend
+        # which scenario to run so it can call /api/pipeline/run with HITL support.
+        display = plan.scenario.replace("_", " ")
+        draft = {"persona": req.persona,
+                 "response": f"Running {plan.intent} analysis for {display} scenario.",
+                 "call_plan": list(plan.agents),
+                 "needs_context": False,
+                 "scenario_detected": plan.scenario}
     else:
         # Canned response fallback
         msg_lower = req.message.lower()
@@ -1106,7 +1118,8 @@ def chat(req: ChatRequest):
 
     reflected = _REFLEXION.process(draft, state, plan)
     result = {**reflected.response, "run_id": run_id, "intent": plan.intent,
-              "reflection_status": reflected.status, "pipeline_log": state.get("pipeline_log", [])}
+              "reflection_status": reflected.status, "pipeline_log": state.get("pipeline_log", []),
+              "scenario_detected": plan.scenario}
     try:
         result["audit"] = write_audit(_AUDIT_PATH, event="chat", run_id=run_id,
                                       status="ok", intent=plan.intent, agents=plan.agents)

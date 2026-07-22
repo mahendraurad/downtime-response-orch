@@ -139,36 +139,15 @@ export default function ChatView() {
     setInputVal('');
     if (inpRef.current) inpRef.current.style.height = 'auto';
     appendU(t);
-    const lower = t.toLowerCase();
 
-    for (const [asid, sc] of Object.entries(ASSET_SCENARIO)) {
-      if (lower.includes(asid.toLowerCase())) {
-        doThink(async () => {
-          try {
-            const data = await runRealPipeline(sc, -1, persona);
-            if (data) {
-              handlePipelineResult(data, sc, persona);
-            } else {
-              const r = DFLT[Math.floor(Math.random() * DFLT.length)];
-              appendA(r.c, r.r);
-            }
-          } catch (err) {
-            const r = DFLT[Math.floor(Math.random() * DFLT.length)];
-            appendA(r.c, r.r);
-          }
-        });
-        if (/approv/i.test(t)) {
-          try { await patchWorkOrder('WO-2024-1847', { status: 'Approved' }); } catch (e) {}
-        }
-        return;
-      }
-    }
-
+    // Local canned Q&A — no backend round-trip needed
     if (CHAT_KB[t]) {
       doThink(() => appendA(CHAT_KB[t].c, CHAT_KB[t].r));
       return;
     }
 
+    // Primary path: backend (query_router) detects scenario entities and intent.
+    // ASSET_SCENARIO is kept as a fallback for offline / unrecognised queries only.
     doThink(async () => {
       try {
         const resp = await fetch(API + '/api/chat', {
@@ -178,15 +157,62 @@ export default function ChatView() {
         });
         if (resp.ok) {
           const d = await resp.json();
-          appendA(d.response, d.agents || []);
-        } else {
-          const r = DFLT[Math.floor(Math.random() * DFLT.length)];
-          appendA(r.c, r.r);
+
+          // Backend detected a scenario entity — run full pipeline for HITL cards
+          if (d.scenario_detected) {
+            try {
+              const pData = await runRealPipeline(d.scenario_detected, -1, persona);
+              if (pData) {
+                if (/approv/i.test(t)) {
+                  try { await patchWorkOrder('WO-2024-1847', { status: 'Approved' }); } catch (e) {}
+                }
+                handlePipelineResult(pData, d.scenario_detected, persona);
+              } else {
+                appendA(d.response, d.agents || []);
+              }
+            } catch {
+              appendA(d.response, d.agents || []);
+            }
+            return;
+          }
+
+          // Backend returned a general/canned response — render as chat text
+          if (!d.needs_context) {
+            appendA(d.response, d.agents || []);
+            return;
+          }
+          // needs_context: fall through to ASSET_SCENARIO fallback below
         }
-      } catch (e) {
-        const r = DFLT[Math.floor(Math.random() * DFLT.length)];
-        appendA(r.c, r.r);
+      } catch {
+        // Network error — fall through to ASSET_SCENARIO fallback below
       }
+
+      // Fallback: frontend ASSET_SCENARIO map (offline / unrecognised by backend)
+      const lower = t.toLowerCase();
+      for (const [asid, sc] of Object.entries(ASSET_SCENARIO)) {
+        if (lower.includes(asid.toLowerCase())) {
+          try {
+            const data = await runRealPipeline(sc, -1, persona);
+            if (data) {
+              if (/approv/i.test(t)) {
+                try { await patchWorkOrder('WO-2024-1847', { status: 'Approved' }); } catch (e) {}
+              }
+              handlePipelineResult(data, sc, persona);
+            } else {
+              const r = DFLT[Math.floor(Math.random() * DFLT.length)];
+              appendA(r.c, r.r);
+            }
+          } catch {
+            const r = DFLT[Math.floor(Math.random() * DFLT.length)];
+            appendA(r.c, r.r);
+          }
+          return;
+        }
+      }
+
+      // Nothing matched at all
+      const r = DFLT[Math.floor(Math.random() * DFLT.length)];
+      appendA(r.c, r.r);
     });
   }
 
