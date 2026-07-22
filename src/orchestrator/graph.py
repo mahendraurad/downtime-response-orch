@@ -21,6 +21,7 @@ from copy import deepcopy
 from typing import Any, Dict
 
 from langgraph.graph import StateGraph, END
+from langsmith import traceable
 
 from src.orchestrator.state import DROGraphState
 from src.orchestrator.routing import (
@@ -114,6 +115,7 @@ def _timed(fn, *args, **kwargs):
     return result, round((time.monotonic() - t0) * 1000)
 
 
+@traceable(name="Agent 1 - Data Foundation", run_type="chain", tags=["dro", "agent-1"])
 def node_data_foundation(state: DROGraphState) -> DROGraphState:
     dfa, *_ = _get_agents()
     log = list(state.get("pipeline_log") or [])
@@ -127,6 +129,7 @@ def node_data_foundation(state: DROGraphState) -> DROGraphState:
         return {**state, "error": str(exc), "pipeline_log": log}
 
 
+@traceable(name="Agent 2 - Monitoring", run_type="chain", tags=["dro", "agent-2"])
 def node_monitoring(state: DROGraphState) -> DROGraphState:
     _, mon, *_ = _get_agents()
     log = list(state.get("pipeline_log") or [])
@@ -141,6 +144,7 @@ def node_monitoring(state: DROGraphState) -> DROGraphState:
         return {**state, "error": str(exc), "pipeline_log": log}
 
 
+@traceable(name="Agent 3 - Failure Intelligence", run_type="chain", tags=["dro", "agent-3"])
 def node_failure_intelligence(state: DROGraphState) -> DROGraphState:
     _, _, fia, *_ = _get_agents()
     log = list(state.get("pipeline_log") or [])
@@ -154,6 +158,7 @@ def node_failure_intelligence(state: DROGraphState) -> DROGraphState:
         return {**state, "error": str(exc), "pipeline_log": log}
 
 
+@traceable(name="Agent 4 - Predictive Risk", run_type="chain", tags=["dro", "agent-4", "llm-optional"])
 def node_predictive_risk(state: DROGraphState) -> DROGraphState:
     _, _, _, pra, _ = _get_agents()
     log = list(state.get("pipeline_log") or [])
@@ -170,6 +175,7 @@ def node_predictive_risk(state: DROGraphState) -> DROGraphState:
         return {**state, "error": str(exc), "pipeline_log": log}
 
 
+@traceable(name="Agent 5 - Knowledge", run_type="retriever", tags=["dro", "agent-5", "rag"])
 def node_knowledge(state: DROGraphState) -> DROGraphState:
     *_, ka = _get_agents()
     log = list(state.get("pipeline_log") or [])
@@ -187,6 +193,7 @@ def node_knowledge(state: DROGraphState) -> DROGraphState:
 
 
 # ************** Added by Prateek Mittal on 20th July 2026 ******************
+@traceable(name="Agent 6 - Prescriptive Optimization", run_type="chain", tags=["dro", "agent-6", "llm-optional"])
 def node_prescriptive(state):
     agent, _, _ = _get_action_agents(); log = list(state.get("pipeline_log") or [])
     try:
@@ -198,12 +205,14 @@ def node_prescriptive(state):
         log.append({"node":"prescriptive","status":"error","latency_ms":0})
         return {**state,"error":str(exc),"pipeline_log":log}
 
+@traceable(name="Agent 7 - Executor", run_type="tool", tags=["dro", "agent-7"])
 def node_executor(state):
     _, agent, _ = _get_action_agents(); log = list(state.get("pipeline_log") or [])
     result, ms = _timed(agent.process, state["recommendation"], state.get("approval_status") == "approved")
     log.append({"node":"executor","status":result.status,"latency_ms":ms})
     return {**state,"execution_result":result,"pipeline_log":log}
 
+@traceable(name="Agent 8 - Learning and Memory", run_type="chain", tags=["dro", "agent-8", "llm-optional"])
 def node_learning(state):
     _, _, agent = _get_action_agents(); log = list(state.get("pipeline_log") or [])
     result, ms = _timed(agent.process, state["execution_result"], state["feedback_event"])
@@ -438,6 +447,7 @@ def run_from_diagnosis(diagnosis, anomaly_event, trusted_signal,
     return state
 
 
+@traceable(name="DRO Agent Orchestrator", run_type="chain", tags=["dro", "orchestrator"])
 def run_pipeline(raw_signal: Dict[str, Any], run_id: str = "",
                  intent: str = "full", inventory_lookup: dict = None,
                  context_lookup: dict = None, approval_status: str = "pending",

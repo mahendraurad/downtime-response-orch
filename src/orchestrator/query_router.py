@@ -11,6 +11,10 @@ class QueryPlan:
     needs_approval: bool = False
 
 _RULES = [
+    ("concept", ("why vibration", "why temperature", "explain why vibration"),
+     "concept", (), False),
+    ("fleet", ("which bearing", "which asset", "highest risk", "fleet",
+               "across the plant", "anomalous equipment"), "fleet", (), False),
     ("learning_history", ("last 3 failures", "last three failures", "recent failures",
                           "failure history", "what did we learn", "learnings from"),
      "history", (8,), False),
@@ -28,10 +32,15 @@ def plan_query(message: str, has_signal: bool = False) -> QueryPlan:
     text = str(message or "").strip().lower()
     if not text:
         return QueryPlan("invalid", "status", (), False)
+    normalized = text.rstrip("?!. ")
+    if normalized in {"what is rul", "what does rul mean", "define rul",
+                      "what does remaining useful life mean",
+                      "explain remaining useful life"}:
+        return QueryPlan("concept", "concept", (), False)
     for intent, words, depth, agents, approval in _RULES:
         if any(word in text for word in words):
             return QueryPlan(intent, depth, tuple(f"agent_{n}" for n in agents),
-                             intent != "learning_history", approval)
+                             intent not in {"learning_history", "concept", "fleet"}, approval)
     # Open-ended plant/reliability questions without telemetry are answered as
     # general guidance with an explicit request for asset/signal context.
     return QueryPlan("general", "full", ("reflexion",), False)

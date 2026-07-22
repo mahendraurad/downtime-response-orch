@@ -29,6 +29,7 @@ export default function ChatView() {
   const [thinking, setThinking] = useState(false);
   const msgsRef = useRef(null);
   const inpRef = useRef(null);
+  const conversationIdRef = useRef(null);
   const p = PD[persona];
 
   // Scroll to bottom whenever messages change
@@ -139,6 +140,35 @@ export default function ChatView() {
     setInputVal('');
     if (inpRef.current) inpRef.current.style.height = 'auto';
     appendU(t);
+    const lower = t.toLowerCase();
+
+    const matchedAssets = Object.entries(ASSET_SCENARIO)
+      .filter(([asid]) => lower.includes(asid.toLowerCase()));
+    // A single asset can use the focused pipeline card. Multi-asset questions
+    // must reach /api/chat intact so the backend can plan every requested asset.
+    if (matchedAssets.length === 1) {
+      const [asid, sc] = matchedAssets[0];
+      if (lower.includes(asid.toLowerCase())) {
+        doThink(async () => {
+          try {
+            const data = await runRealPipeline(sc, -1, persona);
+            if (data) {
+              handlePipelineResult(data, sc, persona);
+            } else {
+              const r = DFLT[Math.floor(Math.random() * DFLT.length)];
+              appendA(r.c, r.r);
+            }
+          } catch (err) {
+            const r = DFLT[Math.floor(Math.random() * DFLT.length)];
+            appendA(r.c, r.r);
+          }
+        });
+        if (/approv/i.test(t)) {
+          try { await patchWorkOrder('WO-2024-1847', { status: 'Approved' }); } catch (e) {}
+        }
+        return;
+      }
+    }
 
     // Local canned Q&A — no backend round-trip needed
     if (CHAT_KB[t]) {
@@ -153,11 +183,10 @@ export default function ChatView() {
         const resp = await fetch(API + '/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: t, persona }),
+          body: JSON.stringify({ message: t, persona, conversation_id: conversationIdRef.current }),
         });
         if (resp.ok) {
           const d = await resp.json();
-
           // Backend detected a scenario entity — run full pipeline for HITL cards
           if (d.scenario_detected) {
             try {
@@ -176,12 +205,19 @@ export default function ChatView() {
             return;
           }
 
-          // Backend returned a general/canned response — render as chat text
-          if (!d.needs_context) {
-            appendA(d.response, d.agents || []);
-            return;
-          }
-          // needs_context: fall through to ASSET_SCENARIO fallback below
+          // Render normal, multi-asset, and clarification responses using the
+          // complete backend contract while retaining conversation context.
+          conversationIdRef.current = d.conversation_id || conversationIdRef.current;
+          const details = d.details && d.details.length ? '<br><br>' + d.details.map(x => '• ' + x).join('<br>') : '';
+          const actions = d.actions && d.actions.length ? '<br><br><strong>Actions:</strong><br>' + d.actions.map(x => '→ ' + x).join('<br>') : '';
+          const questions = d.clarification && d.clarification.questions ? '<br><br><strong>Needed:</strong><br>' + d.clarification.questions.map(x => '? ' + x).join('<br>') : '';
+          appendA(d.response + details + actions + questions,
+            d.pipeline_log ? d.pipeline_log.map(n => n.node ? n.node.replace(/_/g, ' ') : '') : []);
+          return;
+        } else {
+          const r = DFLT[Math.floor(Math.random() * DFLT.length)];
+          appendA(r.c, r.r);
+          return;
         }
       } catch {
         // Network error — fall through to ASSET_SCENARIO fallback below
