@@ -57,8 +57,8 @@ def _extract_foundry_base(endpoint: str) -> str:
       "https://foo.services.ai.azure.com/api/projects/my-proj"
       → "https://foo.services.ai.azure.com"
     """
-    # Remove anything at or after /api/
-    return re.sub(r"/api/.*$", "", endpoint.rstrip("/"))
+    # Accept project URLs and copy-pasted OpenAI-compatible endpoint URLs.
+    return re.sub(r"/(?:api|openai)/.*$", "", endpoint.rstrip("/"))
 
 
 class LLMClient:

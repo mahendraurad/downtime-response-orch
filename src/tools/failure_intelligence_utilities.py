@@ -9,6 +9,9 @@ from typing import Any, Dict, Iterable, List
 
 
 # ************** Added by Prateek Mittal on 20th July 2026 ******************
+# Agent 3 reads only these canonical measurements. Validating taxonomy signal
+# names at startup prevents a misspelled field from silently becoming 0.0 and
+# making a real fault rule impossible to match.
 SUPPORTED_DETECTION_SIGNALS = {
     "bpfo_energy",
     "bpfi_energy",
@@ -130,3 +133,4 @@ def validate_taxonomy(rules: Iterable[Dict]) -> None:
                 or any(v not in SUPPORTED_DETECTION_SIGNALS for v in among)
             ):
                 raise ValueError(f"{code} has an invalid dominant_among list")
+# ***********************

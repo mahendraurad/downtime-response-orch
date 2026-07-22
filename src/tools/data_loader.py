@@ -97,49 +97,6 @@ def load_telemetry_rows(scenario: str) -> List[Dict]:
     return data[scenario]
 
 
-def load_assets() -> List[Dict]:
-    """
-    Returns a flat list of asset dicts from asset_master.json.
-    Used by Phase 7 (POA) tools that need to iterate assets by dict key.
-    """
-    return _load_json("asset_master.json")
-
-
-def load_bearings() -> List[Dict]:
-    """
-    Returns a flat list of bearing dicts from bearing_master.json.
-    Each dict includes bearing_id and asset_id for cross-reference.
-    Used by Phase 7 input validator.
-    """
-    return _load_json("bearing_master.json")
-
-
-def load_action_catalog() -> List[Dict]:
-    """Returns the Phase 7 action catalog from data/action_catalog.json."""
-    return _load_json("action_catalog.json")
-
-
-def load_inventory() -> List[Dict]:
-    """Returns the spare-parts inventory from data/inventory.json."""
-    return _load_json("inventory.json")
-
-
-def load_operations_context() -> List[Dict]:
-    """
-    Returns maintenance windows and production schedules from
-    data/operations_context.json.
-
-    Timestamps are stored as fixed UTC strings. The schedule_reader
-    handles relative-date comparisons against datetime.now().
-    """
-    return _load_json("operations_context.json")
-
-
-def load_personas() -> Dict:
-    """Returns approver and contributor personas from data/personas.json."""
-    return _load_json("personas.json")
-
-
 def load_all_telemetry_rows() -> List[Dict]:
     """Returns every telemetry row across all scenarios (useful for bulk tests)."""
     data = _load_json("telemetry_scenarios.json")

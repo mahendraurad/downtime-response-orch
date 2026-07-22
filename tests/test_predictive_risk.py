@@ -60,22 +60,29 @@ def _trusted(asset_ctx):
         telemetry_id="TEL_UNIT", timestamp_utc="2026-05-20T12:00:00Z",
         asset_id=asset_ctx.asset_id, bearing_id="BRG_TEST", channel_id="CH_TEST",
     )
-    return TrustedBearingSignal(raw=raw, asset_ctx=asset_ctx)
+    return TrustedBearingSignal(
+        raw=raw, asset_ctx=asset_ctx, downstream_eligible=True,
+        validation_status="VALID",
+    )
 
 
 def _diagnosis(iso_stage, fault_code, severity, case_id="CASE_UNIT",
-               asset_id="AST_TEST", confidence=0.85):
+               asset_id="A", confidence=0.85):
     return FaultDiagnosis(
         case_id=case_id, asset_id=asset_id, bearing_id="BRG_TEST",
         fault_mode="outer_race_fault" if fault_code else "undetermined",
         fault_code=fault_code, iso_stage=iso_stage, severity=severity,
         confidence=confidence,
+        diagnosis_status="diagnosed" if fault_code else "undetermined",
     )
 
 
-def _anomaly(score=0.5):
-    return AnomalyEvent(case_id="CASE_UNIT", anomaly_score=score,
-                        confidence_score=0.9)
+def _anomaly(score=0.5, asset_id="A"):
+    return AnomalyEvent(
+        case_id="CASE_UNIT", asset_id=asset_id, bearing_id="BRG_TEST",
+        channel_id="CH_TEST", timestamp_utc="2026-05-20T12:00:00Z",
+        anomaly_score=score, confidence_score=0.9,
+    )
 
 
 class TestPredictiveRiskAgent(unittest.TestCase):
@@ -119,11 +126,15 @@ class TestPredictiveRiskAgent(unittest.TestCase):
         self.assertEqual(diag.iso_stage, 3)
         self.assertEqual(risk.risk_level, "critical")
         self.assertEqual(risk.rul_min_days, 0)
-        self.assertEqual(risk.rul_max_days, 7)             # FT_001 rul_days_stage_3
-        self.assertEqual(risk.rul_band_label, "0–7 days")
+        # ************** Added by Prateek Mittal on 20th July 2026 ******************
+        # Dominant BSF is FT_007 rolling-element fault; its configured stage-3
+        # RUL is 10 days. The gearbox name describes the host asset/scenario.
+        self.assertEqual(risk.rul_max_days, 10)
+        # ***********************
+        self.assertEqual(risk.rul_band_label, "0–10 days")
         self.assertTrue(risk.business_impact_flag)
-        # 7 days × 24h × ₹18,000/hr = ₹30,24,000
-        self.assertEqual(risk.financial_exposure, 7 * 24 * 18000)
+        # 10 days × 24h × ₹18,000/hr = ₹43,20,000
+        self.assertEqual(risk.financial_exposure, 10 * 24 * 18000)
         self.assertGreaterEqual(risk.financial_exposure, 3024000)
 
     # ── End-to-end: stage-3 MTR_001 → exact exposure (no multiplier) ───
@@ -155,7 +166,7 @@ class TestPredictiveRiskAgent(unittest.TestCase):
         diag = _diagnosis(iso_stage=1, fault_code="FT_001", severity="low",
                           asset_id="AST_MTR_002")
         trusted = _trusted(_asset_ctx("AST_MTR_002", "medium", False, 8500))
-        risk = self.pra.process(diag, _anomaly(0.5), trusted)
+        risk = self.pra.process(diag, _anomaly(0.5, "AST_MTR_002"), trusted)
 
         self.assertIn(risk.risk_level, ("low", "medium"))
         # Design A: FT_001 stage 1 → (rul_days_stage_2, rul_days_stage_1) = (30, 90)
@@ -201,7 +212,8 @@ class TestPredictiveRiskAgent(unittest.TestCase):
         trusted = TrustedBearingSignal(
             raw=BearingSignalFact(
                 telemetry_id="T", timestamp_utc="t", asset_id="A",
-                bearing_id="B", channel_id="C"))
+                bearing_id="BRG_TEST", channel_id="CH_TEST"),
+            downstream_eligible=True, validation_status="VALID")
         risk = self.pra.process(diag, _anomaly(0.8), trusted)
         self.assertEqual(risk.financial_exposure, 0.0)
         self.assertFalse(risk.business_impact_flag)
@@ -286,8 +298,9 @@ class TestPredictiveRiskLLMFallback(unittest.TestCase):
         })
         pra  = self._agent(fake, low_conf_below=0.5)
         diag = _diagnosis(iso_stage=1, fault_code="FT_001",
-                          severity="low", confidence=0.3)
-        risk = pra.process(diag, _anomaly(0.5),
+                          severity="low", confidence=0.3,
+                          asset_id="AST_MTR_002")
+        risk = pra.process(diag, _anomaly(0.5, "AST_MTR_002"),
                            _trusted(_asset_ctx("AST_MTR_002", "medium", False, 8500)))
 
         self.assertEqual(fake.calls, 1)

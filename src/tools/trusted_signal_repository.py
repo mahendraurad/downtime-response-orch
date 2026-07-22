@@ -1,6 +1,9 @@
 """Persistence boundary for Agent 1 trusted-signal and ingestion decisions."""
 
 # ************** Added by Prateek Mittal on 16th July 2026 ******************
+# Durable Agent 1 development repository. This isolates persistence,
+# idempotency, and event-order lookups from the agent's validation logic.
+
 from __future__ import annotations
 
 import json
@@ -81,3 +84,5 @@ class SQLiteTrustedSignalRepository:
     def count(self) -> int:
         with closing(self._connect()) as connection:
             return int(connection.execute("SELECT COUNT(*) FROM trusted_signals").fetchone()[0])
+
+# ***********************

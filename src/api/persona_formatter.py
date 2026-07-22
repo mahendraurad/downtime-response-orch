@@ -22,7 +22,7 @@ _ASSET_DISPLAY = {
     "AST_MTR_001": "M-104",
     "AST_MTR_002": "M-089",
     "AST_PMP_001": "P-207",
-    "AST_PMP_002": "P-208",
+    "AST_PMP_002": "C-301",
     "AST_CON_001": "C-301",
     "AST_GBX_001": "G-112",
     "AST_UNKNOWN_001": "UNKNOWN",
@@ -117,7 +117,7 @@ def format_for_persona(state: Dict[str, Any], persona: str) -> Dict[str, Any]:
         "safety":     _fmt_safety,
     }
     fn = formatters.get(persona, _fmt_supervisor)
-    result = fn(
+    return fn(
         asset_id=asset_id, bearing_id=bearing_id,
         fault_mode=fault_mode, iso_stage=iso_stage,
         risk_level=risk_level, rul_band=rul_band,
@@ -129,130 +129,6 @@ def format_for_persona(state: Dict[str, Any], persona: str) -> Dict[str, Any]:
         safety_notes=safety_nts, loto_ref=loto_ref,
         evidence=evidence, total_ms=total_ms, state=state,
     )
-
-    # Append Phase 7 (POA) decision lines when a recommendation was produced
-    rec = state.get("recommendation")
-    if rec is not None:
-        poa_details, poa_actions = _poa_lines(rec)
-        result["details"] = result.get("details", []) + poa_details
-        if poa_actions:
-            result["actions"] = poa_actions + result.get("actions", [])
-
-    return result
-
-
-# ── Phase 7 POA summary builder ──────────────────────────────────────────────
-
-def _poa_lines(rec) -> tuple:
-    """
-    Convert a MaintenanceRecommendation (dict or Pydantic model) to two lists:
-      detail_lines  — bullet-style strings appended to the details section
-      action_lines  — prepended to the actions list as the primary POA action
-
-    Returns ([], []) safely on any error.
-    """
-    try:
-        # Support both Pydantic model and plain dict
-        g = (lambda k, d=None: rec.get(k, d)) if isinstance(rec, dict) \
-            else (lambda k, d=None: getattr(rec, k, d))
-
-        status   = g("recommendation_status", "")
-        asset_id = g("asset_id", "")
-        action   = ""
-        urgency  = g("urgency", "")
-        sop      = ""
-        part_str = ""
-        window   = g("window_chosen") or ""
-        approver = g("responsible_approver", "")
-
-        # Extract recommended_action (may be nested object or dict)
-        ra = g("recommended_action")
-        if ra is not None:
-            if isinstance(ra, dict):
-                action = ra.get("name", "") or ra.get("action", "")
-                sop    = ra.get("source_sop", "") or ""
-            else:
-                action = getattr(ra, "name", "") or getattr(ra, "action", "")
-                sop    = getattr(ra, "source_sop", "") or ""
-
-        # Extract first required part — lead_time_days=0 means in_stock
-        parts = g("required_parts") or []
-        if parts:
-            p = parts[0]
-            if isinstance(p, dict):
-                pm = p.get("part_number") or p.get("part_model") or p.get("part_id", "")
-                lt = p.get("lead_time_days", 0)
-                ps = p.get("status", "in_stock" if lt == 0 else "out_of_stock")
-            else:
-                pm = getattr(p, "part_number", None) or getattr(p, "part_model", None) or ""
-                lt = getattr(p, "lead_time_days", 0)
-                ps = getattr(p, "status", "in_stock" if lt == 0 else "out_of_stock")
-
-            if ps == "in_stock" or lt == 0:
-                part_str = f"{pm} (in stock)" if pm else ""
-            elif lt:
-                part_str = f"{pm} — OUT OF STOCK, lead {lt}d"
-            elif pm:
-                part_str = pm
-
-        detail_lines = []
-        action_lines = []
-
-        sep = "-" * 32
-        detail_lines.append(sep)
-        detail_lines.append("Phase 7 - Prescriptive Recommendation")
-
-        if status in ("blocked_no_part",):
-            detail_lines.append(f"Status: BLOCKED — part unavailable")
-            if action:
-                detail_lines.append(f"Required action: {action.replace('_', ' ')}")
-            if part_str:
-                detail_lines.append(f"Part issue: {part_str}")
-            if approver:
-                detail_lines.append(f"Escalate to: {approver}")
-            action_lines.append(f"URGENT: Expedite procurement — {part_str or 'required part'}")
-
-        elif status in ("unreliable_diagnosis",):
-            detail_lines.append("Status: HOLD — diagnosis confidence too low")
-            detail_lines.append("Next step: Manual inspection required before any action")
-            action_lines.append("Dispatch technician for manual bearing inspection")
-
-        elif status in ("catalog_miss",):
-            detail_lines.append("Status: ESCALATED — no approved SOP for this fault")
-            detail_lines.append("Next step: Maintenance engineer must determine corrective action")
-            action_lines.append("Raise manual work order — fault/severity not in action catalog")
-
-        elif status in ("blocked_unknown_asset", "blocked_invalid_input"):
-            detail_lines.append(f"Status: BLOCKED — {status.replace('_', ' ')}")
-            detail_lines.append("Next step: Verify asset master data and resubmit")
-
-        else:
-            # status == "ok" or "novel_llm_suggestion"
-            label = "OK" if status == "ok" else "AI-SUGGESTED (no SOP)"
-            detail_lines.append(f"Status: {label}")
-            if action:
-                sop_part = f" per {sop}" if sop else ""
-                detail_lines.append(f"Action: {action.replace('_', ' ')}{sop_part}")
-            if urgency:
-                detail_lines.append(f"Urgency: {urgency}")
-            if part_str:
-                detail_lines.append(f"Part: {part_str}")
-            if window:
-                detail_lines.append(f"Window: {window}")
-            if approver:
-                detail_lines.append(f"Approver: {approver}")
-
-            if action:
-                poa_action = action.replace("_", " ").title()
-                if urgency in ("critical", "urgent"):
-                    action_lines.append(f"POA: {poa_action} — {urgency} priority")
-                else:
-                    action_lines.append(f"POA: {poa_action}")
-
-        return detail_lines, action_lines
-
-    except Exception:
-        return [], []
 
 
 # ── Per-persona formatters ────────────────────────────────────────────────────
@@ -278,7 +154,7 @@ def _fmt_supervisor(*, asset_id, fault_mode, iso_stage, risk_level, rul_band,
             *(([f"Advisory: {advisory}"] if advisory else [])),
         ],
         "actions": [
-            f"Approve work order for {asset_id} {'gearbox overhaul' if fault_mode == 'gearbox_fault' else 'bearing replacement'}" if urgent else
+            f"Approve work order for {asset_id} {'rolling-element bearing inspection/replacement' if fault_mode == 'rolling_element_fault' else 'bearing replacement'}" if urgent else
             f"Monitor {asset_id} — schedule inspection this week",
             f"Brief Line operators on {asset_id} symptoms to watch for",
             f"Generate shift handover with {asset_id} as top priority",
@@ -291,23 +167,17 @@ def _fmt_supervisor(*, asset_id, fault_mode, iso_stage, risk_level, rul_band,
 
 
 _FAULT_BAND_LABEL = {
-    "gearbox_fault":    "BSF",
+    "rolling_element_fault": "BSF",
     "outer_race_spall": "BPFO",
-    "outer_race_fault": "BPFO",
     "inner_race_spall": "BPFI",
-    "inner_race_fault": "BPFI",
     "cage_fault":       "FTF",
-    "lubrication_issue": "RMS",
 }
 
 _FAULT_FFT_ACTION = {
-    "gearbox_fault":    "Run BSF + gear mesh harmonic analysis (1× GMF sidebands)",
+    "rolling_element_fault": "Run BSF harmonic and sideband analysis against bearing geometry",
     "outer_race_spall": "Run full FFT harmonic analysis (BPFO family + sidebands)",
-    "outer_race_fault": "Run full FFT harmonic analysis (BPFO family + sidebands)",
     "inner_race_spall": "Run full FFT harmonic analysis (BPFI family + AM sidebands)",
-    "inner_race_fault": "Run full FFT harmonic analysis (BPFI family + AM sidebands)",
     "cage_fault":       "Run FTF sub-harmonic analysis (0.4–0.5× shaft harmonics)",
-    "lubrication_issue": "Check RMS velocity trend + high-frequency envelope spectrum",
 }
 
 

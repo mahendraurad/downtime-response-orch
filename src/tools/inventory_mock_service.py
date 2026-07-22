@@ -11,16 +11,24 @@ import uuid
 from datetime import datetime, timezone
 
 # In-memory parts catalog: part_number -> qty_on_hand
-# Must match part_model values in data/inventory.json.
+# Populated with bearing models and consumables referenced in the asset master.
 _CATALOG: dict[str, int] = {
-    # Rolling-element bearings (from inventory.json)
-    "SKF6310-ZZ":   2,   # PRT_001 — BRG_001-004  (outer/inner race motor fault)
-    "SKF6208-2RS":  4,   # PRT_002 — BRG_005-008
-    "SKF22212-EK":  1,   # PRT_003 — BRG_009-010
-    "SKF22318-E":   0,   # PRT_004 — BRG_011-012 (intentionally OOS for gearbox scenario)
-    # Lubricants
-    "SHELL-GADUS-S2-V220": 12,  # PRT_005
-    "MOBIL-DTE-25":         6,  # PRT_006 — pump lubrication scenario
+    # Rolling-element bearings
+    "SKF6310":    4,
+    "SKF6210":    2,
+    "SKF6308":    1,
+    "SKF6205":    3,
+    "SKF6306":    2,
+    "FAG6310":    1,
+    "NSK6310":    2,
+    # Greases and lubricants
+    "GREASE_HP222":      10,
+    "GREASE_POLYREX_EM":  8,
+    "OIL_MOBIL_SHC629":   5,
+    "MOBIL-DTE-25":       4,
+    # Seals and misc
+    "SEAL_NEOPRENE_65MM": 6,
+    "COUPLING_INSERT":    3,
 }
 
 

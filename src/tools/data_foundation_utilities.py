@@ -1,6 +1,9 @@
 """Deterministic utility functions used by the Data Foundation Agent."""
 
 # ************** Added by Prateek Mittal on 16th July 2026 ******************
+# Agent 1 utility layer: normalization, freshness, relationship validation,
+# and explicit routing are kept deterministic and independently testable.
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -32,7 +35,7 @@ class RoutingDecision:
 
 def normalize_record(raw: Dict[str, Any], aliases: Dict[str, str],
                      conversions: Dict[str, Dict[str, Any]],
-                     known_fields: set) -> NormalizationResult:
+                     known_fields: set[str]) -> NormalizationResult:
     """Return a normalized copy; the caller's dictionary is never mutated."""
     normalized = dict(raw)
     actions: List[str] = []
@@ -83,7 +86,7 @@ def validate_timestamp(timestamp_utc: str, data_source: str, now: datetime,
     return FreshnessResult(not reasons, parsed_utc, round(age, 3), reasons)
 
 
-def validate_asset_bearing_relationship(asset_id: str, bearing_record: Any) -> tuple:
+def validate_asset_bearing_relationship(asset_id: str, bearing_record: Any) -> tuple[bool, str]:
     """Ensure the resolved bearing actually belongs to the supplied asset."""
     owner = getattr(bearing_record, "asset_id", None)
     if owner != asset_id:

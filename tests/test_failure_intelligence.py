@@ -94,11 +94,14 @@ class TestFailureIntelligenceAgent(unittest.TestCase):
         self.assertTrue(diag.evidence["broadband_pattern"])
         self.assertGreater(diag.evidence["temp_rise_c"], 0)
 
-    # ── TEL_0020: gearbox outer race, stage 3, bottleneck asset ────────
+    # ************** Added by Prateek Mittal on 20th July 2026 ******************
+    # The scenario name identifies a gearbox asset. Its dominant BSF signature
+    # identifies a rolling-element bearing fault per the developer roadmap.
 
     def test_gearbox_tel_0020(self):
         diag, _ = self._diagnose("gearbox_fault", 2)
-        self.assertEqual(diag.fault_mode, "outer_race_fault")
+        self.assertEqual(diag.fault_mode, "rolling_element_fault")
+        self.assertEqual(diag.fault_code, "FT_007")
         self.assertEqual(diag.iso_stage, 3)
         self.assertTrue(diag.is_bottleneck)
         # high-criticality bottleneck at stage 3 → escalated to critical
@@ -150,7 +153,7 @@ class TestFailureIntelligenceAgent(unittest.TestCase):
             "outer_race_fault":  "outer_race_fault",
             "inner_race_fault":  "inner_race_fault",
             "lubrication_issue": "lubrication_issue",
-            "gearbox_fault":     "outer_race_fault",
+            "gearbox_fault":     "rolling_element_fault",
         }
         for scenario, fault_mode in expected.items():
             rows = load_telemetry_rows(scenario)
@@ -161,6 +164,7 @@ class TestFailureIntelligenceAgent(unittest.TestCase):
             )
             self.assertIn(diag.iso_stage, (1, 2, 3))
             self.assertIn(diag.severity, ("low", "medium", "high", "critical"))
+    # ***********************
 
 
 if __name__ == "__main__":

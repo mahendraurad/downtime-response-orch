@@ -1,9 +1,29 @@
 {
-  "_comment": "Phase 7 (Prescriptive Optimization Agent) tunable parameters. Secrets (Azure OpenAI) stay in .env. Values here are read at startup by src/agents/prescriptive_optimization_agent.py; if this file is missing or a key is absent, the code falls back to its built-in defaults.",
-  "thresholds": {
-    "min_reliable_confidence": 0.5,
-    "contributor_review_confidence": 0.6,
-    "monitor_appropriateness": 0.3,
-    "default_duration_hours": 2.0
-  }
+  "_comment": "Agent 6 deterministic ranking and guarded LLM rationale policy.",
+  "risk_actions": {
+    "critical": ["stop_and_replace", "derate_and_monitor", "inspect_next_shift"],
+    "high": ["repair_next_planned_stop", "derate_and_monitor", "inspect_next_shift"],
+    "medium": ["inspect_next_shift", "repair_next_planned_stop", "continue_monitoring"],
+    "low": ["continue_monitoring", "inspect_next_shift"]
+  },
+  "durations_hours": {
+    "continue_monitoring": 0.0,
+    "inspect_next_shift": 2.0,
+    "repair_next_planned_stop": 4.0,
+    "derate_and_monitor": 0.5,
+    "stop_and_replace": 6.0,
+    "lubrication_service": 3.0
+  },
+  "urgency": {"critical": "immediate", "high": "urgent", "medium": "planned", "low": "monitor"},
+  "approval_actions": ["repair_next_planned_stop", "derate_and_monitor", "stop_and_replace", "lubrication_service"],
+  "replacement_faults": ["outer_race_fault", "inner_race_fault", "rolling_element_fault", "cage_fault"],
+  "lubrication_part": "MOBIL-DTE-25",
+  "personnel": {
+    "responsible_person": "Maintenance Planner - Tom Rodriguez",
+    "responsible_person_id": "PERSONA_PLANNER",
+    "responsible_approver": "Plant Supervisor - James Kowalski",
+    "responsible_approver_id": "PERSONA_SUP"
+  },
+  "llm_rationale": {"enabled": true, "max_characters": 800},
+  "logging": {"log_recommendations": true}
 }

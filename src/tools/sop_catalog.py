@@ -83,6 +83,28 @@ SOP_CHUNKS: List[Dict] = [
         ),
     },
     # ────────────────────────────────────────────────────────────
+    # SOP_002B Inner-race fault — motor — Stage 3
+    # Added by Prateek Mittal on 20th July 2026 to satisfy the guiding
+    # document's requirement for a relevant SOP for every diagnosed fault.
+    {
+        "source": "SOP_002_inner_race_motor_stage3.pdf",
+        "fault_mode": "inner_race_fault",
+        "asset_type": "motor",
+        "iso_stage": 3,
+        "text": (
+            "INNER RACE FAULT — MOTOR — STAGE 3 BEARING REPLACEMENT (Rev 1.0).\n"
+            "Scope: motors with confirmed BPFI harmonic family, elevated kurtosis, and Stage 3 severity.\n"
+            "Step 1: Obtain LOTO EL-104-A and verify zero energy at the motor terminals.\n"
+            "Step 2: Inspect coupling alignment and record axial/radial offset before disassembly.\n"
+            "Step 3: Remove the bearing housing and extract the bearing with an approved puller.\n"
+            "Step 4: Inspect the shaft journal, inner-race seating surface, and rolling elements for secondary damage.\n"
+            "Step 5: Install the specified replacement bearing and apply Mobil SHC 100 grease, 80–100 g.\n"
+            "Step 6: Torque housing bolts to 85 Nm using a star pattern.\n"
+            "Step 7: Run 15 minutes no-load and confirm BPFI energy, vibration, and temperature return to baseline.\n"
+            "Safety: wear safety glasses, gloves, and hearing protection; do not use impact tools on the shaft."
+        ),
+    },
+    # ────────────────────────────────────────────────────────────
     # SOP_003  Lubrication / inner-race degradation — pump — Stage 1/2
     # ────────────────────────────────────────────────────────────
     {
@@ -246,45 +268,44 @@ SOP_CHUNKS: List[Dict] = [
         ),
     },
     # ────────────────────────────────────────────────────────────
-    # SOP_007  Gearbox fault — gear tooth degradation — Stage 3
+    # SOP_007  Gearbox rolling-element bearing fault — Stage 3
     # ────────────────────────────────────────────────────────────
     {
         "source": "SOP_007_gearbox_fault_stage3.pdf",
-        "fault_mode": "gearbox_fault",
+        "fault_mode": "rolling_element_fault",
         "asset_type": "gearbox",
         "iso_stage": 3,
         "text": (
-            "GEARBOX — GEAR TOOTH DEGRADATION OVERHAUL (Stage 3).\n"
-            "Applicable: BSF energy ≥3.5× baseline dominant over BPFO/BPFI; kurtosis ≥4.5; Zone C/D.\n"
+            "GEARBOX ROLLING-ELEMENT BEARING — STAGE 3 REPLACEMENT (Rev 1.0).\n"
+            "Applicable: bearing BSF energy ≥3.5× baseline dominant over BPFO/BPFI; kurtosis ≥4.5; Zone C/D.\n"
             "LOTO reference: IL-GBX-A (full isolation required; DO NOT operate under load).\n"
             "Step 1: LOTO gearbox — IL-GBX-A. Drain oil completely. Capture for particle analysis.\n"
-            "Step 2: Remove gearbox cover (torque: 120 Nm). Photograph all gear mesh surfaces before handling.\n"
-            "Step 3: Inspect gear teeth with 10× loupe. Document pitting depth, spalling percentage, "
-            "and location on tooth face (root/flank/tip).\n"
-            "Step 4: Replace gear set if pit area >20% of tooth face or spall depth >0.5 mm. "
-            "Otherwise re-lube and retest at reduced load for 24h.\n"
-            "Step 5: Inspect input/output shaft bearings while cover is off. Replace if kurtosis >4.5 at rest-run.\n"
+            "Step 2: Remove gearbox cover (torque: 120 Nm) and identify the BSF-associated bearing position.\n"
+            "Step 3: Inspect balls/rollers, raceways, cage, and lubricant for pitting, spalling, scoring, or debris.\n"
+            "Step 4: Replace the affected rolling-element bearing when spalling or scoring is confirmed. "
+            "Use the OEM bearing part number and approved puller/heater procedure.\n"
+            "Step 5: Inspect adjacent shaft bearings and seats for secondary damage while the cover is open.\n"
             "Step 6: Refill with Mobil Gear 600 XP 220 to sight glass midpoint. Check for leaks.\n"
             "Step 7: Commission at no-load 15 min → 50% load 30 min → full load with vibration sign-off.\n"
             "Acceptance: BSF energy ≤1.0×, kurtosis <2.5 at steady state. Oil sample at 500h."
         ),
     },
     # ────────────────────────────────────────────────────────────
-    # CASE_006  Gearbox fault — BSF dominant — Stage 3 — 2024
+    # CASE_006  Gearbox rolling-element bearing fault — BSF dominant — Stage 3
     # ────────────────────────────────────────────────────────────
     {
         "source": "CASE_006_gearbox_bsf_stage3_2024.pdf",
-        "fault_mode": "gearbox_fault",
+        "fault_mode": "rolling_element_fault",
         "asset_type": "gearbox",
         "iso_stage": 3,
         "text": (
             "CASE 006 — G-055 Gearbox BSF Stage 3, 2024. DRO WARNING raised Day 0 "
             "(BSF 3.8×, kurtosis 6.9, no outer/inner race dominance). "
-            "Action taken Day 4. Gear tooth inspection revealed 28% pitting on drive flank. "
-            "Full gear set replaced. Repair duration: 6.5h. Post-repair BSF: 0.7×, kurtosis 1.9. "
+            "Action taken Day 4. Inspection confirmed rolling-element spalling in the input-shaft bearing. "
+            "Affected bearing replaced. Repair duration: 6.5h. Post-repair BSF: 0.7×, kurtosis 1.9. "
             "Avoidance: $2.1M (catastrophic failure of gearbox + connected drivetrain). "
             "Key finding: BSF energy without BPFO/BPFI dominance is a reliable early indicator of "
-            "gear tooth degradation distinct from bearing race faults — do not misclassify as outer race."
+            "rolling-element damage distinct from inner/outer race dominance — do not misclassify as an outer-race fault."
         ),
     },
 ]

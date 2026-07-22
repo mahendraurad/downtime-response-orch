@@ -1,112 +1,256 @@
 # Downtime Response Orchestrator (DRO)
 
-Multi-agent bearing predictive maintenance system.
-Converts raw historian telemetry into explainable maintenance recommendations.
+DRO is a FastAPI and LangGraph backend for bearing predictive maintenance. It validates telemetry, detects anomalies, diagnoses bearing faults, estimates risk and RUL, retrieves cited maintenance guidance, recommends constrained actions, executes approved work through mock adapters, and learns from confirmed outcomes.
+
+The repository is ready for frontend integration in deterministic local mode. Azure credentials are optional.
 
 ## Current status
 
-Phases 2–4 complete — Data Foundation Agent (+ remediation/curated store),
-Monitoring Agent, and Failure Intelligence Agent are built and tested
-(88 tests passing, 3 stub phases skipped).
-Phases 5–10 are scaffolded with typed stubs ready to implement.
+| Capability | Status |
+|---|---|
+| Agents 1–8 | Implemented |
+| LangGraph conditional orchestration | Implemented |
+| Persona-aware pipeline and chat APIs | Implemented |
+| Human approval and HITL gates | Implemented |
+| Reflexion and graceful error envelopes | Implemented |
+| Local persistence and mock connectors | Implemented |
+| Automated backend tests | `659 passed` |
+| React frontend from `feature/8agents_frontend` | Integrated on `dev` |
+| Real CMMS/ERP/historian and Azure services | Next phase |
 
-## Project structure
+## Agent flow
 
-```
-dro/
-├── data/                          # Synthetic baseline data (Tables 2–8)
-│   ├── asset_master.json          # Table 3 — 6 assets
-│   ├── bearing_master.json        # Table 2 — 12 bearings with baselines
-│   ├── fault_taxonomy.json        # Table 4 — 6 fault rules
-│   ├── telemetry_scenarios.json   # Table 8 — all 7 demo scenarios
-│   └── sops/                      # Place SOP + case PDFs here (Phase 6)
-├── src/
-│   ├── schemas/                   # Pydantic-style dataclasses (agent contracts)
-│   │   ├── bearing_signal.py      # ✅ BearingSignalFact, TrustedBearingSignal
-│   │   ├── asset.py               # ✅ AssetMaster, BearingMaster
-│   │   ├── anomaly.py             # ✅ Phase 3
-│   │   ├── diagnosis.py           # ✅ Phase 4
-│   │   ├── risk.py                # 🔲 Phase 5
-│   │   ├── knowledge.py           # 🔲 Phase 6
-│   │   ├── recommendation.py      # 🔲 Phase 7
-│   │   ├── execution.py           # 🔲 Phase 9
-│   │   └── feedback.py            # 🔲 Phase 10
-│   ├── agents/
-│   │   ├── data_foundation_agent.py      # ✅ COMPLETE — 30 tests passing
-│   │   ├── monitoring_agent.py           # ✅ Phase 3
-│   │   ├── failure_intelligence_agent.py # ✅ Phase 4
-│   │   ├── predictive_risk_agent.py      # 🔲 Phase 5
-│   │   ├── knowledge_agent.py            # 🔲 Phase 6
-│   │   ├── prescriptive_optimization_agent.py # 🔲 Phase 7
-│   │   ├── executor_agent.py             # 🔲 Phase 9
-│   │   └── learning_memory_agent.py      # 🔲 Phase 10
-│   ├── tools/
-│   │   ├── data_loader.py         # ✅ loads JSON → typed dicts (swap for DB later)
-│   │   ├── validators.py          # ✅ all field-level validation rules
-│   │   ├── enrichment.py          # ✅ asset + bearing context joining
-│   │   ├── baseline_features.py   # ✅ Phase 3 — z-score, rolling trend
-│   │   ├── fault_matcher.py       # ✅ Phase 4 — BPFO/BPFI threshold matching
-│   │   ├── rul_calculator.py      # 🔲 Phase 5 — RUL band logic
-│   │   ├── retriever.py           # 🔲 Phase 6 — FAISS/Azure AI Search wrapper
-│   │   ├── cmms_mock_service.py   # 🔲 Phase 9 — mock work order creation
-│   │   └── inventory_mock_service.py # 🔲 Phase 9 — mock part reservation
-│   └── orchestrator/
-│       ├── state.py               # 🔲 Phase 8 — LangGraph TypedDict state
-│       ├── routing.py             # 🔲 Phase 8 — conditional edge functions
-│       └── graph.py               # 🔲 Phase 8 — StateGraph wiring
-├── tests/
-│   ├── test_data_foundation.py    # ✅ 30 tests, all passing
-│   ├── test_monitoring.py         # ✅ Phase 3
-│   ├── test_failure_intelligence.py # ✅ Phase 4
-│   ├── test_predictive_risk.py    # 🔲 Phase 5
-│   ├── test_knowledge_agent.py    # 🔲 Phase 6
-│   └── test_end_to_end_graph.py   # 🔲 Phase 8
-├── models/                        # ML model artifacts (Phase 8+, git-ignored)
-├── .env.example                   # Copy to .env and fill in credentials
-├── .gitignore
-├── pyproject.toml                 # pytest config — testpaths and pythonpath
-└── requirements.txt               # Phased install guide
+```text
+Raw telemetry
+  → Agent 1: Data Foundation
+  → Agent 2: Monitoring
+  → Agent 3: Failure Intelligence
+  → Agent 4: Predictive Risk
+  → Agent 5: Knowledge/RAG
+  → Agent 6: Prescriptive Optimization
+  → approval gate
+  → Agent 7: Executor
+  → confirmed closure feedback
+  → Agent 8: Learning & Memory
+  → Reflexion: user-facing response validation
 ```
 
-## Quickstart
+The orchestrator stops early when data is ineligible, telemetry is healthy, an upstream handoff is invalid, guidance is ungrounded, approval is missing, execution fails, or closure feedback is unsafe.
 
-```bash
-# 1. Clone / open in VS Code
-cd dro
+## Repository layout
 
-# 2. Run the Data Foundation Agent tests (no install needed — stdlib only)
-python -m unittest tests.test_data_foundation -v
-
-# 3. Copy .env template
-cp .env.example .env
+```text
+config/       Configurable agent, orchestration, retrieval and safety policies
+data/         Synthetic masters, telemetry scenarios and SOP corpus
+frontend/     Legacy prototype plus the React/Vite application
+Reference/    Change records, historical developer docs and legacy diagnostics
+scripts/      Agent and demo runners
+src/agents/   Agents 1–8 plus bounded Reflexion Agent
+src/api/      FastAPI application and persona formatting
+src/orchestrator/ LangGraph state, routing, graph and open-question planner
+src/schemas/  Typed Pydantic contracts shared between agents
+src/tools/    Validators, repositories, adapters, retrieval and audit utilities
+tests/        Unit, edge, API, orchestration and Agent 1→8 integration tests
 ```
 
-## Running tests
+## Setup
 
-```bash
-# All tests (stubs for future phases will be skipped automatically)
-python -m unittest discover tests/ -v
+Python 3.10 or newer is required. Python 3.14 is currently tested locally.
 
-# Data Foundation only
-python -m unittest tests.test_data_foundation -v
+```powershell
+git clone <repository-url>
+cd <repository-folder>
+.\setup.ps1
+.\.venv\Scripts\Activate.ps1
+python -m pytest -q
 ```
 
-## Swapping JSON for a real database
+Manual setup:
 
-Only `src/tools/data_loader.py` changes. Every other file stays the same.
-See the three `load_*()` functions — replace `_load_json()` calls with DB queries.
-The agent receives already-built dicts and never touches the loader directly.
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
 
-## Build order
+Do not commit `.env`. Copy `.env.example` only when testing optional Azure-backed LLM/search/storage integrations.
 
-| Phase | Agent | Status |
-|-------|-------|--------|
-| 2 | Data Foundation Agent | ✅ Complete |
-| 3 | Monitoring Agent | ✅ Complete |
-| 4 | Failure Intelligence Agent | ✅ Complete |
-| 5 | Predictive Risk Agent | 🔲 Next |
-| 6 | Knowledge Agent (RAG) | 🔲 |
-| 7 | Prescriptive Optimization Agent | 🔲 |
-| 8 | LangGraph Orchestrator | 🔲 |
-| 9 | Executor Agent | 🔲 |
-| 10 | Learning & Memory Agent | 🔲 |
+## Start the backend
+
+```powershell
+python -m uvicorn src.api.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+Useful URLs:
+
+- API documentation: `http://127.0.0.1:8000/docs`
+- OpenAPI JSON: `http://127.0.0.1:8000/openapi.json`
+- Existing frontend: `http://127.0.0.1:8000/`
+- Health check: `GET /api/assets`
+
+## Start the React frontend
+
+Node.js 18 or newer is recommended. Keep the backend running on port 8000,
+then open a second PowerShell terminal:
+
+```powershell
+cd frontend/react-app
+npm ci
+npm run dev
+```
+
+Open `http://localhost:3000`. The Vite development server proxies `/api` and
+`/ws` to `http://localhost:8000`. For a separately hosted API, set
+`VITE_API_BASE_URL` to its origin before building or starting Vite.
+
+## Frontend integration
+
+The frontend can generate its API client from `/openapi.json`. The principal endpoints are:
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| `POST` | `/api/chat` | Open-question routing and persona-aware response |
+| `POST` | `/api/pipeline/run` | Run telemetry through the required agent depth |
+| `GET` | `/api/pipeline/scenarios` | List bundled demo scenarios |
+| `GET` | `/api/assets` | Asset cards/list |
+| `GET` | `/api/assets/{asset_id}` | Asset detail |
+| `POST` | `/api/pipeline/hitl/remediation` | Resolve Agent 1 data-quality gate |
+| `POST` | `/api/pipeline/hitl/monitoring` | Resolve Agent 2 borderline event |
+| `POST` | `/api/pipeline/hitl/diagnosis` | Resolve Agent 3 low-confidence diagnosis |
+| `POST` | `/api/pipeline/hitl/knowledge` | Resolve missing-SOP gate |
+| `POST` | `/api/executor/run` | Execute a typed recommendation after approval |
+| `GET` | `/api/notifications/counts` | Unread counts for frontend personas |
+| `GET` | `/api/notifications/{persona_id}` | Persona notification inbox |
+| `POST` | `/api/notifications/{persona_id}/read` | Mark a persona inbox as read |
+| `GET/POST/PATCH` | `/api/workorders` | Demo work-order UI operations |
+| `WS` | `/ws/sensors/{asset_id}` | Simulated live sensor stream |
+
+### Chat example
+
+```javascript
+const response = await fetch("http://127.0.0.1:8000/api/chat", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    message: "What is the RUL risk?",
+    persona: "supervisor",
+    context: { scenario: "outer_race_fault" }
+  })
+});
+const result = await response.json();
+```
+
+Chat returns `run_id`, `intent`, `response`, `details`, `actions`, `call_plan`, actual `pipeline_log`, sources, reflection status and available structured agent outputs. Asking to execute work in chat does not constitute approval.
+
+Recent-failure and lessons-learned questions route directly to Agent 8's
+validated closed-case memory. Arbitrary canonical telemetry supplied in
+`context.signal` routes by question intent and need not match a demo scenario.
+
+### Pipeline example
+
+```javascript
+const response = await fetch("http://127.0.0.1:8000/api/pipeline/run", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    signal: {},
+    scenario: "outer_race_fault",
+    row_index: -1,
+    persona: "engineer",
+    query: "recommend maintenance action"
+  })
+});
+```
+
+The response includes persona-ready presentation fields plus `fault_diagnosis`, `risk_assessment`, `knowledge_guidance`, `recommendation`, `execution_result`, `learned_case`, HITL fields, and the ordered pipeline log.
+
+## Expected input values
+
+Agent 1’s canonical telemetry contract requires:
+
+```json
+{
+  "telemetry_id": "TEL-1001",
+  "timestamp_utc": "2026-07-20T10:00:00Z",
+  "asset_id": "AST_MTR_001",
+  "bearing_id": "BRG_001",
+  "channel_id": "CH_001",
+  "rpm": 1780,
+  "load_pct": 75,
+  "machine_state": "running",
+  "startup_shutdown_flag": false,
+  "vib_rms_mm_s": 2.2,
+  "kurtosis": 2.8,
+  "temp_c": 48,
+  "bpfo_energy": 0.8,
+  "bpfi_energy": 0.5,
+  "signal_quality_score": 1.0,
+  "data_source": "historian"
+}
+```
+
+Identity and timestamp fields are mandatory. Supported source profiles also normalize configured OPC-UA and Event Hub aliases.
+
+Expected controlled values include:
+
+| Contract | Values |
+|---|---|
+| Agent 1 validation | `VALID`, `FLAGGED`, `REJECTED` |
+| Agent 2 status | `healthy`, `anomaly`, `suppressed`, `ineligible`, `insufficient_data`, `cooldown`, `duplicate`, `out_of_order` |
+| Agent 3 diagnosis | `diagnosed`, `undetermined`, `invalid_input` |
+| Agent 4 assessment | `assessed`, `monitor`, `invalid_input` |
+| Agent 5 guidance | `grounded`, `no_guidance`, `retrieval_failed`, `invalid_input` |
+| Agent 6 recommendation | `ok`, `invalid_input` |
+| Agent 7 execution | `success`, `partial`, `blocked`, `failed`, `invalid_input`, `duplicate` |
+| Agent 8 learning | `learned`, `duplicate`, `invalid_input`, `persistence_failed` |
+
+## Expected outputs and errors
+
+- Healthy telemetry normally stops after Monitoring and creates no maintenance case.
+- A supported fault can reach a grounded recommendation.
+- Repair/replacement recommendations remain `pending` until approved.
+- Execution runs only through the dedicated approval-aware path.
+- Learning requires completed execution and matching technician feedback.
+- Defined validation/not-found errors return HTTP 4xx responses.
+- Unexpected errors return a sanitized `INTERNAL_ERROR` envelope with a correlation `error_id`; raw exception details are not returned.
+
+## Testing
+
+```powershell
+# Everything
+python -m pytest -q
+
+# Orchestrator and chat/API wiring
+python -m pytest tests/test_end_to_end_graph.py tests/test_orchestrator_chat_reflexion.py -q
+
+# Complete Agent 1→8 chain
+python -m pytest tests/test_agent1_to_agent8_integration.py -q
+```
+
+Current certification:
+
+```text
+659 passed
+0 failed
+```
+
+The test-client stack currently emits one non-functional Starlette/httpx deprecation warning.
+
+## Configuration
+
+All policy files live under `config/`. Important frontend-visible controls include freshness/routing, alert cooldown, retrieval grounding, recommendation approval actions, execution allowlists, learning validation, chat length and reflection limits.
+
+Cloud credentials are never required for deterministic local execution. LLM output is non-authoritative and cannot alter telemetry facts, risk calculations, action approval or confirmed maintenance outcomes.
+
+## Next steps
+
+1. Add PostgreSQL LangGraph checkpointing and durable HITL sessions.
+2. Add authentication, persona authorization and approval permissions.
+3. Replace local/mocked historian, CMMS, inventory and notification adapters.
+4. Move SOP and learned-case retrieval to Azure Blob Storage and Azure AI Search.
+5. Add governed multi-turn conversation memory and cited general-knowledge RAG.
+6. Add centralized immutable audit storage, tracing, metrics and operational alerts.
+7. Validate real LLM endpoints against prompt-injection and grounding evaluations.
+8. Run a shadow pilot against at least three historical or live bearing events.
+
+Detailed historical implementation notes are indexed in [`Reference/README.md`](Reference/README.md).

@@ -29,6 +29,8 @@ from __future__ import annotations
 import logging
 import os
 import re
+import hashlib
+import json
 from typing import List, Dict
 
 import numpy as np
@@ -50,7 +52,7 @@ _FAULT_KEYWORDS = {
     "cage":       "cage_fault",
     "lube":       "lubrication_issue",
     "lubrication":"lubrication_issue",
-    "gearbox":    "gearbox_fault",
+    "gearbox":    "rolling_element_fault",
 }
 _ASSET_KEYWORDS = {
     "motor":    "motor",
@@ -265,21 +267,33 @@ def retrieve(query: str, top_k: int = 3,
             "source": chunk["source"],
             "text":   chunk["text"],
             "score":  round(float(scores[idx]), 4),
+            "fault_mode": chunk.get("fault_mode", ""),
+            "asset_type": chunk.get("asset_type", ""),
+            "iso_stage": chunk.get("iso_stage", 0),
         })
 
     return results
 
 
+# ************** Added by Prateek Mittal on 20th July 2026 ******************
 def knowledge_index_version() -> str:
-    """Return a stable identifier for the current in-memory knowledge index."""
-    import hashlib
-    import json
+    """Stable version of the effective real+synthetic retrieval corpus."""
     if not _index_built:
         build_index()
-    sources = sorted({c.get("source", "") for c in _chunks})
-    payload = json.dumps({"n_chunks": len(_chunks), "sources": sources},
-                         separators=(",", ":")).encode("utf-8")
+    payload = json.dumps(
+        _chunks, sort_keys=True, separators=(",", ":"), default=str
+    ).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()[:16]
+
+
+def knowledge_index_stats() -> Dict[str, int]:
+    if not _index_built:
+        build_index()
+    return {
+        "chunks": len(_chunks),
+        "documents": len({chunk.get("source", "") for chunk in _chunks if chunk.get("source")}),
+    }
+# ***********************
 
 
 # Build index eagerly on import so first call is fast

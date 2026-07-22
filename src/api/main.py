@@ -52,16 +52,41 @@ _AUDIT_PATH = os.path.join(os.path.dirname(__file__), "..", "..", _ORCH_CONFIG["
 _REFLEXION = ReflexionAgent(max_characters=_ORCH_CONFIG["reflection"]["max_response_characters"])
 
 
+def _learning_agent():
+    """Factory kept patchable so tests and deployments can inject storage."""
+    from src.agents.learning_memory_agent import LearningMemoryAgent
+    return LearningMemoryAgent()
+
+
+def _learning_history_draft(persona: str, limit: int = 3):
+    cases = _learning_agent().recent_cases(limit)
+    if not cases:
+        return ({"persona": persona,
+            "response": "No validated closed failure cases are available in Agent 8 memory. Learning is recorded only after successful execution and confirmed closure feedback.",
+            "details": [], "actions": [], "case_references": [],
+            "call_plan": ["agent_8"], "needs_context": False,
+            "agent_outputs": {"learned_cases": []}}, cases)
+    details = [
+        f"{case.get('case_id', 'unknown case')}: {case.get('fault_mode', 'unknown fault')}; outcome: {case.get('outcome', 'not recorded')}. Learning: {case.get('content', 'not recorded')}"
+        for case in cases
+    ]
+    audience = "Executive summary" if str(persona).lower() in {"md", "executive", "manager"} else "Failure history"
+    return ({"persona": persona,
+        "response": f"{audience}: the last {len(cases)} validated closed failure cases are summarized below.",
+        "details": details,
+        "actions": ["Use these confirmed outcomes to review recurring causes and maintenance effectiveness."],
+        "case_references": [f"Learned case {case.get('case_id', '')}" for case in cases],
+        "call_plan": ["agent_8"], "needs_context": False,
+        "agent_outputs": {"learned_cases": cases}}, cases)
+
 # ************** Added by Prateek Mittal on 20th July 2026 ******************
 @app.exception_handler(Exception)
 async def unexpected_error_handler(request: Request, exc: Exception):
     error_id = f"ERR-{uuid.uuid4().hex[:10].upper()}"
-    try:
-        write_audit(_AUDIT_PATH, event="api_error", status="unexpected", error_code=error_id)
-    except Exception:
-        pass
-    return JSONResponse(status_code=500, content={"error": {"code": "INTERNAL_ERROR",
-        "message": "The request could not be completed safely.", "error_id": error_id, "retryable": True}})
+    try: write_audit(_AUDIT_PATH,event="api_error",status="unexpected",error_code=error_id)
+    except Exception: pass
+    return JSONResponse(status_code=500,content={"error":{"code":"INTERNAL_ERROR",
+        "message":"The request could not be completed safely.","error_id":error_id,"retryable":True}})
 # ***********************
 
 app.add_middleware(
@@ -148,7 +173,9 @@ class PipelineRunResponse(BaseModel):
     risk_assessment: Optional[Dict] = None
     knowledge_guidance: Optional[Dict] = None
     fault_diagnosis: Optional[Dict] = None
-    recommendation: Optional[Dict] = None   # Agent 7 POA: MaintenanceRecommendation
+    recommendation: Optional[Dict] = None
+    execution_result: Optional[Dict] = None
+    learned_case: Optional[Dict] = None
     hitl_required: Optional[Dict] = None    # Agent 1 DFA: FLAGGED → IMPUTE/DROP/KEEP
     hitl_advisory: Optional[Dict] = None    # Agent 4 PRA: LLM advisory → Accept/Reject
     hitl_monitoring: Optional[Dict] = None  # Agent 2 Monitoring: borderline EWMA → Suppress/Confirm
@@ -266,6 +293,8 @@ def pipeline_run(req: PipelineRunRequest):
             state = run_pipeline(signal, intent=intent)
         else:
             state = run_pipeline(req.signal, intent=intent)
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(500, f"Pipeline error: {exc}")
 
@@ -466,6 +495,8 @@ def pipeline_run(req: PipelineRunRequest):
                             else _to_dict(state.get("knowledge_guidance"))),
         recommendation=(None if (_mon_paused or _diag_paused)
                         else _to_dict(state.get("recommendation"))),
+        execution_result=_to_dict(state.get("execution_result")),
+        learned_case=_to_dict(state.get("learned_case")),
         hitl_required=hitl_required,
         hitl_advisory=hitl_advisory,
         hitl_monitoring=hitl_monitoring,
@@ -586,7 +617,6 @@ def hitl_remediation(req: HITLRemediationRequest):
         fault_diagnosis=_to_dict(diagnosis),
         risk_assessment=None if _diag_paused else _to_dict(risk),
         knowledge_guidance=None if _diag_paused else _to_dict(knowledge),
-        recommendation=None if _diag_paused else _to_dict(state.get("recommendation")),
         hitl_advisory=hitl_advisory if not _diag_paused else None,
         hitl_diagnosis=hitl_diagnosis,
         hitl_knowledge=hitl_knowledge,
@@ -717,7 +747,6 @@ def hitl_monitoring_resolution(req: HITLMonitoringRequest):
         fault_diagnosis=None if _diag_paused else _to_dict(diagnosis),
         risk_assessment=None if _diag_paused else _to_dict(risk),
         knowledge_guidance=None if _diag_paused else _to_dict(knowledge),
-        recommendation=None if _diag_paused else _to_dict(state.get("recommendation")),
         hitl_advisory=hitl_advisory if not _diag_paused else None,
         hitl_diagnosis=hitl_diagnosis,
         hitl_knowledge=hitl_knowledge,
@@ -818,7 +847,6 @@ def hitl_diagnosis_resolution(req: HITLDiagnosisRequest):
         fault_diagnosis=_to_dict(diagnosis),
         risk_assessment=_to_dict(risk),
         knowledge_guidance=_to_dict(knowledge),
-        recommendation=_to_dict(state.get("recommendation")),
         hitl_advisory=hitl_advisory,
         hitl_knowledge=hitl_knowledge,
     )
@@ -902,7 +930,10 @@ def hitl_knowledge_resolution(req: HITLKnowledgeRequest):
 def executor_run(req: ExecutorRunRequest):
     """
     Execute an approved (or rejected) MaintenanceRecommendation.
+
     Pass approved=True to execute, approved=False to test the blocked path.
+    The recommendation dict must match the MaintenanceRecommendation schema
+    (RecommendedAction + RequiredPart sub-models).
     """
     from src.schemas.recommendation import MaintenanceRecommendation
     from src.agents.executor_agent import ExecutorAgent
@@ -914,77 +945,27 @@ def executor_run(req: ExecutorRunRequest):
         raise HTTPException(400, f"Executor error: {exc}")
 
 
-class LearningFeedbackRequest(BaseModel):
-    execution_result: Dict[str, Any]
-    feedback: Dict[str, Any]
-
-
-@app.post("/api/learning/feedback")
-def record_learning_feedback(req: LearningFeedbackRequest):
-    """Submit closed-loop feedback to the Learning & Memory Agent."""
-    from src.schemas.execution import ExecutionResult
-    from src.schemas.feedback import FeedbackEvent
-    from src.agents.learning_memory_agent import LearningMemoryAgent
-    try:
-        execution = ExecutionResult(**req.execution_result)
-        feedback = FeedbackEvent(**req.feedback)
-        doc = LearningMemoryAgent().process(execution, feedback)
-        return doc.model_dump()
-    except Exception as exc:
-        raise HTTPException(400, f"Learning feedback error: {exc}")
-
-
-@app.get("/api/learning/cases")
-def get_learned_cases():
-    """Return all learned cases stored by the Learning & Memory Agent."""
-    from src.tools.learned_case_repository import JSONLearnedCaseRepository
-    from src.tools.config_loader import load_learning_config
-    try:
-        cfg = load_learning_config()
-        repo = JSONLearnedCaseRepository(cfg.repository_path)
-        rows = repo._rows()
-        return {"count": len(rows), "cases": rows}
-    except Exception:
-        return {"count": 0, "cases": []}
-
-
-@app.get("/api/learning/cases/{case_id}")
-def get_learned_case(case_id: str):
-    """Return a single learned case by ID."""
-    from src.tools.learned_case_repository import JSONLearnedCaseRepository
-    from src.tools.config_loader import load_learning_config
-    try:
-        cfg = load_learning_config()
-        repo = JSONLearnedCaseRepository(cfg.repository_path)
-        doc = repo.get(case_id)
-        if doc is None:
-            raise HTTPException(404, f"Case '{case_id}' not found")
-        return doc
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(500, str(exc))
-
-
 @app.get("/api/notifications/counts")
 def notification_counts():
-    """Return unread notification count per persona_id."""
+    """Return unread notification counts for every supported frontend persona."""
     from src.tools.notification_mock_service import get_unread_counts
     return get_unread_counts()
 
 
 @app.get("/api/notifications/{persona_id}")
-def get_persona_notifications(persona_id: str):
-    """Return all notifications for a persona (newest first)."""
-    from src.tools.notification_mock_service import get_notifications
-    notifs = get_notifications(persona_id)
-    return {"persona_id": persona_id, "notifications": notifs, "count": len(notifs)}
+def persona_notifications(persona_id: str):
+    from src.tools.notification_mock_service import PERSONAS, get_notifications
+    if persona_id not in PERSONAS:
+        raise HTTPException(404, f"Unknown persona: {persona_id}")
+    notifications = get_notifications(persona_id)
+    return {"persona_id": persona_id, "notifications": notifications, "count": len(notifications)}
 
 
 @app.post("/api/notifications/{persona_id}/read")
-def mark_notifications_read(persona_id: str):
-    """Mark all notifications for a persona as read."""
-    from src.tools.notification_mock_service import mark_all_read
+def read_persona_notifications(persona_id: str):
+    from src.tools.notification_mock_service import PERSONAS, mark_all_read
+    if persona_id not in PERSONAS:
+        raise HTTPException(404, f"Unknown persona: {persona_id}")
     mark_all_read(persona_id)
     return {"status": "ok", "persona_id": persona_id}
 
@@ -997,7 +978,7 @@ def list_scenarios():
             {"name": "outer_race_fault",    "description": "Motor outer race spall — Stage 1→3"},
             {"name": "inner_race_fault",    "description": "Motor inner race degradation"},
             {"name": "lubrication_issue",   "description": "Pump lubrication degradation"},
-            {"name": "gearbox_fault",       "description": "Gearbox bearing fault"},
+            {"name": "rolling_element_fault", "description": "Ball or roller bearing fault (BSF signature)"},
             {"name": "healthy",             "description": "Healthy motor — no fault"},
             {"name": "fi_hitl_test",        "description": "HITL test: early inner-race, low confidence → Gate 3"},
             {"name": "knowledge_hitl_test", "description": "HITL test: undetermined fault → Gate 5 (no SOP)"},
@@ -1051,80 +1032,33 @@ _CANNED = {
 
 @app.post("/api/chat")
 def chat(req: ChatRequest):
-    """Persona-aware chat — QueryRouter + pipeline context + ReflexionAgent validation."""
-    run_id = f"CHAT-{uuid.uuid4().hex[:10].upper()}"
-    context = req.context or {}
-    if not req.message or not req.message.strip():
-        raise HTTPException(422, "Chat message must not be empty.")
-    if len(req.message) > _ORCH_CONFIG["chat"]["max_message_characters"]:
-        raise HTTPException(422, "Chat message exceeds the configured length limit.")
-
-    signal = context.get("signal")
-    scenario = context.get("scenario")
+    """Simple persona-aware chat — keyword matching + optional pipeline context."""
+    run_id=f"CHAT-{uuid.uuid4().hex[:10].upper()}"; context=req.context or {}
+    if not req.message or not req.message.strip(): raise HTTPException(422,"Chat message must not be empty.")
+    if len(req.message)>_ORCH_CONFIG["chat"]["max_message_characters"]: raise HTTPException(422,"Chat message exceeds the configured length limit.")
+    signal=context.get("signal"); scenario=context.get("scenario")
     if scenario and signal is None:
-        try:
-            signal = _get_demo_signal(str(scenario), int(context.get("row_index", -1)))
-        except (KeyError, ValueError, TypeError) as exc:
-            raise HTTPException(404, f"Scenario unavailable: {scenario}") from exc
-
-    plan = plan_query(req.message, signal is not None)
-    state: dict = {"pipeline_log": []}
-
-    # When the query_router detects a scenario entity in the message, skip the
-    # needs_context gate and return scenario_detected so the frontend runs the
-    # full pipeline (preserving HITL card rendering) via /api/pipeline/run.
-    if plan.needs_signal and signal is None and not plan.scenario:
-        draft = {"persona": req.persona,
-                 "response": f"I can answer this {plan.intent} question once telemetry or a named scenario is supplied. No agent decision was fabricated.",
-                 "call_plan": list(plan.agents), "needs_context": True}
+        try: signal=_get_demo_signal(str(scenario),int(context.get("row_index",-1)))
+        except (KeyError,ValueError,TypeError) as exc: raise HTTPException(404,f"Scenario unavailable: {scenario}") from exc
+    plan=plan_query(req.message,signal is not None); state={"pipeline_log":[]}
+    if plan.intent == "learning_history":
+        draft,cases=_learning_history_draft(req.persona,3)
+        state={"pipeline_log":[{"node":"learning_memory","status":"history_query","latency_ms":0,"count":len(cases)}]}
+    elif plan.needs_signal and signal is None:
+        draft={"persona":req.persona,"response":f"I can answer this {plan.intent} question once telemetry or a named scenario is supplied. No agent decision was fabricated.","call_plan":list(plan.agents),"needs_context":True}
     elif signal is not None:
-        state = run_pipeline(deepcopy(signal), run_id=run_id, intent=plan.pipeline_intent,
-            inventory_lookup=context.get("inventory_lookup"),
-            context_lookup=context.get("operations_context"),
-            approval_status="pending")
-        formatted = format_for_persona(state, req.persona)
-        rec = state.get("recommendation")
-        exec_result = state.get("execution_result")
-        draft = {"persona": req.persona,
-                 "response": formatted.get("headline", "Analysis complete."),
-                 "details": formatted.get("details", []),
-                 "actions": formatted.get("actions", []),
-                 "call_plan": list(plan.agents),
-                 "needs_context": False,
-                 "agent_outputs": {
-                     "recommendation": rec.to_dict() if rec and hasattr(rec, "to_dict") else (rec.model_dump() if rec else None),
-                     "execution_result": exec_result.to_dict() if exec_result and hasattr(exec_result, "to_dict") else None,
-                 }}
-    elif plan.scenario:
-        # Backend scenario detection: entity found in message — tell the frontend
-        # which scenario to run so it can call /api/pipeline/run with HITL support.
-        display = plan.scenario.replace("_", " ")
-        draft = {"persona": req.persona,
-                 "response": f"Running {plan.intent} analysis for {display} scenario.",
-                 "call_plan": list(plan.agents),
-                 "needs_context": False,
-                 "scenario_detected": plan.scenario}
+        state=run_pipeline(deepcopy(signal),run_id=run_id,intent=plan.pipeline_intent,
+            inventory_lookup=context.get("inventory_lookup"),context_lookup=context.get("operations_context"),approval_status="pending")
+        formatted=format_for_persona(state,req.persona)
+        draft={"persona":req.persona,"response":formatted.get("headline","Analysis complete."),"details":formatted.get("details",[]),"actions":formatted.get("actions",[]),"call_plan":list(plan.agents),"needs_context":False,
+               "agent_outputs":{"recommendation":state["recommendation"].to_dict() if state.get("recommendation") else None,
+                                "execution_result":state["execution_result"].to_dict() if state.get("execution_result") else None}}
     else:
-        # Canned response fallback
-        msg_lower = req.message.lower()
-        canned_response = next((v for k, v in _CANNED.items() if k in msg_lower), None)
-        if canned_response:
-            draft = {"persona": req.persona, "response": canned_response,
-                     "sources": ["Knowledge Agent"], "call_plan": list(plan.agents), "needs_context": False}
-        else:
-            draft = {"persona": req.persona,
-                     "response": "This is an open-ended reliability question. I can explain the workflow, but an asset-specific decision requires telemetry or a named scenario.",
-                     "call_plan": list(plan.agents), "needs_context": True}
-
-    reflected = _REFLEXION.process(draft, state, plan)
-    result = {**reflected.response, "run_id": run_id, "intent": plan.intent,
-              "reflection_status": reflected.status, "pipeline_log": state.get("pipeline_log", []),
-              "scenario_detected": plan.scenario}
-    try:
-        result["audit"] = write_audit(_AUDIT_PATH, event="chat", run_id=run_id,
-                                      status="ok", intent=plan.intent, agents=plan.agents)
-    except Exception:
-        result["audit"] = {"status": "audit_write_failed"}
+        draft={"persona":req.persona,"response":"This is an open-ended reliability question. I can explain the workflow, but an asset-specific decision requires telemetry or a named scenario.","call_plan":list(plan.agents),"needs_context":True}
+    reflected=_REFLEXION.process(draft,state,plan)
+    result={**reflected.response,"run_id":run_id,"intent":plan.intent,"reflection_status":reflected.status,"pipeline_log":state.get("pipeline_log",[])}
+    try: result["audit"]=write_audit(_AUDIT_PATH,event="chat",run_id=run_id,status="ok",intent=plan.intent,agents=plan.agents)
+    except Exception: result["audit"]={"status":"audit_write_failed"}
     return result
 
 

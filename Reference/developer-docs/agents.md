@@ -539,6 +539,7 @@ Defined in [src/schemas/diagnosis.py](../src/schemas/diagnosis.py). The 12 requi
 | 2 | FT_002 | inner_race_fault | `bpfi_energy` crosses a stage threshold **AND** `kurtosis > 5.5` |
 | 3 | FT_006 | cage_fault | `ftf_energy` dominant **AND** crosses a stage threshold **AND** `kurtosis > 4.5` |
 | 4 | FT_003 | lubrication_issue | `broadband_pattern` **AND** `temp_rise > 0` **AND** `kurtosis < 5.0` |
+| 5 | FT_007 | rolling_element_fault | `bsf_energy` dominant **AND** crosses a stage threshold **AND** `kurtosis > 4.5` |
 
 **ISO stage** (`determine_iso_stage`) compares the energy value to `stage_3/2/1_vib_multiple` using **`>=`** — a value exactly on a threshold belongs to the **higher** stage (e.g. `bpfo == 3.5 == stage_3` → stage 3).
 
@@ -560,7 +561,7 @@ Loaded via `load_fi_config()` in [src/tools/config_loader.py](../src/tools/confi
 
 ### 3A.8 Severity
 
-Base from ISO stage (`1→low`, `2→medium`, `3→high`), then escalated **one level** (up to `critical`) if the asset is high-criticality and/or a production bottleneck. So a stage-3 outer-race fault on the bottleneck gearbox (TEL_0020) escalates `high → critical`.
+Base from ISO stage (`1→low`, `2→medium`, `3→high`), then escalated **one level** (up to `critical`) if the asset is high-criticality and/or a production bottleneck. So the stage-3 rolling-element fault on the bottleneck gearbox asset (TEL_0020) escalates `high → critical`.
 
 ### 3A.9 Logging
 

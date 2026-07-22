@@ -79,6 +79,17 @@ def test_repository_roundtrip_and_searchability(tmp_path):
     row=agent._repo.get("CASE-L1"); hits=agent._repo.search("outer race contamination bearing replacement")
     assert row["fault_mode"]=="outer_race_fault" and hits[0]["source"]=="Learned case CASE-L1"
 
+@pytest.mark.parametrize("limit",[0,-1,True,"3",None])
+def test_recent_history_rejects_invalid_limits(tmp_path,limit):
+    agent=_agent(tmp_path); agent.process(_execution(),_feedback())
+    assert agent.recent_cases(limit)==[]
+
+def test_recent_history_ignores_malformed_rows(tmp_path):
+    path=tmp_path/"cases.json"
+    path.write_text(json.dumps([None,"bad",{"case_id":"VALID","created_at":"2026-07-20T00:00:00Z"}]))
+    cfg=load_learning_config(); cfg.repository_path=str(path); cfg.training_export_path=str(tmp_path/"rows.jsonl")
+    assert LearningMemoryAgent(cfg).recent_cases(3)==[{"case_id":"VALID","created_at":"2026-07-20T00:00:00Z"}]
+
 def test_training_row_is_exported(tmp_path):
     agent=_agent(tmp_path); agent.process(_execution(),_feedback())
     row=json.loads((tmp_path/"rows.jsonl").read_text().strip())

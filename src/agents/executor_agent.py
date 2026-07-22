@@ -34,6 +34,9 @@ from __future__ import annotations
 
 import logging
 import uuid
+import hashlib
+import json
+from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import List
 
@@ -41,6 +44,7 @@ from src.schemas.recommendation import MaintenanceRecommendation
 from src.schemas.execution import ExecutionResult
 from src.tools.cmms_mock_service import create_work_order
 from src.tools.inventory_mock_service import reserve_part
+from src.tools.config_loader import ExecutorConfig, load_executor_config
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +80,27 @@ class ExecutorAgent:
     changing only the tool layer — this class stays unchanged.
     """
 
+    # ************** Added by Prateek Mittal on 20th July 2026 ******************
+    def __init__(self, cfg: ExecutorConfig = None, repository=None,
+                 cmms_fn=None, inventory_fn=None, notification_fn=None,
+                 now_fn=None):
+        self._cfg = cfg or load_executor_config(); self._cfg.validate()
+        self._repository = repository
+        self._cmms_fn = cmms_fn
+        self._inventory_fn = inventory_fn
+        self._notification_fn = notification_fn
+        self._now_fn = now_fn or (lambda: datetime.now(tz=timezone.utc))
+        self._version = hashlib.sha256(json.dumps(asdict(self._cfg), sort_keys=True).encode()).hexdigest()[:16]
+
+    def _base(self, recommendation):
+        return dict(
+            executor_config_version=self._version,
+            source_recommendation_schema_version=getattr(recommendation, "schema_version", ""),
+            source_prescriptive_config_version=getattr(recommendation, "prescriptive_config_version", ""),
+            linked_recommendation_case_id=getattr(recommendation, "case_id", ""),
+        )
+    # ***********************
+
     def process(self, recommendation: MaintenanceRecommendation,
                 approved: bool = False) -> ExecutionResult:
         """
@@ -87,12 +112,33 @@ class ExecutorAgent:
             approved: True when LangGraph state.approval_status == 'approved'.
                       Also proceeds when recommendation.approval_status == 'approved'.
         """
-        executed_at = datetime.now(tz=timezone.utc).isoformat()
+        # ************** Added by Prateek Mittal on 20th July 2026 ******************
+        # Validate the typed, eligible, allowlisted recommendation before any side effect.
+        if not isinstance(recommendation, MaintenanceRecommendation):
+            return ExecutionResult(status="invalid_input", execution_eligible=False,
+                                   blocked_reason="typed MaintenanceRecommendation required",
+                                   executed_at=self._now_fn().isoformat(),
+                                   executor_config_version=self._version)
+        executed_at = self._now_fn().isoformat()
         audit_ref   = f"AUDIT-{uuid.uuid4().hex[:10].upper()}"
         action_name = recommendation.recommended_action.name
+        base = self._base(recommendation)
+        if not getattr(recommendation, "recommendation_eligible", True):
+            return ExecutionResult(case_id=recommendation.case_id, action_taken=action_name,
+                status="invalid_input", execution_eligible=False,
+                blocked_reason="recommendation is not execution eligible", notification_status="skipped",
+                audit_reference=audit_ref, executed_at=executed_at, **base)
+        if action_name not in self._cfg.allowed_actions:
+            return ExecutionResult(case_id=recommendation.case_id, action_taken=action_name,
+                status="invalid_input", execution_eligible=False,
+                blocked_reason="recommended action is not allowlisted", notification_status="skipped",
+                audit_reference=audit_ref, executed_at=executed_at, **base)
+        if recommendation.approval_status == "rejected":
+            approved = False
+        # ***********************
 
         # ── Step 1: approval guard ──────────────────────────────────────
-        if not _is_approved(recommendation, approved):
+        if recommendation.approval_status == "rejected" or not _is_approved(recommendation, approved):
             logger.warning(
                 "[executor] BLOCKED case_id=%s action=%s approval_status=%s",
                 recommendation.case_id, action_name, recommendation.approval_status,
@@ -108,6 +154,8 @@ class ExecutorAgent:
                 notification_status="skipped",
                 audit_reference=audit_ref,
                 executed_at=executed_at,
+                execution_eligible=False,
+                **base,
             )
 
         # ── Step 2: log-only actions (monitor / continue_monitoring) ────
@@ -128,17 +176,18 @@ class ExecutorAgent:
                 notification_status=notif,
                 audit_reference=audit_ref,
                 executed_at=executed_at,
+                **base,
             )
 
         # ── Step 3: create work order ───────────────────────────────────
-        priority    = _URGENCY_PRIORITY.get(recommendation.urgency, "P3-Medium")
+        priority    = self._cfg.priority_by_urgency.get(recommendation.urgency, "P3-Medium")
         description = (
             f"{recommendation.recommended_action.description or action_name} — "
             f"{recommendation.rationale[:200]}"
         ).strip(" —")
 
         try:
-            wo = create_work_order(
+            wo = (self._cmms_fn or create_work_order)(
                 asset_id=recommendation.asset_id,
                 fault_mode=action_name,
                 priority=priority,
@@ -161,6 +210,8 @@ class ExecutorAgent:
                 notification_status="skipped",
                 audit_reference=audit_ref,
                 executed_at=executed_at,
+                execution_eligible=False,
+                **base,
             )
 
         # ── Step 4: reserve required parts ──────────────────────────────
@@ -170,7 +221,7 @@ class ExecutorAgent:
 
         for part in recommendation.required_parts:
             try:
-                result = reserve_part(
+                result = (self._inventory_fn or reserve_part)(
                     part_number=part.part_number,
                     quantity=part.quantity,
                     work_order_id=work_order_id,
@@ -222,28 +273,57 @@ class ExecutorAgent:
             notification_status=notif,
             audit_reference=audit_ref,
             executed_at=executed_at,
+            **base,
         )
+
+    # ************** Added by Prateek Mittal on 20th July 2026 ******************
+    def process_and_store(self, recommendation, approved=False):
+        if self._repository is None:
+            raise RuntimeError("process_and_store requires an execution repository")
+        case_id = getattr(recommendation, "case_id", "")
+        if self._cfg.reject_duplicate_cases and case_id and self._repository.exists(case_id):
+            return ExecutionResult(case_id=case_id, status="duplicate", execution_eligible=False,
+                duplicate_detected=True, persistence_status="duplicate_not_stored",
+                blocked_reason="case already executed", executed_at=self._now_fn().isoformat(),
+                executor_config_version=self._version, linked_recommendation_case_id=case_id)
+        result = self.process(recommendation, approved)
+        try:
+            result.persistence_status = "stored"
+            self._repository.save(result)
+        except Exception as exc:
+            result.persistence_status = "failed"
+            result.status = "partial" if result.work_order_id else "failed"
+            result.blocked_reason = f"execution audit persistence failed: {exc}"
+        return result
+    # ***********************
 
     # ── internal helpers ────────────────────────────────────────────────
 
     def _notify(self, recommendation: MaintenanceRecommendation,
                 work_order_id: str) -> str:
         """
-        Route persona-specific notifications via notification_mock_service.
-        In Phase 11, replace send_notifications() with real channel adapters.
-        Always returns 'sent' (notifications are fire-and-forget).
+        Log-based notification mock.
+        In Phase 11, replace with email / Teams / PagerDuty calls.
+        Always returns 'sent' in dev (notifications are fire-and-forget).
         """
+        # The default adapter powers the frontend inbox. Injection keeps this
+        # boundary replaceable and makes notifier failures independently testable.
         from src.tools.notification_mock_service import send_notifications
-        notified = send_notifications(recommendation, work_order_id)
 
-        escalate = recommendation.urgency in _ESCALATE_URGENCIES
+        contributors = ", ".join(
+            f"{c.name} ({c.role})" for c in recommendation.contributors
+        ) or "on-call team"
+        escalate = recommendation.urgency in self._cfg.escalate_urgencies
+
         logger.info(
-            "[executor][notify] WO=%s action=%s asset=%s urgency=%s notified=%s",
+            "[executor][notify] WO=%s action=%s responsible=%s contributors=%s "
+            "asset=%s escalate=%s",
             work_order_id or "N/A",
             recommendation.recommended_action.name,
+            recommendation.responsible_person,
+            contributors,
             recommendation.asset_id,
-            recommendation.urgency,
-            notified,
+            escalate,
         )
         if escalate:
             logger.info(
@@ -253,4 +333,9 @@ class ExecutorAgent:
                 recommendation.asset_id,
                 recommendation.responsible_approver,
             )
-        return "sent"
+        try:
+            (self._notification_fn or send_notifications)(recommendation, work_order_id)
+            return "sent"
+        except Exception as exc:
+            logger.error("[executor][notify] delivery failed: %s", exc)
+            return "failed"

@@ -20,12 +20,15 @@ import os
 import json
 import unittest
 from copy import deepcopy
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from src.agents.data_foundation_agent import DataFoundationAgent
 from src.agents.monitoring_agent import MonitoringAgent
-from src.schemas.anomaly import AnomalyEvent
+from src.schemas.anomaly import AnomalyEvent, MonitoringResult
 from src.tools.baseline_features import (
     build_correlation_matrix, build_covariance_matrix,
     compute_hotelling_t2, t2_anomaly_score, chi2_cdf,
@@ -33,6 +36,7 @@ from src.tools.baseline_features import (
 from src.tools.data_loader import load_telemetry_rows
 from src.tools.config_loader import load_monitoring_config
 from src.tools.remediation import remediate, IMPUTE
+from src.tools.monitoring_decision_repository import SQLiteMonitoringDecisionRepository
 
 import numpy as np
 
@@ -164,6 +168,12 @@ class TestMonitoringAgent(unittest.TestCase):
         row = _row("outer_race_fault", -1)
         row["bpfo_energy"] = None              # remove one signal
         trusted = self.dfa.process(row)
+        # ************** Added by Prateek Mittal on 17th July 2026 ******************
+        # This test isolates reduced-dimensional detector math. Agent 1 correctly
+        # routes the incomplete record to review, so eligibility is explicitly
+        # granted here after the handoff guard has been tested separately.
+        trusted.downstream_eligible = True
+        # ***********************
         ev = self.mon.process(trusted)
         self.assertIsNotNone(ev)
         self.assertEqual(ev.evidence["t2_degrees_freedom"], 3)
@@ -272,6 +282,163 @@ class TestHotellingT2Math(unittest.TestCase):
         # T² with high positive correlation catches anti-correlated deviations
         # better than independent scoring
         self.assertGreater(t2_corr, t2_diag)
+
+
+# ************** Added by Prateek Mittal on 17th July 2026 ******************
+# Completion tests for Agent 2's detailed decision contract, defensive handoff,
+# atomic/versioned state, provenance, alert policy, and decision persistence.
+class TestMonitoringAgentCompletion(unittest.TestCase):
+
+    def setUp(self):
+        self.temp = TemporaryDirectory()
+        self.state_file = str(Path(self.temp.name) / "ewma.json")
+        self.dfa = DataFoundationAgent.from_data_files()
+        self.cfg = load_monitoring_config()
+        self.cfg.ewma_state_file = self.state_file
+        self.mon = MonitoringAgent(self.cfg)
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def trusted(self, scenario="healthy", index=0):
+        return self.dfa.process(_row(scenario, index))
+
+    def test_assess_healthy_is_distinct_from_suppressed(self):
+        result = self.mon.assess(self.trusted("healthy"))
+        self.assertIsInstance(result, MonitoringResult)
+        self.assertEqual(result.status, "healthy")
+        self.assertTrue(result.assessed)
+        self.assertIsNone(result.anomaly_event)
+
+    def test_assess_startup_reports_suppression_reason(self):
+        result = self.mon.assess(self.trusted("startup_filter"))
+        self.assertEqual(result.status, "suppressed")
+        self.assertFalse(result.assessed)
+        self.assertEqual(result.suppression_reason, "startup_shutdown")
+
+    def test_ineligible_agent1_input_is_defensively_rejected(self):
+        trusted = self.trusted("signal_dropout", 1)
+        self.assertFalse(trusted.downstream_eligible)
+        result = self.mon.assess(trusted)
+        self.assertEqual(result.status, "ineligible")
+        self.assertFalse(result.assessed)
+        self.assertFalse(os.path.exists(self.state_file))
+
+    def test_duplicate_does_not_update_state(self):
+        trusted = self.trusted("outer_race_fault", -1)
+        trusted.duplicate_detected = True
+        result = self.mon.assess(trusted)
+        self.assertEqual(result.status, "duplicate")
+        self.assertFalse(os.path.exists(self.state_file))
+
+    def test_out_of_order_does_not_update_state(self):
+        trusted = self.trusted("outer_race_fault", -1)
+        trusted.out_of_order = True
+        result = self.mon.assess(trusted)
+        self.assertEqual(result.status, "out_of_order")
+        self.assertFalse(os.path.exists(self.state_file))
+
+    def test_insufficient_signals_has_structured_result(self):
+        trusted = self.trusted("outer_race_fault", -1)
+        trusted.raw.vib_rms_mm_s = None
+        trusted.raw.kurtosis = None
+        trusted.raw.temp_c = None
+        result = self.mon.assess(trusted)
+        self.assertEqual(result.status, "insufficient_data")
+        self.assertEqual(result.suppression_reason, "insufficient_usable_signals")
+
+    def test_anomaly_and_result_include_provenance(self):
+        result = self.mon.assess(self.trusted("outer_race_fault", -1))
+        self.assertEqual(result.status, "anomaly")
+        self.assertEqual(len(result.monitoring_config_version), 16)
+        event = result.anomaly_event
+        self.assertEqual(event.monitoring_config_version, result.monitoring_config_version)
+        self.assertEqual(event.source_config_version, result.source_config_version)
+        self.assertEqual(event.source_master_data_version, result.source_master_data_version)
+
+    def test_config_version_is_stable(self):
+        other_cfg = load_monitoring_config()
+        other_cfg.ewma_state_file = self.state_file
+        other = MonitoringAgent(other_cfg)
+        self.assertEqual(self.mon._config_version, other._config_version)
+
+    def test_corrupt_state_recovery_is_audited(self):
+        Path(self.state_file).write_text("{not-json", encoding="utf-8")
+        result = self.mon.assess(self.trusted("healthy"))
+        self.assertTrue(result.state_recovered)
+        json.loads(Path(self.state_file).read_text(encoding="utf-8"))
+
+    def test_state_is_namespaced_by_version_bearing_and_regime(self):
+        self.mon.assess(self.trusted("outer_race_fault", -1))
+        state = json.loads(Path(self.state_file).read_text(encoding="utf-8"))
+        namespaces = state["namespaces"]
+        self.assertEqual(len(namespaces), 1)
+        namespace = next(iter(namespaces.values()))
+        self.assertIn("BRG_001", namespace)
+        self.assertTrue(next(iter(namespace["BRG_001"])))
+
+    def test_singular_covariance_reports_fallback(self):
+        trusted = self.trusted("outer_race_fault", -1)
+        for field in (
+            "baseline_corr_vib_kurtosis", "baseline_corr_vib_temp",
+            "baseline_corr_vib_bpfo", "baseline_corr_kurtosis_temp",
+            "baseline_corr_kurtosis_bpfo", "baseline_corr_temp_bpfo",
+        ):
+            setattr(trusted.bearing_ctx, field, 1.0)
+        event = self.mon.process(trusted)
+        self.assertIsNotNone(event)
+        self.assertTrue(event.evidence["cov_inv_fallback"])
+
+    def test_minimum_consecutive_alert_policy(self):
+        self.cfg.min_consecutive_anomalies = 2
+        mon = MonitoringAgent(self.cfg)
+        first = mon.assess(self.trusted("outer_race_fault", -1))
+        second = mon.assess(self.trusted("outer_race_fault", -1))
+        self.assertEqual(first.status, "pending_alert")
+        self.assertIsNone(first.anomaly_event)
+        self.assertEqual(second.status, "anomaly")
+        self.assertIsNotNone(second.anomaly_event)
+
+    def test_alert_cooldown_suppresses_repeated_emission(self):
+        self.cfg.min_consecutive_anomalies = 1
+        self.cfg.alert_cooldown_seconds = 60
+        now = datetime(2026, 7, 17, 10, 0, tzinfo=timezone.utc)
+        mon = MonitoringAgent(self.cfg, now_fn=lambda: now)
+        first = mon.assess(self.trusted("outer_race_fault", -1))
+        second = mon.assess(self.trusted("outer_race_fault", -1))
+        self.assertEqual(first.status, "anomaly")
+        self.assertEqual(second.status, "cooldown")
+        self.assertIsNone(second.anomaly_event)
+
+    def test_assess_and_store_persists_decision(self):
+        repository = SQLiteMonitoringDecisionRepository(str(Path(self.temp.name) / "decisions.db"))
+        mon = MonitoringAgent(self.cfg, decision_repository=repository)
+        result = mon.assess_and_store(self.trusted("healthy"))
+        self.assertEqual(result.persistence_status, "stored")
+        self.assertEqual(repository.count(), 1)
+        self.assertEqual(repository.latest(result.telemetry_id)["status"], "healthy")
+
+    def test_assess_and_store_requires_repository(self):
+        with self.assertRaises(RuntimeError):
+            self.mon.assess_and_store(self.trusted("healthy"))
+
+    def test_decision_persistence_failure_is_visible(self):
+        class BrokenRepository:
+            def save(self, result):
+                raise OSError("database unavailable")
+
+        mon = MonitoringAgent(self.cfg, decision_repository=BrokenRepository())
+        result = mon.assess_and_store(self.trusted("healthy"))
+        self.assertEqual(result.persistence_status, "failed")
+        self.assertIn("database unavailable", result.suppression_reason)
+
+    def test_monitoring_config_rejects_invalid_confidence_weights(self):
+        cfg = load_monitoring_config()
+        cfg.confidence_weights = {"signal_quality": 1.0, "coverage": 1.0, "data_quality": 1.0}
+        with self.assertRaises(ValueError):
+            cfg.validate()
+
+# ***********************
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 {
-  "_comment": "Agent 5 deterministic retrieval, grounding, and output policy.",
+  "_comment_added_start": "************** Added by Prateek Mittal on 20th July 2026 ****************** - Agent 5 deterministic retrieval, grounding, and output policy.",
   "retrieval": {
     "top_k": 5,
     "minimum_score": 0.45,
@@ -17,5 +17,6 @@
   },
   "logging": {
     "log_retrievals": true
-  }
+  },
+  "_comment_added_end": "***********************"
 }

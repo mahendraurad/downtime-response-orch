@@ -1,19 +1,4 @@
-"""
-agents/learning_memory_agent.py  —  Phase 10
-
-Learning & Memory Agent — converts validated execution outcomes into
-searchable case documents for closed-loop institutional knowledge.
-
-Entry point:
-  LearningMemoryAgent.process(execution, feedback) -> LearnedCaseDocument
-
-Pipeline:
-  1. Input validation — typed ExecutionResult + FeedbackEvent required.
-  2. Duplicate check — idempotent; rejected if case already learned.
-  3. Template narrative — deterministic content from execution + feedback.
-  4. Optional LLM narrative enhancement (disabled by default).
-  5. Persist to JSON case store + export training row.
-"""
+"""Agent 8: validate closed-loop outcomes and publish searchable learned cases."""
 from __future__ import annotations
 import hashlib
 import json
@@ -38,12 +23,10 @@ class LearningMemoryAgent:
 
     def process(self, execution: ExecutionResult, feedback: FeedbackEvent) -> LearnedCaseDocument:
         reason = self._input_error(execution, feedback)
-        if reason:
-            return self._empty(execution, reason)
+        if reason: return self._empty(execution, reason)
         if self._repo.exists(feedback.case_id):
             result = self._empty(execution, "case outcome has already been learned")
-            result.learning_status = "duplicate"
-            result.persistence_status = "duplicate_not_stored"
+            result.learning_status = "duplicate"; result.persistence_status = "duplicate_not_stored"
             return result
         content = self._template(execution, feedback)
         content, source = self._optional_llm(content, feedback)
@@ -64,17 +47,20 @@ class LearningMemoryAgent:
             status_reason="validated closed outcome converted to searchable memory",
         )
         try:
-            doc.persistence_status = "stored"
-            doc.index_status = "indexed"
+            doc.persistence_status = "stored"; doc.index_status = "indexed"
             self._repo.save(doc)
             self._export_training_row(execution, feedback)
         except Exception as exc:
-            doc.learning_status = "persistence_failed"
-            doc.learning_eligible = False
-            doc.persistence_status = "failed"
-            doc.index_status = "failed"
+            doc.learning_status = "persistence_failed"; doc.learning_eligible = False
+            doc.persistence_status = "failed"; doc.index_status = "failed"
             doc.status_reason = f"learning persistence failed: {exc}"
         return doc
+
+    def recent_cases(self, limit: int = 3) -> list[dict]:
+        """Read validated learned history; this does not create new learning."""
+        if not hasattr(self._repo, "list_recent"):
+            return []
+        return self._repo.list_recent(limit)
 
     def _input_error(self, execution, feedback):
         if not isinstance(execution, ExecutionResult) or not isinstance(feedback, FeedbackEvent):
@@ -91,12 +77,9 @@ class LearningMemoryAgent:
             return "confirmed root cause is required"
         try:
             closed = datetime.fromisoformat(feedback.closed_at.replace("Z", "+00:00"))
-            if self._cfg.require_timezone and closed.tzinfo is None:
-                return "closure timestamp requires timezone"
-            if closed > self._now():
-                return "closure timestamp cannot be in the future"
-        except ValueError:
-            return "closure timestamp must be ISO-8601"
+            if self._cfg.require_timezone and closed.tzinfo is None: return "closure timestamp requires timezone"
+            if closed > self._now(): return "closure timestamp cannot be in the future"
+        except ValueError: return "closure timestamp must be ISO-8601"
         if feedback.post_repair_vib_mm_s < 0 or feedback.post_repair_temp_c < -273.15:
             return "post-repair measurements are physically invalid"
         if feedback.days_to_failure_actual is not None and feedback.days_to_failure_actual < 0:
@@ -121,26 +104,23 @@ class LearningMemoryAgent:
             f"{feedback.post_repair_temp_c} C. Execution audit {execution.audit_reference}.")
 
     def _optional_llm(self, fallback, feedback):
-        if not self._cfg.llm_narrative_enabled or self._llm is None:
-            return fallback, "template"
+        if not self._cfg.llm_narrative_enabled or self._llm is None: return fallback, "template"
         try:
-            if hasattr(self._llm, "is_configured") and not self._llm.is_configured():
-                return fallback, "template"
+            if hasattr(self._llm, "is_configured") and not self._llm.is_configured(): return fallback, "template"
             response = self._llm.complete_json(system_prompt=(
-                "Rewrite only the learned-case narrative. Preserve all confirmed labels and measurements."),
+                "Rewrite only the learned-case narrative. Preserve all confirmed labels and measurements. "
+                "Return exactly one JSON object with one string field named narrative; no markdown."),
                 user_prompt=fallback, temperature=0.1, max_tokens=500)
             text = response.get("narrative", "") if isinstance(response, dict) else ""
+            # Require the immutable confirmed fault and action to remain visible.
             if isinstance(text, str) and feedback.confirmed_fault_mode in text and feedback.action_taken in text:
                 return text[:self._cfg.llm_max_characters], "template+llm_narrative"
-        except Exception:
-            pass
+        except Exception: pass
         return fallback, "template"
 
     def _export_training_row(self, execution, feedback):
-        path = Path(self._cfg.training_export_path)
-        path.parent.mkdir(parents=True, exist_ok=True)
+        path = Path(self._cfg.training_export_path); path.parent.mkdir(parents=True, exist_ok=True)
         row = {**feedback.model_dump(), "execution_status": execution.status,
                "execution_action": execution.action_taken}
-        with path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(row, sort_keys=True) + "\n")
+        with path.open("a", encoding="utf-8") as fh: fh.write(json.dumps(row, sort_keys=True) + "\n")
 # ***********************

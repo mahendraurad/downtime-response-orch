@@ -1,3 +1,9 @@
+"""Durable development repository for detailed Agent 2 monitoring decisions."""
+
+# ************** Added by Prateek Mittal on 17th July 2026 ******************
+# Persists healthy, suppressed, insufficient, ineligible, and anomalous
+# MonitoringResult objects without coupling Agent 2 to a production database.
+
 from __future__ import annotations
 
 from contextlib import closing
@@ -53,3 +59,5 @@ class SQLiteMonitoringDecisionRepository:
     def count(self) -> int:
         with closing(sqlite3.connect(self.path)) as connection:
             return int(connection.execute("SELECT COUNT(*) FROM monitoring_decisions").fetchone()[0])
+
+# ***********************

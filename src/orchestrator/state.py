@@ -33,5 +33,9 @@ class DROGraphState(TypedDict, total=False):
     recommendation:     Any   # MaintenanceRecommendation | None  (Phase 7)
     approval_status:    str   # pending | approved | rejected
     execution_result:   Any   # ExecutionResult | None  (Phase 9)
+    feedback_event:     Any
+    learned_case:       Any
+    inventory_lookup:   dict
+    context_lookup:     dict
     error:              str   # non-empty if any agent raised
     pipeline_log:       list  # list of {"node", "status", "latency_ms"} entries

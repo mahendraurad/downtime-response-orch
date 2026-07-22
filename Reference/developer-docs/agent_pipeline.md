@@ -114,6 +114,7 @@ fault has a **kurtosis gate** that must also be crossed:
 |---|---|---|---|---|
 | outer_race_fault | FT_001 | BPFO | > 5.0 | 1 |
 | inner_race_fault | FT_002 | BPFI | > 5.5 | 2 |
+| rolling_element_fault | FT_007 | dominant BSF | > 4.5 | 5 |
 | cage_fault | FT_006 | FTF (must dominate) | > 4.5 | 3 |
 | lubrication_issue | FT_003 | broadband (no single band) | *below* ceiling 5.0 | 4 |
 
@@ -247,6 +248,11 @@ the call **never raises**. See [src/tools/llm_client.py](../src/tools/llm_client
 `"rules+llm_fallback"`), `advisory_note` (LLM advisory when rules were
 insufficient), `case_id`/`asset_id`/`bearing_id`, `processed_at`.
 
+The hardened contract also includes `assessment_status` (`assessed`, `monitor`,
+or `invalid_input`), `risk_eligible`, `status_reason`, deterministic
+`risk_explanation`, calculation `evidence`, and complete Agent 1-4 provenance.
+Invalid audit results are stopped before Knowledge retrieval.
+
 ### Tool module
 [src/tools/rul_calculator.py](../src/tools/rul_calculator.py) (`get_rul_band`,
 `compute_financial_exposure`),
@@ -256,9 +262,29 @@ schema [src/schemas/risk.py](../src/schemas/risk.py).
 
 ---
 
+# Agent 5 — Knowledge Agent
+
+Agent 5 consumes the validated `FaultDiagnosis`, originating
+`TrustedBearingSignal`, and linked `RiskAssessment`. It retrieves relevant SOP
+chunks using fault mode, asset type, bearing type, stage, severity, and risk.
+
+The development adapter is deterministic TF-IDF/cosine retrieval over approved
+real documents plus a synthetic fallback catalog. Every returned inspection
+step and safety note has a `GroundedGuidanceItem` containing the exact source
+document and retrieval score. Unsourced, malformed, below-threshold, or
+wrong-fault hits cannot produce instructions.
+
+Outputs distinguish `grounded`, `no_guidance`, `retrieval_failed`, and
+`invalid_input`. An undetermined diagnosis returns `no_guidance` for HITL rather
+than guessing a repair procedure. Retrieval policy is configured in
+`config/knowledge_config.json`; every result carries configuration, effective
+index, and Agent 1-4 provenance.
+
+---
+
 # Worked example — Gearbox AST_GBX_001, reading TEL_0020
 
-Raw signal: **Vib = 7.2 mm/s, Kurtosis = 7.0, Temp = 86 °C, BPFO = 3.5**.
+Raw signal: **Vib = 7.2 mm/s, Kurtosis = 6.0, Temp = 86 °C, BSF = 3.5**.
 Baseline for BRG_011 ≈ 2.8 mm/s ± 0.4.
 
 ### 1 — Monitoring Agent
@@ -268,19 +294,20 @@ Vib is ~11σ above baseline; T² over the correlated vector is large → normali
 *"Something is seriously wrong with this bearing."*
 
 ### 2 — Failure Intelligence Agent
-BPFO `3.5` ≥ FT_001 stage-3 threshold (`3.5`) ✓ **and** kurtosis `7.0` > `5.0` ✓.
-Both gates crossed → **`fault_mode = outer_race_fault`, `iso_stage = 3`**.
+BSF `3.5` ≥ FT_007 stage-3 threshold (`3.5`) ✓, is the dominant band, and
+kurtosis `6.0` > `4.5` ✓. These gates map to the roadmap's ball/rolling-element
+signature → **`fault_mode = rolling_element_fault`, `iso_stage = 3`**.
 High-criticality bottleneck escalates severity to **critical**.
-→ Emits **`FaultDiagnosis`** (with `rul_days_estimate = 7`).
-*"It's a stage-3 outer-race crack."*
+→ Emits **`FaultDiagnosis`** (with `rul_days_estimate = 10`).
+*"It's a stage-3 rolling-element bearing fault."*
 
 ### 3 — Predictive Risk Agent
-Stage 3 outer race → RUL band **`(0, 7, "0–7 days")`**. Asset is a bottleneck,
+Stage 3 rolling-element fault → RUL band **`(0, 10, "0–10 days")`**. Asset is a bottleneck,
 downtime cost ₹18,000/hr.
-**financial_exposure = 7 × 24 × 18,000 = ₹30,24,000.**
+**financial_exposure = 10 × 24 × 18,000 = ₹43,20,000.**
 risk_level = **critical** (reused from diagnosis), business_impact_flag = **True**.
 → Emits **`RiskAssessment`**.
-*"You have less than a week, and it will cost ₹30 lakh if it fails."*
+*"The configured upper RUL is 10 days, with ₹43.2 lakh exposure if it fails."*
 
 ---
 

@@ -1,24 +1,37 @@
-"""
-tests/test_end_to_end_graph.py  —  Phase 8
+"""Real LangGraph wiring and conditional-agent invocation tests."""
+from copy import deepcopy
+import pytest
+from src.orchestrator.graph import run_pipeline
+from src.tools.data_loader import load_telemetry_rows
 
-TODO: implement when the LangGraph Orchestrator is built (Phase 8).
-Run only after all 5 Tier 1+2 agents pass their individual tests.
+# ************** Added by Prateek Mittal on 20th July 2026 ******************
+def _row(name): return deepcopy(load_telemetry_rows(name)[-1])
+def _nodes(state): return [x["node"] for x in state["pipeline_log"]]
 
-Test cases to write:
-  - healthy signal → TrustedBearingSignal stored, no AnomalyEvent, no case created
-  - outer_race signal → full pipeline: TrustedBearingSignal → AnomalyEvent →
-    FaultDiagnosis → RiskAssessment → KnowledgeGuidance → Recommendation
-  - unknown_asset signal → REJECTED at Data Foundation, pipeline stops
-  - approval_required=True → pipeline pauses at approval gate
-  - audit log captures every agent decision
-"""
-import unittest
+@pytest.mark.parametrize(("intent","expected"),[("status",["data_foundation"]),("anomaly",["data_foundation","monitoring"]),("diagnosis",["data_foundation","monitoring","failure_intelligence"]),("risk",["data_foundation","monitoring","failure_intelligence","predictive_risk"]),("guidance",["data_foundation","monitoring","failure_intelligence","predictive_risk","knowledge"])])
+def test_intent_calls_only_required_agents(intent,expected): assert _nodes(run_pipeline(_row("outer_race_fault"),intent=intent))==expected
 
+def test_full_fault_calls_agents_1_to_6_and_pauses_for_approval():
+    state=run_pipeline(_row("outer_race_fault"),intent="full")
+    assert _nodes(state)==["data_foundation","monitoring","failure_intelligence","predictive_risk","knowledge","prescriptive"]
+    assert state["recommendation"].approval_status=="pending" and "execution_result" not in state
 
-class TestEndToEndGraph(unittest.TestCase):
-    def test_placeholder(self):
-        self.skipTest("LangGraph Orchestrator not yet implemented — Phase 8")
+def test_approved_fault_calls_executor_not_learning_without_feedback():
+    state=run_pipeline(_row("outer_race_fault"),approval_status="approved")
+    assert _nodes(state)[-1]=="executor" and "learning" not in _nodes(state)
 
+@pytest.mark.parametrize("scenario",["healthy","startup_filter"])
+def test_non_anomaly_stops_after_monitoring(scenario): assert _nodes(run_pipeline(_row(scenario)))==["data_foundation","monitoring"]
+@pytest.mark.parametrize("scenario",["signal_dropout","unknown_asset"])
+def test_bad_data_stops_after_foundation(scenario): assert _nodes(run_pipeline(_row(scenario)))==["data_foundation"]
+def test_every_log_entry_has_status_and_latency(): assert all({"node","status","latency_ms"}<=set(x) for x in run_pipeline(_row("outer_race_fault"))["pipeline_log"])
 
-if __name__ == "__main__":
-    unittest.main()
+def test_agent_failure_is_captured_in_state(monkeypatch):
+    import src.orchestrator.graph as graph
+    agents=list(graph._get_agents())
+    class Broken:
+        def process(self,*_): raise RuntimeError("internal secret detail")
+    agents[2]=Broken(); monkeypatch.setattr(graph,"_agents",tuple(agents))
+    state=graph.run_pipeline(_row("outer_race_fault"),intent="diagnosis")
+    assert "error" in state and state["pipeline_log"][-1]["status"]=="error"
+# ***********************

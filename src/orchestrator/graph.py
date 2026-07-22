@@ -1,13 +1,14 @@
 """
 orchestrator/graph.py  —  Phase 8
 
-Wires the live agents (DFA → Monitoring → Failure Intelligence →
-Predictive Risk → Knowledge → Prescriptive Optimisation) into a LangGraph StateGraph.
+Wires the four live agents (DFA → Monitoring → Failure Intelligence →
+Predictive Risk → Knowledge) into a LangGraph StateGraph.
 
 The graph is compiled once at import time.  Call run_pipeline(raw_signal)
 from the API layer.
 
-Phases 9/10 (Executor, Learning & Memory) are stubs pending implementation.
+Phases 7/9/10 (Prescriptive Optimisation, Executor, Learning & Memory) are
+stubbed as pass-through nodes; other developers implement them.
 """
 from __future__ import annotations
 
@@ -93,7 +94,14 @@ def _get_action_agents():
         from src.agents.prescriptive_optimization_agent import PrescriptiveOptimizationAgent
         from src.agents.executor_agent import ExecutorAgent
         from src.agents.learning_memory_agent import LearningMemoryAgent
-        _action_agents = (PrescriptiveOptimizationAgent(), ExecutorAgent(), LearningMemoryAgent())
+        from src.tools.llm_client import LLMClient
+        llm = LLMClient()
+        optional_llm = llm if llm.is_configured() else None
+        _action_agents = (
+            PrescriptiveOptimizationAgent(llm_client=optional_llm),
+            ExecutorAgent(),
+            LearningMemoryAgent(llm_client=optional_llm),
+        )
     return _action_agents
 # ***********************
 
@@ -147,7 +155,7 @@ def node_failure_intelligence(state: DROGraphState) -> DROGraphState:
 
 
 def node_predictive_risk(state: DROGraphState) -> DROGraphState:
-    _, _, _, pra, *_ = _get_agents()
+    _, _, _, pra, _ = _get_agents()
     log = list(state.get("pipeline_log") or [])
     try:
         risk, ms = _timed(
@@ -180,33 +188,27 @@ def node_knowledge(state: DROGraphState) -> DROGraphState:
 
 # ************** Added by Prateek Mittal on 20th July 2026 ******************
 def node_prescriptive(state):
-    agent, _, _ = _get_action_agents()
-    log = list(state.get("pipeline_log") or [])
+    agent, _, _ = _get_action_agents(); log = list(state.get("pipeline_log") or [])
     try:
         result, ms = _timed(agent.process, state["risk_assessment"], state["fault_diagnosis"],
             state["knowledge_guidance"], state.get("inventory_lookup") or {}, state.get("context_lookup") or {})
-        log.append({"node": "prescriptive", "status": "ok", "latency_ms": ms})
-        return {**state, "recommendation": result, "pipeline_log": log}
+        log.append({"node":"prescriptive","status":"ok","latency_ms":ms})
+        return {**state,"recommendation":result,"pipeline_log":log}
     except Exception as exc:
-        logger.error("prescriptive failed: %s", exc)
-        log.append({"node": "prescriptive", "status": "error", "latency_ms": 0})
-        return {**state, "error": str(exc), "pipeline_log": log}
-
+        log.append({"node":"prescriptive","status":"error","latency_ms":0})
+        return {**state,"error":str(exc),"pipeline_log":log}
 
 def node_executor(state):
-    _, agent, _ = _get_action_agents()
-    log = list(state.get("pipeline_log") or [])
+    _, agent, _ = _get_action_agents(); log = list(state.get("pipeline_log") or [])
     result, ms = _timed(agent.process, state["recommendation"], state.get("approval_status") == "approved")
-    log.append({"node": "executor", "status": result.status, "latency_ms": ms})
-    return {**state, "execution_result": result, "pipeline_log": log}
-
+    log.append({"node":"executor","status":result.status,"latency_ms":ms})
+    return {**state,"execution_result":result,"pipeline_log":log}
 
 def node_learning(state):
-    _, _, agent = _get_action_agents()
-    log = list(state.get("pipeline_log") or [])
-    result, ms = _timed(agent.process, state["execution_result"], state.get("feedback_event"))
-    log.append({"node": "learning", "status": getattr(result, "learning_status", "unknown"), "latency_ms": ms})
-    return {**state, "learned_case": result, "pipeline_log": log}
+    _, _, agent = _get_action_agents(); log = list(state.get("pipeline_log") or [])
+    result, ms = _timed(agent.process, state["execution_result"], state["feedback_event"])
+    log.append({"node":"learning","status":result.learning_status,"latency_ms":ms})
+    return {**state,"learned_case":result,"pipeline_log":log}
 # ***********************
 
 
@@ -246,8 +248,8 @@ def _build_graph():
         "knowledge", route_after_knowledge,
         {"prescriptive": "prescriptive", END: END},
     )
-    g.add_conditional_edges("prescriptive", route_after_prescriptive, {"executor": "executor", END: END})
-    g.add_conditional_edges("executor", route_after_executor, {"learning": "learning", END: END})
+    g.add_conditional_edges("prescriptive", route_after_prescriptive, {"executor":"executor", END:END})
+    g.add_conditional_edges("executor", route_after_executor, {"learning":"learning", END:END})
     g.add_edge("learning", END)
 
     return g.compile()
@@ -261,13 +263,12 @@ _graph = _build_graph()
 def run_from_trusted_signal(trusted_signal, intent: str = "full",
                              run_id: str = "") -> DROGraphState:
     """
-    Skip DFA; run monitoring→FI→risk→knowledge→prescriptive on a pre-validated signal.
+    Skip DFA; run monitoring→FI→risk→knowledge on a pre-validated/remediated signal.
     Called by the HITL resolution endpoint after an IMPUTE or KEEP decision.
     """
     import uuid
     rid = run_id or str(uuid.uuid4())[:8]
     _, mon, fia, pra, ka = _get_agents()
-    poa, _, _ = _get_action_agents()
 
     log: list = [{"node": "data_foundation", "status": "ok (remediated)", "latency_ms": 0}]
     state: DROGraphState = {
@@ -323,16 +324,6 @@ def run_from_trusted_signal(trusted_signal, intent: str = "full",
         logger.error("knowledge failed in HITL resume: %s", exc)
         log.append({"node": "knowledge", "status": "error", "latency_ms": 0})
         state["error"] = str(exc)
-        return state
-
-    try:
-        rec, ms = _timed(poa.process, risk, diag, guidance)
-        log.append({"node": "prescriptive", "status": "ok", "latency_ms": ms})
-        state["recommendation"] = rec
-    except Exception as exc:
-        logger.error("prescriptive failed in HITL resume: %s", exc)
-        log.append({"node": "prescriptive", "status": "error", "latency_ms": 0})
-        state["error"] = str(exc)
 
     return state
 
@@ -340,13 +331,12 @@ def run_from_trusted_signal(trusted_signal, intent: str = "full",
 def run_from_anomaly_event(anomaly_event, trusted_signal, intent: str = "full",
                            run_id: str = "") -> DROGraphState:
     """
-    Skip DFA + Monitoring; run FI → Risk → Knowledge → Prescriptive on a confirmed anomaly.
+    Skip DFA + Monitoring; run FI → Risk → Knowledge on an operator-confirmed anomaly.
     Called by the Monitoring HITL resolution endpoint after a CONFIRM decision.
     """
     import uuid as _uuid
     rid = run_id or str(_uuid.uuid4())[:8]
     _, _, fia, pra, ka = _get_agents()
-    poa, _, _ = _get_action_agents()
 
     log: list = [
         {"node": "data_foundation", "status": "ok (resumed)", "latency_ms": 0},
@@ -393,16 +383,6 @@ def run_from_anomaly_event(anomaly_event, trusted_signal, intent: str = "full",
         logger.error("knowledge failed in monitoring HITL resume: %s", exc)
         log.append({"node": "knowledge", "status": "error", "latency_ms": 0})
         state["error"] = str(exc)
-        return state
-
-    try:
-        rec, ms = _timed(poa.process, risk, diag, guidance)
-        log.append({"node": "prescriptive", "status": "ok", "latency_ms": ms})
-        state["recommendation"] = rec
-    except Exception as exc:
-        logger.error("prescriptive failed in monitoring HITL resume: %s", exc)
-        log.append({"node": "prescriptive", "status": "error", "latency_ms": 0})
-        state["error"] = str(exc)
 
     return state
 
@@ -410,13 +390,12 @@ def run_from_anomaly_event(anomaly_event, trusted_signal, intent: str = "full",
 def run_from_diagnosis(diagnosis, anomaly_event, trusted_signal,
                        intent: str = "full", run_id: str = "") -> DROGraphState:
     """
-    Skip DFA + Monitoring + FI; run Risk → Knowledge → Prescriptive on a confirmed diagnosis.
+    Skip DFA + Monitoring + FI; run Risk → Knowledge on an operator-confirmed diagnosis.
     Called by the FI HITL resolution endpoint after a CONFIRM or MARK_UNDETERMINED decision.
     """
     import uuid as _uuid
     rid = run_id or str(_uuid.uuid4())[:8]
     _, _, _, pra, ka = _get_agents()
-    poa, _, _ = _get_action_agents()
 
     log: list = [
         {"node": "data_foundation", "status": "ok (resumed)", "latency_ms": 0},
@@ -455,16 +434,6 @@ def run_from_diagnosis(diagnosis, anomaly_event, trusted_signal,
         logger.error("knowledge failed in diagnosis HITL resume: %s", exc)
         log.append({"node": "knowledge", "status": "error", "latency_ms": 0})
         state["error"] = str(exc)
-        return state
-
-    try:
-        rec, ms = _timed(poa.process, risk, diagnosis, guidance)
-        log.append({"node": "prescriptive", "status": "ok", "latency_ms": ms})
-        state["recommendation"] = rec
-    except Exception as exc:
-        logger.error("prescriptive failed in diagnosis HITL resume: %s", exc)
-        log.append({"node": "prescriptive", "status": "error", "latency_ms": 0})
-        state["error"] = str(exc)
 
     return state
 
@@ -490,10 +459,8 @@ def run_pipeline(raw_signal: Dict[str, Any], run_id: str = "",
         "case_id": rid,
         "intent": intent,
         "raw_signal": raw_signal,
-        "inventory_lookup": inventory_lookup or {},
-        "context_lookup": context_lookup or {},
-        "approval_status": approval_status,
-        "feedback_event": feedback_event,
+        "inventory_lookup": inventory_lookup or {}, "context_lookup": context_lookup or {},
+        "approval_status": approval_status, "feedback_event": feedback_event,
         "pipeline_log": [],
     }
     final_state = _graph.invoke(initial)

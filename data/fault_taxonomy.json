@@ -189,8 +189,8 @@
   },
   {
     "fault_code": "FT_007",
-    "fault_mode": "gearbox_fault",
-    "affected_component": "gear_teeth",
+    "fault_mode": "rolling_element_fault",
+    "affected_component": "rolling_elements",
     "dominant_band": "BSF",
     "broadband_pattern": false,
     "expected_temp_rise": true,
@@ -203,9 +203,9 @@
     "rul_days_stage_3": 10,
     "degradation_curve": "exponential",
     "typical_causes": [
-      "gear tooth wear",
-      "overloading",
-      "lubrication failure"
+      "rolling-element spalling or pitting",
+      "overloading or shock loading",
+      "lubrication contamination or starvation"
     ],
     "severity_logic": "Stage confirmed when bsf_energy is the dominant band AND > multiple AND kurtosis > 4.5",
     "detection": {

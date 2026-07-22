@@ -15,6 +15,10 @@ def test_open_question_call_plans(question,intent,count):
 def test_unclassified_question_requests_context_without_fabrication():
     plan=plan_query("Tell me about reliability culture"); assert plan.intent=="general" and plan.agents==("reflexion",)
 def test_empty_question_has_invalid_plan(): assert plan_query("  ").intent=="invalid"
+@pytest.mark.parametrize("question",["Is this reading anomalous?","Could this be anomalous?"])
+def test_natural_anomaly_phrasing_routes_to_monitoring(question): assert plan_query(question,True).intent=="anomaly"
+@pytest.mark.parametrize("question",["What maintenance action should we take?","Should we replace this bearing?"])
+def test_natural_action_phrasing_routes_to_recommendation(question): assert plan_query(question,True).intent=="recommendation"
 def test_reflexion_accepts_supported_response():
     result=ReflexionAgent().process({"response":"Risk assessed."},{"pipeline_log":[{"node":"predictive_risk","status":"ok"}]})
     assert result.status=="accepted" and result.response["sources"]==["predictive_risk"]

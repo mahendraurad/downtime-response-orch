@@ -23,7 +23,8 @@ from __future__ import annotations
 import json
 import os
 import threading
-from typing import Dict
+import tempfile
+from typing import Callable, Dict, Tuple, Any
 
 # Prevents concurrent FastAPI request threads from corrupting the EWMA file
 _LOCK = threading.Lock()
@@ -59,34 +60,44 @@ def save_state(state: Dict[str, Dict[str, float]], path: str) -> None:
             json.dump(state, fh, indent=2, sort_keys=True)
 
 
-def mutate_state(path: str, fn) -> tuple:
-    """
-    Load state, apply fn(state) atomically, save state back.
-
-    fn receives the full state dict, mutates it in-place, and returns any
-    result value.  mutate_state returns (fn_result, state_recovered) where
-    state_recovered is True when the persisted file was corrupt and had to
-    be reset to an empty dict.
-    """
+# ************** Added by Prateek Mittal on 17th July 2026 ******************
+# Atomic read-modify-write operation for Agent 2 state. The lock spans the
+# entire mutation, writes use replace semantics, and corrupt state recovery is
+# explicitly returned to the caller for audit.
+def mutate_state(path: str, mutator: Callable[[Dict], Any]) -> Tuple[Any, bool]:
     resolved = _resolve(path)
+    recovered = False
     with _LOCK:
-        recovered = False
-        state: dict = {}
+        state: Dict = {}
         if os.path.exists(resolved):
             try:
                 with open(resolved, "r", encoding="utf-8") as fh:
                     state = json.load(fh)
+                if not isinstance(state, dict):
+                    state = {}
+                    recovered = True
             except (json.JSONDecodeError, OSError):
                 state = {}
                 recovered = True
 
-        result = fn(state)
-
+        result = mutator(state)
+        directory = os.path.dirname(resolved) or "."
+        os.makedirs(directory, exist_ok=True)
+        fd, temp_path = tempfile.mkstemp(prefix=".ewma-", suffix=".json", dir=directory)
         try:
-            os.makedirs(os.path.dirname(resolved) or ".", exist_ok=True)
-            with open(resolved, "w", encoding="utf-8") as fh:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
                 json.dump(state, fh, indent=2, sort_keys=True)
-        except OSError:
-            pass
-
+                fh.flush()
+                os.fsync(fh.fileno())
+            try:
+                os.replace(temp_path, resolved)
+            except PermissionError:
+                # Windows security/indexing software can briefly deny replace.
+                # The process-wide lock still protects this fallback write.
+                with open(resolved, "w", encoding="utf-8") as target:
+                    json.dump(state, target, indent=2, sort_keys=True)
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
         return result, recovered
+# ***********************
