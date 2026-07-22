@@ -157,6 +157,10 @@ class ValidationDetail(BaseModel):
     ranges_valid:     bool      = False  # values within sensor bounds     (Validity)
     accuracy_ok:      bool      = False  # signal_quality at/above floor   (Accuracy)
     consistency_valid: bool     = False  # cross-field values agree        (Consistency)
+    # ************** Added by Prateek Mittal on 16th July 2026 ******************
+    # Timestamp quality is reported separately from the original six checks.
+    freshness_valid:   bool     = False  # timestamp syntax and live age   (Freshness)
+    # ***********************
     reasons:          List[str] = Field(default_factory=list)
 
 
@@ -265,6 +269,22 @@ class TrustedBearingSignal(BaseModel):
     remediation_action:   str                      = ""
     imputed_fields:       List[str]                = Field(default_factory=list)
     imputation_method:    str                      = ""
+    # ************** Added by Prateek Mittal on 16th July 2026 ******************
+    # Agent 1 audit, routing, provenance, and durable-ingestion contract fields.
+    normalization_actions: List[str]               = Field(default_factory=list)
+    unknown_fields:        List[str]               = Field(default_factory=list)
+    record_age_seconds:    Optional[float]          = None
+    downstream_eligible:   bool                     = False
+    next_route:            str                      = "stop"
+    routing_reason:        str                      = ""
+    schema_version:        str                      = "1.1"
+    config_version:        str                      = ""
+    master_data_version:   str                      = ""
+    source_profile:        str                      = "default"
+    persistence_status:    str                      = "not_requested"
+    duplicate_detected:    bool                     = False
+    out_of_order:          bool                     = False
+    # ***********************
 
     def to_dict(self) -> Dict[str, Any]:
         report_dict = None
@@ -302,9 +322,28 @@ class TrustedBearingSignal(BaseModel):
             "remediation_action": self.remediation_action,
             "imputed_fields":     list(self.imputed_fields),
             "imputation_method":  self.imputation_method,
+            # ************** Added by Prateek Mittal on 16th July 2026 ******************
+            # Serialize every new audit/provenance field for APIs and persistence.
+            "normalization_actions": list(self.normalization_actions),
+            "unknown_fields":        list(self.unknown_fields),
+            "record_age_seconds":    self.record_age_seconds,
+            "downstream_eligible":   self.downstream_eligible,
+            "next_route":            self.next_route,
+            "routing_reason":        self.routing_reason,
+            "schema_version":        self.schema_version,
+            "config_version":        self.config_version,
+            "master_data_version":   self.master_data_version,
+            "source_profile":        self.source_profile,
+            "persistence_status":    self.persistence_status,
+            "duplicate_detected":    self.duplicate_detected,
+            "out_of_order":          self.out_of_order,
+            # ***********************
         }
 
     @property
     def is_processable(self) -> bool:
         """True when safe to pass to the Monitoring Agent."""
-        return self.validation_status in (ValidationStatus.VALID, ValidationStatus.FLAGGED)
+        # ************** Added by Prateek Mittal on 16th July 2026 ******************
+        # Processability now follows the explicit Agent 1 routing decision.
+        return self.downstream_eligible
+        # ***********************

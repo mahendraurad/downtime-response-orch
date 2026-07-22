@@ -1,0 +1,21 @@
+{
+  "_comment": "Agent 5 deterministic retrieval, grounding, and output policy.",
+  "retrieval": {
+    "top_k": 5,
+    "minimum_score": 0.45,
+    "fault_mode_boost": 0.25,
+    "asset_type_boost": 0.15,
+    "iso_stage_boost": 0.10,
+    "require_source": true,
+    "allow_generic_documents": true
+  },
+  "output": {
+    "max_relevant_sections": 5,
+    "max_inspection_steps": 8,
+    "max_safety_notes": 6,
+    "section_preview_characters": 300
+  },
+  "logging": {
+    "log_retrievals": true
+  }
+}

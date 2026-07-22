@@ -1,0 +1,33 @@
+"""Deterministic open-question intent and minimum-agent call planning."""
+from dataclasses import dataclass
+
+# ************** Added by Prateek Mittal on 20th July 2026 ******************
+@dataclass(frozen=True)
+class QueryPlan:
+    intent: str
+    pipeline_intent: str
+    agents: tuple
+    needs_signal: bool
+    needs_approval: bool = False
+
+_RULES = [
+    ("execution", ("execute", "create work order", "reserve part", "approve work"), "full", (1,2,3,4,5,6,7), True),
+    ("recommendation", ("recommend", "what should", "best action", "maintenance plan"), "full", (1,2,3,4,5,6), False),
+    ("guidance", ("sop", "procedure", "inspection steps", "safety", "loto"), "full", (1,2,3,4,5), False),
+    ("risk", ("rul", "remaining useful life", "risk", "probability", "how long", "urgent"), "risk", (1,2,3,4), False),
+    ("diagnosis", ("fault", "diagnose", "root cause", "what type"), "diagnosis", (1,2,3), False),
+    ("anomaly", ("anomaly", "alert", "normal", "any issue"), "anomaly", (1,2), False),
+    ("status", ("status", "reading", "vibration", "temperature", "sensor"), "status", (1,), False),
+]
+
+def plan_query(message: str, has_signal: bool = False) -> QueryPlan:
+    text = str(message or "").strip().lower()
+    if not text:
+        return QueryPlan("invalid", "status", (), False)
+    for intent, words, depth, agents, approval in _RULES:
+        if any(word in text for word in words):
+            return QueryPlan(intent, depth, tuple(f"agent_{n}" for n in agents), True, approval)
+    # Open-ended plant/reliability questions without telemetry are answered as
+    # general guidance with an explicit request for asset/signal context.
+    return QueryPlan("general", "full", ("reflexion",), False)
+# ***********************

@@ -30,14 +30,11 @@ class MaintenanceRecommendation(BaseModel):
     case_id:                str                  = ""
     asset_id:               str                  = ""
     bearing_id:             str                  = ""
-    fault_mode:             str                  = ""   # propagated from FaultDiagnosis
-    asset_type:             str                  = ""   # propagated from asset master
-    iso_stage:              int                  = 0    # propagated from FaultDiagnosis
     recommended_action:     RecommendedAction    = Field(default_factory=RecommendedAction)
     urgency:                str                  = ""   # planned | urgent | immediate | monitor
-    ranked_alternatives:    List[RecommendedAction] = Field(default_factory=list)
-    required_parts:         List[RequiredPart]      = Field(default_factory=list)
-    window_chosen:          Optional[str]           = None
+    ranked_alternatives:    List[Dict[str, Any]] = Field(default_factory=list)
+    required_parts:         List[RequiredPart]   = Field(default_factory=list)
+    window_chosen:          Optional[str]        = None
     rationale:              str                  = ""
     evidence:               Dict[str, Any]       = Field(default_factory=dict)
     recommendation_status:  str                  = ""   # ok | no_action | fallback
@@ -49,3 +46,19 @@ class MaintenanceRecommendation(BaseModel):
     responsible_approver_id: str                 = ""
     contributors:           List[Contributor]    = Field(default_factory=list)
     generated_at_utc:       str                  = ""
+    # ************** Added by Prateek Mittal on 20th July 2026 ******************
+    approval_required:      bool                 = False
+    recommendation_eligible: bool                = True
+    status_reason:          str                  = ""
+    procurement_required:   bool                 = False
+    schema_version:         str                  = "1.1"
+    prescriptive_config_version: str             = ""
+    source_risk_config_version: str              = ""
+    source_knowledge_config_version: str         = ""
+    source_knowledge_index_version: str          = ""
+    linked_risk_case_id:    str                  = ""
+    rationale_source:       str                  = "rules"
+
+    def to_dict(self) -> Dict[str, Any]:
+        return self.model_dump()
+    # ***********************

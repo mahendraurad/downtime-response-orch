@@ -25,6 +25,7 @@ Unit note:
 from __future__ import annotations
 
 import logging
+import math
 from datetime import datetime, timezone
 from typing import List, Dict, Optional
 
@@ -38,6 +39,7 @@ from src.tools.fault_matcher import (
     band_stage1_threshold,
 )
 from src.tools.config_loader import FailureIntelligenceConfig, load_fi_config
+from src.tools.failure_intelligence_utilities import stable_version, validate_taxonomy
 
 logger = logging.getLogger(__name__)
 
@@ -49,9 +51,16 @@ class FailureIntelligenceAgent:
 
     def __init__(self, taxonomy_rules: List[Dict],
                  cfg: FailureIntelligenceConfig = None):
+        # ************** Added by Prateek Mittal on 20th July 2026 ******************
+        # Validate rule semantics once at startup. A broken taxonomy is a
+        # deployment/configuration error and must not silently weaken diagnosis.
+        validate_taxonomy(taxonomy_rules)
         self._rules = taxonomy_rules
         self._by_code = {r["fault_code"]: r for r in taxonomy_rules}
         self._cfg = cfg or load_fi_config()
+        self._config_version = stable_version(self._cfg)
+        self._taxonomy_version = stable_version(taxonomy_rules)
+        # ***********************
 
     @classmethod
     def from_data_files(cls) -> "FailureIntelligenceAgent":
@@ -64,6 +73,13 @@ class FailureIntelligenceAgent:
     def process(self, anomaly: AnomalyEvent,
                 trusted: TrustedBearingSignal) -> FaultDiagnosis:
         """Classify one anomaly into a FaultDiagnosis. Never raises."""
+        # ************** Added by Prateek Mittal on 20th July 2026 ******************
+        # Direct callers receive the same protection as the orchestrator. Invalid
+        # handoffs return an explicit audit object rather than an AttributeError.
+        invalid_reason = self._input_error(anomaly, trusted)
+        if invalid_reason:
+            return self._invalid(anomaly, trusted, invalid_reason)
+        # ***********************
         cfg  = self._cfg
         raw  = trusted.raw
         bctx = trusted.bearing_ctx
@@ -188,6 +204,7 @@ class FailureIntelligenceAgent:
             is_bottleneck         = is_bottleneck,
             typical_causes        = causes,
             rul_days_estimate     = rul_days,
+            **self._provenance(anomaly),
         )
 
         if cfg.log_diagnoses:
@@ -202,7 +219,18 @@ class FailureIntelligenceAgent:
 
     def process_batch(self, pairs: list) -> list:
         """Classify a list of (anomaly, trusted) pairs → list[FaultDiagnosis]."""
-        return [self.process(a, t) for a, t in pairs]
+        # ************** Added by Prateek Mittal on 20th July 2026 ******************
+        # A malformed batch item must not abort valid diagnoses in the same batch.
+        results = []
+        for item in pairs:
+            if not isinstance(item, (tuple, list)) or len(item) != 2:
+                results.append(self._invalid(
+                    None, None, "batch item must contain anomaly and trusted signal"
+                ))
+            else:
+                results.append(self.process(item[0], item[1]))
+        return results
+        # ***********************
 
     # ── Helpers ────────────────────────────────────────────────────────
 
@@ -249,7 +277,87 @@ class FailureIntelligenceAgent:
             recommended_checks    = checks,
             narrative             = narrative,
             processed_at          = processed_at,
+            diagnosis_status      = "undetermined",
+            diagnostic_eligible   = True,
+            status_reason         = "no active taxonomy rule matched the anomaly evidence",
+            **self._provenance(anomaly),
         )
+
+    # ************** Added by Prateek Mittal on 20th July 2026 ******************
+    # The upstream identity and eligibility checks are deliberately small and
+    # deterministic so Agent 3 remains independently testable and reusable.
+    @staticmethod
+    def _input_error(anomaly, trusted) -> str:
+        if not isinstance(anomaly, AnomalyEvent):
+            return "anomaly must be an AnomalyEvent"
+        if not isinstance(trusted, TrustedBearingSignal):
+            return "trusted must be a TrustedBearingSignal"
+        if not trusted.downstream_eligible:
+            return "Agent 1 signal is not downstream eligible"
+        raw = trusted.raw
+        if not raw or not raw.asset_id or not raw.bearing_id:
+            return "trusted signal is missing asset or bearing identity"
+        if not anomaly.case_id:
+            return "anomaly is missing case_id"
+        for name in ("anomaly_score", "confidence_score"):
+            value = getattr(anomaly, name, None)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                or not 0.0 <= value <= 1.0
+            ):
+                return f"anomaly {name} must be a finite value between 0 and 1"
+        if anomaly.asset_id != raw.asset_id or anomaly.bearing_id != raw.bearing_id:
+            return "anomaly and trusted signal identities do not match"
+        if anomaly.channel_id and anomaly.channel_id != raw.channel_id:
+            return "anomaly and trusted signal channel identities do not match"
+        if anomaly.timestamp_utc and anomaly.timestamp_utc != raw.timestamp_utc:
+            return "anomaly and trusted signal timestamps do not match"
+        for name in (
+            "bpfo_energy", "bpfi_energy", "bsf_energy", "ftf_energy",
+            "kurtosis", "temp_c", "vib_rms_mm_s",
+        ):
+            value = getattr(raw, name, None)
+            if value is not None and (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+            ):
+                return f"trusted signal {name} must be finite when supplied"
+        return ""
+
+    def _provenance(self, anomaly) -> Dict[str, str]:
+        return {
+            "fi_config_version": self._config_version,
+            "taxonomy_version": self._taxonomy_version,
+            "source_schema_version": getattr(anomaly, "source_schema_version", ""),
+            "source_config_version": getattr(anomaly, "source_config_version", ""),
+            "source_master_data_version": getattr(anomaly, "source_master_data_version", ""),
+            "source_monitoring_config_version": getattr(anomaly, "monitoring_config_version", ""),
+            "source_detector_version": getattr(anomaly, "detector_version", ""),
+        }
+
+    def _invalid(self, anomaly, trusted, reason: str) -> FaultDiagnosis:
+        processed_at = datetime.now(tz=timezone.utc).isoformat()
+        raw = getattr(trusted, "raw", None)
+        return FaultDiagnosis(
+            case_id=getattr(anomaly, "case_id", ""),
+            asset_id=getattr(raw, "asset_id", "") or getattr(anomaly, "asset_id", ""),
+            bearing_id=getattr(raw, "bearing_id", "") or getattr(anomaly, "bearing_id", ""),
+            fault_mode=_UNDETERMINED,
+            severity=self._cfg.undetermined_severity,
+            confidence=0.0,
+            evidence={"input_validation": reason},
+            recommended_checks=["Correct the upstream Agent 2/Agent 1 handoff before diagnosis"],
+            narrative=f"Failure Intelligence did not assess this input: {reason}.",
+            processed_at=processed_at,
+            diagnosis_status="invalid_input",
+            diagnostic_eligible=False,
+            status_reason=reason,
+            **self._provenance(anomaly),
+        )
+    # ***********************
 
     def _severity(self, iso_stage: int, criticality: str,
                   is_bottleneck: bool) -> str:

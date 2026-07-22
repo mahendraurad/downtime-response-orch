@@ -47,10 +47,16 @@ from src.schemas.risk import RiskAssessment
 from src.tools.rul_calculator import get_rul_band, compute_financial_exposure
 from src.tools.config_loader import RiskConfig, load_risk_config
 from src.tools.llm_client import LLMClient
+from src.tools.failure_intelligence_utilities import stable_version, validate_taxonomy
+from src.tools.predictive_risk_utilities import (
+    VALID_RISK_LEVELS,
+    build_risk_explanation,
+    validate_risk_handoff,
+)
 
 logger = logging.getLogger(__name__)
 
-_VALID_RISK_LEVELS = {"low", "medium", "high", "critical"}
+_VALID_RISK_LEVELS = VALID_RISK_LEVELS
 
 
 class PredictiveRiskAgent:
@@ -60,8 +66,17 @@ class PredictiveRiskAgent:
                  cfg: RiskConfig = None,
                  llm_client: LLMClient = None,
                  hitl_handler: Optional[Callable] = None):
+        # ************** Added by Prateek Mittal on 20th July 2026 ******************
+        # Agent 4 shares Agent 3's taxonomy and independently validates it because
+        # it may be instantiated or deployed separately from Agent 3.
+        validate_taxonomy(taxonomy_rules)
         self._rules = taxonomy_rules
+        self._by_code = {rule["fault_code"]: rule for rule in taxonomy_rules}
         self._cfg = cfg or load_risk_config()
+        self._cfg.validate()
+        self._config_version = stable_version(self._cfg)
+        self._taxonomy_version = stable_version(taxonomy_rules)
+        # ***********************
         # Lazily usable LLM client; only ever called when the fallback triggers
         # and llm_enabled is true. is_configured() gates the actual API call.
         self._llm = llm_client or LLMClient(
@@ -85,6 +100,15 @@ class PredictiveRiskAgent:
                 anomaly: AnomalyEvent,
                 trusted: TrustedBearingSignal) -> RiskAssessment:
         """Assess one diagnosis. Never raises."""
+        # ************** Added by Prateek Mittal on 20th July 2026 ******************
+        # Reject inconsistent Agent 1-3 handoffs explicitly. A runtime input error
+        # is not the same as a valid undetermined diagnosis/monitor assessment.
+        invalid_reason = validate_risk_handoff(
+            diagnosis, anomaly, trusted, self._by_code, self._taxonomy_version
+        )
+        if invalid_reason:
+            return self._invalid(diagnosis, anomaly, trusted, invalid_reason)
+        # ***********************
         cfg  = self._cfg
         actx = trusted.asset_ctx
         processed_at = datetime.now(tz=timezone.utc).isoformat()
@@ -130,6 +154,31 @@ class PredictiveRiskAgent:
         # ── Step 5: risk level — reuse the escalated diagnosis severity ──
         risk_level = diagnosis.severity or cfg.risk_level_fallback
 
+        assessment_status = "monitor" if is_monitor else "assessed"
+        status_reason = (
+            "valid anomaly has no classified fault; monitor and complete diagnostic checks"
+            if is_monitor else "risk calculated from validated diagnosis and taxonomy"
+        )
+        evidence = {
+            "iso_stage": iso_stage,
+            "fault_code": fault_code,
+            "failure_probability": {
+                "stage_base": stage_base,
+                "stage_weight": w["stage_base"],
+                "anomaly_score": anomaly.anomaly_score,
+                "anomaly_weight": w["anomaly_score"],
+            },
+            "diagnosis_confidence": diagnosis.confidence,
+            "anomaly_confidence": anomaly.confidence_score,
+            "history_coverage": "not_available_in_current_typed_contract",
+            "rul_source": "fault_taxonomy" if not is_monitor else "configured_monitor_band",
+            "downtime_cost_per_hour": downtime_cost,
+        }
+        explanation = build_risk_explanation(
+            diagnosis, failure_probability, health_index, band_label,
+            business_impact_flag, financial_exposure,
+        )
+
         assessment = RiskAssessment(
             case_id              = diagnosis.case_id,
             asset_id             = diagnosis.asset_id,
@@ -144,6 +193,12 @@ class PredictiveRiskAgent:
             business_impact_flag = business_impact_flag,
             financial_exposure   = financial_exposure,
             processed_at         = processed_at,
+            assessment_status    = assessment_status,
+            risk_eligible        = True,
+            status_reason        = status_reason,
+            risk_explanation     = explanation,
+            evidence             = evidence,
+            **self._provenance(diagnosis, anomaly),
         )
 
         # ── Step 6: LLM advisory fallback when rules are insufficient ───
@@ -201,7 +256,11 @@ class PredictiveRiskAgent:
         modify, or reject (return None) the LLM result. A rejection leaves the
         deterministic assessment unchanged.
         """
-        result = self._call_llm(diagnosis, anomaly, actx, is_monitor)
+        try:
+            result = self._call_llm(diagnosis, anomaly, actx, is_monitor)
+        except Exception as exc:
+            logger.warning("LLM advisory failed (%s) — deterministic result kept.", exc)
+            return
         if not result:
             return
 
@@ -220,18 +279,21 @@ class PredictiveRiskAgent:
                 )
                 return
 
-        assessment.assessment_source = "rules+llm_fallback"
-
         rationale = str(result.get("rationale", "")).strip()
         action    = str(result.get("recommended_action", "")).strip()
         note_bits = [b for b in (action, rationale) if b]
+        level = str(result.get("risk_level", "")).strip().lower()
+        valid_monitor_level = is_monitor and level in _VALID_RISK_LEVELS
+        if not note_bits and not valid_monitor_level:
+            return
+
+        assessment.assessment_source = "rules+llm_fallback"
         if note_bits:
             assessment.advisory_note = " — ".join(note_bits)
 
         # Only let the LLM set risk_level where the rules genuinely had nothing
         # to say (undetermined/monitor band). Never override a rule-derived level.
         if is_monitor:
-            level = str(result.get("risk_level", "")).strip().lower()
             if level in _VALID_RISK_LEVELS:
                 assessment.risk_level = level
 
@@ -284,4 +346,51 @@ class PredictiveRiskAgent:
 
     def process_batch(self, triples: list) -> list:
         """Assess a list of (diagnosis, anomaly, trusted) → list[RiskAssessment]."""
-        return [self.process(d, a, t) for d, a, t in triples]
+        # ************** Added by Prateek Mittal on 20th July 2026 ******************
+        # Preserve one auditable output per item; malformed entries cannot abort
+        # otherwise valid risk cards in the same batch.
+        results = []
+        for item in triples:
+            if not isinstance(item, (tuple, list)) or len(item) != 3:
+                results.append(self._invalid(
+                    None, None, None,
+                    "batch item must contain diagnosis, anomaly, and trusted signal",
+                ))
+            else:
+                results.append(self.process(item[0], item[1], item[2]))
+        return results
+
+    def _provenance(self, diagnosis, anomaly) -> Dict[str, str]:
+        return {
+            "risk_config_version": self._config_version,
+            "taxonomy_version": self._taxonomy_version,
+            "source_diagnosis_schema_version": getattr(diagnosis, "schema_version", ""),
+            "source_fi_config_version": getattr(diagnosis, "fi_config_version", ""),
+            "source_taxonomy_version": getattr(diagnosis, "taxonomy_version", ""),
+            "source_monitoring_config_version": getattr(diagnosis, "source_monitoring_config_version", ""),
+            "source_detector_version": getattr(diagnosis, "source_detector_version", ""),
+            "source_data_schema_version": getattr(diagnosis, "source_schema_version", ""),
+            "source_data_config_version": getattr(diagnosis, "source_config_version", ""),
+            "source_master_data_version": getattr(diagnosis, "source_master_data_version", ""),
+            "linked_anomaly_case_id": getattr(anomaly, "case_id", ""),
+            "linked_diagnosis_case_id": getattr(diagnosis, "case_id", ""),
+        }
+
+    def _invalid(self, diagnosis, anomaly, trusted, reason: str) -> RiskAssessment:
+        processed_at = datetime.now(tz=timezone.utc).isoformat()
+        raw = getattr(trusted, "raw", None)
+        return RiskAssessment(
+            case_id=getattr(diagnosis, "case_id", "") or getattr(anomaly, "case_id", ""),
+            asset_id=getattr(diagnosis, "asset_id", "") or getattr(raw, "asset_id", ""),
+            bearing_id=getattr(diagnosis, "bearing_id", "") or getattr(raw, "bearing_id", ""),
+            risk_level=self._cfg.risk_level_fallback,
+            confidence=0.0,
+            assessment_status="invalid_input",
+            risk_eligible=False,
+            status_reason=reason,
+            risk_explanation=f"Predictive Risk did not assess this input: {reason}.",
+            evidence={"input_validation": reason},
+            processed_at=processed_at,
+            **self._provenance(diagnosis, anomaly),
+        )
+        # ***********************

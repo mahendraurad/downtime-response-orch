@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import json
 from typing import Any, Dict
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class RiskAssessment(BaseModel):
@@ -25,6 +25,29 @@ class RiskAssessment(BaseModel):
     assessment_source:    str   = "rules"  # "rules" | "rules+llm_fallback"
     advisory_note:        str   = ""       # LLM advisory when rules were insufficient
     processed_at:         str   = ""
+
+    # ************** Added by Prateek Mittal on 20th July 2026 ******************
+    # Explicit outcome, explanation, and provenance make Agent 4 independently
+    # safe and connect every risk card to the exact Agent 1-3 decisions/rules.
+    assessment_status:    str   = "assessed"  # assessed | monitor | invalid_input
+    risk_eligible:        bool  = True
+    status_reason:        str   = ""
+    risk_explanation:     str   = ""
+    evidence:             Dict[str, Any] = Field(default_factory=dict)
+    schema_version:       str   = "1.1"
+    risk_config_version:  str   = ""
+    taxonomy_version:     str   = ""
+    source_diagnosis_schema_version: str = ""
+    source_fi_config_version: str = ""
+    source_taxonomy_version: str = ""
+    source_monitoring_config_version: str = ""
+    source_detector_version: str = ""
+    source_data_schema_version: str = ""
+    source_data_config_version: str = ""
+    source_master_data_version: str = ""
+    linked_anomaly_case_id: str = ""
+    linked_diagnosis_case_id: str = ""
+    # ***********************
 
     def to_dict(self) -> Dict[str, Any]:
         """Return all fields as a plain dict (JSON-serialisable)."""

@@ -27,10 +27,10 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
 # Make repo root importable when run as: python -m src.api.main
@@ -39,8 +39,30 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from src.orchestrator.graph import run_pipeline
 from src.api.persona_formatter import format_for_persona
 from src.tools.data_loader import load_telemetry_rows, load_asset_master
+from src.orchestrator.query_router import plan_query
+from src.agents.reflexion_agent import ReflexionAgent
+from src.tools.orchestrator_audit import write_audit
 
 app = FastAPI(title="DRO API", version="1.0.0")
+
+_ORCH_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "config", "orchestrator_config.json")
+with open(_ORCH_CONFIG_PATH, "r", encoding="utf-8") as _fh:
+    _ORCH_CONFIG = json.load(_fh)
+_AUDIT_PATH = os.path.join(os.path.dirname(__file__), "..", "..", _ORCH_CONFIG["audit"]["jsonl_path"])
+_REFLEXION = ReflexionAgent(max_characters=_ORCH_CONFIG["reflection"]["max_response_characters"])
+
+
+# ************** Added by Prateek Mittal on 20th July 2026 ******************
+@app.exception_handler(Exception)
+async def unexpected_error_handler(request: Request, exc: Exception):
+    error_id = f"ERR-{uuid.uuid4().hex[:10].upper()}"
+    try:
+        write_audit(_AUDIT_PATH, event="api_error", status="unexpected", error_code=error_id)
+    except Exception:
+        pass
+    return JSONResponse(status_code=500, content={"error": {"code": "INTERNAL_ERROR",
+        "message": "The request could not be completed safely.", "error_id": error_id, "retryable": True}})
+# ***********************
 
 app.add_middleware(
     CORSMiddleware,
@@ -223,13 +245,7 @@ _INTENT_RULES = [
 
 def _classify_intent(query: str) -> str:
     """Map a natural-language query to a pipeline depth intent."""
-    if not query:
-        return "full"
-    lower = query.lower()
-    for intent, keywords in _INTENT_RULES:
-        if any(kw in lower for kw in keywords):
-            return intent
-    return "full"
+    return plan_query(query or "recommend full maintenance analysis", True).pipeline_intent
 
 
 # ── Pipeline endpoint ─────────────────────────────────────────────────────────
@@ -886,49 +902,68 @@ def hitl_knowledge_resolution(req: HITLKnowledgeRequest):
 def executor_run(req: ExecutorRunRequest):
     """
     Execute an approved (or rejected) MaintenanceRecommendation.
-    On success, Phase 10 Learning & Memory Agent runs automatically
-    and appends a 'learning' key to the response.
+    Pass approved=True to execute, approved=False to test the blocked path.
     """
     from src.schemas.recommendation import MaintenanceRecommendation
     from src.agents.executor_agent import ExecutorAgent
-    from src.agents.learning_memory_agent import LearningMemoryAgent
     try:
         rec = MaintenanceRecommendation(**req.recommendation)
         result = ExecutorAgent().process(rec, approved=req.approved)
-        result_dict = result.model_dump()
-
-        if req.approved and result.status in ("success", "partial"):
-            try:
-                learning = LearningMemoryAgent().process(result, req.recommendation)
-                result_dict["learning"] = learning
-            except Exception as lma_exc:
-                import logging as _log
-                _log.getLogger(__name__).warning(
-                    "[lma] Learning agent failed: %s", lma_exc
-                )
-                result_dict["learning"] = None
-
-        return result_dict
+        return result.model_dump()
     except Exception as exc:
         raise HTTPException(400, f"Executor error: {exc}")
+
+
+class LearningFeedbackRequest(BaseModel):
+    execution_result: Dict[str, Any]
+    feedback: Dict[str, Any]
+
+
+@app.post("/api/learning/feedback")
+def record_learning_feedback(req: LearningFeedbackRequest):
+    """Submit closed-loop feedback to the Learning & Memory Agent."""
+    from src.schemas.execution import ExecutionResult
+    from src.schemas.feedback import FeedbackEvent
+    from src.agents.learning_memory_agent import LearningMemoryAgent
+    try:
+        execution = ExecutionResult(**req.execution_result)
+        feedback = FeedbackEvent(**req.feedback)
+        doc = LearningMemoryAgent().process(execution, feedback)
+        return doc.model_dump()
+    except Exception as exc:
+        raise HTTPException(400, f"Learning feedback error: {exc}")
 
 
 @app.get("/api/learning/cases")
 def get_learned_cases():
     """Return all learned cases stored by the Learning & Memory Agent."""
-    from src.tools.lma_case_store import get_all_cases
-    cases = get_all_cases()
-    return {"count": len(cases), "cases": cases}
+    from src.tools.learned_case_repository import JSONLearnedCaseRepository
+    from src.tools.config_loader import load_learning_config
+    try:
+        cfg = load_learning_config()
+        repo = JSONLearnedCaseRepository(cfg.repository_path)
+        rows = repo._rows()
+        return {"count": len(rows), "cases": rows}
+    except Exception:
+        return {"count": 0, "cases": []}
 
 
 @app.get("/api/learning/cases/{case_id}")
 def get_learned_case(case_id: str):
     """Return a single learned case by ID."""
-    from src.tools.lma_case_store import get_case
-    doc = get_case(case_id)
-    if doc is None:
-        raise HTTPException(404, f"Case '{case_id}' not found")
-    return doc
+    from src.tools.learned_case_repository import JSONLearnedCaseRepository
+    from src.tools.config_loader import load_learning_config
+    try:
+        cfg = load_learning_config()
+        repo = JSONLearnedCaseRepository(cfg.repository_path)
+        doc = repo.get(case_id)
+        if doc is None:
+            raise HTTPException(404, f"Case '{case_id}' not found")
+        return doc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
 
 
 @app.get("/api/notifications/counts")
@@ -1016,23 +1051,68 @@ _CANNED = {
 
 @app.post("/api/chat")
 def chat(req: ChatRequest):
-    """Simple persona-aware chat — keyword matching + optional pipeline context."""
-    msg_lower = req.message.lower()
-    for keyword, response in _CANNED.items():
-        if keyword in msg_lower:
-            return {
-                "persona": req.persona,
-                "response": response,
-                "sources": ["Failure Intelligence Agent", "Knowledge Agent"],
-            }
-    return {
-        "persona": req.persona,
-        "response": (
-            f"Processing your query about '{req.message[:60]}'. "
-            "Run /api/pipeline/run with a signal payload for a full agent-backed response."
-        ),
-        "sources": [],
-    }
+    """Persona-aware chat — QueryRouter + pipeline context + ReflexionAgent validation."""
+    run_id = f"CHAT-{uuid.uuid4().hex[:10].upper()}"
+    context = req.context or {}
+    if not req.message or not req.message.strip():
+        raise HTTPException(422, "Chat message must not be empty.")
+    if len(req.message) > _ORCH_CONFIG["chat"]["max_message_characters"]:
+        raise HTTPException(422, "Chat message exceeds the configured length limit.")
+
+    signal = context.get("signal")
+    scenario = context.get("scenario")
+    if scenario and signal is None:
+        try:
+            signal = _get_demo_signal(str(scenario), int(context.get("row_index", -1)))
+        except (KeyError, ValueError, TypeError) as exc:
+            raise HTTPException(404, f"Scenario unavailable: {scenario}") from exc
+
+    plan = plan_query(req.message, signal is not None)
+    state: dict = {"pipeline_log": []}
+
+    if plan.needs_signal and signal is None:
+        draft = {"persona": req.persona,
+                 "response": f"I can answer this {plan.intent} question once telemetry or a named scenario is supplied. No agent decision was fabricated.",
+                 "call_plan": list(plan.agents), "needs_context": True}
+    elif signal is not None:
+        state = run_pipeline(deepcopy(signal), run_id=run_id, intent=plan.pipeline_intent,
+            inventory_lookup=context.get("inventory_lookup"),
+            context_lookup=context.get("operations_context"),
+            approval_status="pending")
+        formatted = format_for_persona(state, req.persona)
+        rec = state.get("recommendation")
+        exec_result = state.get("execution_result")
+        draft = {"persona": req.persona,
+                 "response": formatted.get("headline", "Analysis complete."),
+                 "details": formatted.get("details", []),
+                 "actions": formatted.get("actions", []),
+                 "call_plan": list(plan.agents),
+                 "needs_context": False,
+                 "agent_outputs": {
+                     "recommendation": rec.to_dict() if rec and hasattr(rec, "to_dict") else (rec.model_dump() if rec else None),
+                     "execution_result": exec_result.to_dict() if exec_result and hasattr(exec_result, "to_dict") else None,
+                 }}
+    else:
+        # Canned response fallback
+        msg_lower = req.message.lower()
+        canned_response = next((v for k, v in _CANNED.items() if k in msg_lower), None)
+        if canned_response:
+            draft = {"persona": req.persona, "response": canned_response,
+                     "sources": ["Knowledge Agent"], "call_plan": list(plan.agents), "needs_context": False}
+        else:
+            draft = {"persona": req.persona,
+                     "response": "This is an open-ended reliability question. I can explain the workflow, but an asset-specific decision requires telemetry or a named scenario.",
+                     "call_plan": list(plan.agents), "needs_context": True}
+
+    reflected = _REFLEXION.process(draft, state, plan)
+    result = {**reflected.response, "run_id": run_id, "intent": plan.intent,
+              "reflection_status": reflected.status, "pipeline_log": state.get("pipeline_log", [])}
+    try:
+        result["audit"] = write_audit(_AUDIT_PATH, event="chat", run_id=run_id,
+                                      status="ok", intent=plan.intent, agents=plan.agents)
+    except Exception:
+        result["audit"] = {"status": "audit_write_failed"}
+    return result
 
 
 # ── Work-order endpoints ──────────────────────────────────────────────────────

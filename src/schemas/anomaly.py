@@ -8,7 +8,7 @@ Agent (Phase 4), which classifies the fault from this evidence.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
@@ -47,6 +47,46 @@ class AnomalyEvent(BaseModel):
     evidence:           Dict[str, Any]   = Field(default_factory=dict)
     baseline_ref:       str              = ""    # bearing_id used for baseline lookup
     processed_at:       str              = ""
+    # ************** Added by Prateek Mittal on 17th July 2026 ******************
+    # Provenance fields make the detector decision reproducible and traceable
+    # back to Agent 1 configuration/master data and Agent 2 configuration.
+    schema_version:             str = "2.0"
+    monitoring_config_version: str = ""
+    detector_version:           str = "hotelling_t2+ewma-v1"
+    source_schema_version:      str = ""
+    source_config_version:      str = ""
+    source_master_data_version: str = ""
+    # ***********************
 
     def to_dict(self) -> Dict[str, Any]:
         return self.model_dump()
+
+
+# ************** Added by Prateek Mittal on 17th July 2026 ******************
+# Detailed Agent 2 decision contract. Unlike the compatibility `process()` API,
+# this distinguishes healthy, suppressed, ineligible, insufficient-data, and
+# anomalous outcomes and can be persisted for monitoring audit.
+class MonitoringResult(BaseModel):
+    telemetry_id:              str = ""
+    asset_id:                  str = ""
+    bearing_id:                str = ""
+    timestamp_utc:             str = ""
+    status:                    str = "not_assessed"
+    assessed:                  bool = False
+    suppression_reason:       str = ""
+    anomaly_event:            Optional[AnomalyEvent] = None
+    regime:                   str = ""
+    usable_signals:           List[str] = Field(default_factory=list)
+    excluded_signals:         List[str] = Field(default_factory=list)
+    processed_at:             str = ""
+    schema_version:           str = "1.0"
+    monitoring_config_version: str = ""
+    source_schema_version:    str = ""
+    source_config_version:    str = ""
+    source_master_data_version: str = ""
+    state_recovered:          bool = False
+    persistence_status:       str = "not_requested"
+
+    def to_dict(self) -> Dict[str, Any]:
+        return self.model_dump()
+# ***********************

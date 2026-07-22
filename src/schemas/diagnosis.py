@@ -20,7 +20,8 @@ class FaultDiagnosis(BaseModel):
       case_id               : stable id, carried from the AnomalyEvent
       asset_id / bearing_id : identity, carried from the signal
       fault_mode            : outer_race_fault | inner_race_fault |
-                              lubrication_issue | cage_fault | undetermined
+                              rolling_element_fault | lubrication_issue |
+                              cage_fault | undetermined
       fault_code            : FT_001 | FT_002 | FT_003 | FT_006 | ""
       iso_stage             : 1 | 2 | 3 (0 when undetermined)
       severity              : low | medium | high | critical
@@ -59,6 +60,23 @@ class FaultDiagnosis(BaseModel):
     is_bottleneck:          bool             = False
     typical_causes:         List[str]        = Field(default_factory=list)
     rul_days_estimate:      int              = 0
+
+    # ************** Added by Prateek Mittal on 20th July 2026 ******************
+    # Additive status and provenance fields distinguish a successful diagnosis,
+    # a valid-but-unmatched anomaly, and a rejected upstream handoff. They also
+    # identify the exact Agent 3 policy and taxonomy used for audit/replay.
+    diagnosis_status:       str              = "diagnosed"
+    diagnostic_eligible:    bool             = True
+    status_reason:          str              = ""
+    schema_version:         str              = "1.1"
+    fi_config_version:      str              = ""
+    taxonomy_version:       str              = ""
+    source_schema_version:  str              = ""
+    source_config_version:  str              = ""
+    source_master_data_version: str          = ""
+    source_monitoring_config_version: str    = ""
+    source_detector_version: str             = ""
+    # ***********************
 
     def to_dict(self) -> Dict[str, Any]:
         return self.model_dump()

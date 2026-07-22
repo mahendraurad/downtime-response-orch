@@ -41,6 +41,12 @@
       "Check FTF frequency and look for irregular BSF modulation",
       "Review lubrication history — cage faults are frequently lubrication-driven"
     ],
+    "_comment_FT_007": "Added by Prateek Mittal on 20th July 2026. The roadmap defines BSF as a ball/rolling-element signature; gearbox is asset context, not the diagnosed bearing component.",
+    "FT_007": [
+      "Inspect balls or rollers for pitting, spalling, scoring, or skidding",
+      "Confirm BSF and BSF sidebands track shaft speed and bearing geometry",
+      "Review lubricant condition and check for contamination or overload"
+    ],
     "undetermined": [
       "Schedule manual vibration spectrum review by a reliability engineer",
       "Capture a high-resolution envelope spectrum for offline analysis",

@@ -57,3 +57,36 @@ def save_state(state: Dict[str, Dict[str, float]], path: str) -> None:
         os.makedirs(os.path.dirname(resolved) or ".", exist_ok=True)
         with open(resolved, "w", encoding="utf-8") as fh:
             json.dump(state, fh, indent=2, sort_keys=True)
+
+
+def mutate_state(path: str, fn) -> tuple:
+    """
+    Load state, apply fn(state) atomically, save state back.
+
+    fn receives the full state dict, mutates it in-place, and returns any
+    result value.  mutate_state returns (fn_result, state_recovered) where
+    state_recovered is True when the persisted file was corrupt and had to
+    be reset to an empty dict.
+    """
+    resolved = _resolve(path)
+    with _LOCK:
+        recovered = False
+        state: dict = {}
+        if os.path.exists(resolved):
+            try:
+                with open(resolved, "r", encoding="utf-8") as fh:
+                    state = json.load(fh)
+            except (json.JSONDecodeError, OSError):
+                state = {}
+                recovered = True
+
+        result = fn(state)
+
+        try:
+            os.makedirs(os.path.dirname(resolved) or ".", exist_ok=True)
+            with open(resolved, "w", encoding="utf-8") as fh:
+                json.dump(state, fh, indent=2, sort_keys=True)
+        except OSError:
+            pass
+
+        return result, recovered

@@ -217,7 +217,11 @@ def build_index(chunks: List[Dict] = None) -> None:
 def retrieve(query: str, top_k: int = 3,
              fault_mode: str = "",
              asset_type: str = "",
-             iso_stage: int = 0) -> List[Dict]:
+             iso_stage: int = 0,
+             minimum_score: float = 0.45,
+             fault_mode_boost: float = 0.25,
+             asset_type_boost: float = 0.15,
+             iso_stage_boost: float = 0.10) -> List[Dict]:
     """
     Return top_k SOP passages most similar to query.
     Works identically whether index was built from real docs or synthetic fallback.
@@ -245,16 +249,16 @@ def retrieve(query: str, top_k: int = 3,
     # Metadata boosting — uses _chunks (works for both real and synthetic docs)
     for i, chunk in enumerate(_chunks):
         if fault_mode and chunk.get("fault_mode") == fault_mode:
-            scores[i] += 0.25
+            scores[i] += fault_mode_boost
         if asset_type and chunk.get("asset_type") == asset_type:
-            scores[i] += 0.15
+            scores[i] += asset_type_boost
         if iso_stage and chunk.get("iso_stage") == iso_stage:
-            scores[i] += 0.10
+            scores[i] += iso_stage_boost
 
     top_idx = np.argsort(scores)[::-1][:top_k]
     results = []
     for idx in top_idx:
-        if float(scores[idx]) < 0.45:
+        if float(scores[idx]) < minimum_score:
             break
         chunk = _chunks[int(idx)]
         results.append({
@@ -264,6 +268,18 @@ def retrieve(query: str, top_k: int = 3,
         })
 
     return results
+
+
+def knowledge_index_version() -> str:
+    """Return a stable identifier for the current in-memory knowledge index."""
+    import hashlib
+    import json
+    if not _index_built:
+        build_index()
+    sources = sorted({c.get("source", "") for c in _chunks})
+    payload = json.dumps({"n_chunks": len(_chunks), "sources": sources},
+                         separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()[:16]
 
 
 # Build index eagerly on import so first call is fast

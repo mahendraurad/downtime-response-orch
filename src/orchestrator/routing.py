@@ -73,4 +73,21 @@ def route_after_risk(state: dict) -> str:
 
 def route_after_knowledge(state: dict) -> str:
     """After Knowledge Agent → prescriptive (Phase 7)."""
+    guidance = state.get("knowledge_guidance")
+    if guidance is None or not getattr(guidance, "guidance_eligible", True):
+        return END
     return "prescriptive"
+
+
+def route_after_prescriptive(state: dict) -> str:
+    rec = state.get("recommendation")
+    if rec is None or not getattr(rec, "recommendation_eligible", True):
+        return END
+    return "executor" if (state.get("approval_status") == "approved" or rec.approval_status == "approved") else END
+
+
+def route_after_executor(state: dict) -> str:
+    result = state.get("execution_result")
+    if result is None or result.status not in {"success", "partial"}:
+        return END
+    return "learning" if state.get("feedback_event") is not None else END

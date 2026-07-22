@@ -26,6 +26,9 @@ Pipeline:
 from __future__ import annotations
 
 import logging
+import hashlib
+import json
+from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Dict, Any
 
@@ -48,6 +51,16 @@ from src.tools.validators import (
 )
 from src.tools.enrichment import build_asset_context, build_bearing_context
 from src.tools.config_loader import DFAConfig, load_config
+# ************** Added by Prateek Mittal on 16th July 2026 ******************
+# New deterministic Agent 1 utilities used for normalization, freshness,
+# complete identity validation, and downstream routing.
+from src.tools.data_foundation_utilities import (
+    evaluate_routing,
+    normalize_record,
+    validate_asset_bearing_relationship,
+    validate_timestamp,
+)
+# ***********************
 
 logger = logging.getLogger(__name__)
 
@@ -71,11 +84,26 @@ class DataFoundationAgent:
         bearing_lookup: Dict,
         channel_lookup: Dict,
         cfg:            DFAConfig = None,
+        now_fn=None,
+        # ************** Added by Prateek Mittal on 16th July 2026 ******************
+        # Optional durable repository enables idempotency and ordering checks.
+        repository=None,
+        # ***********************
     ):
         self._assets   = asset_lookup
         self._bearings = bearing_lookup
         self._channels = channel_lookup
         self._cfg      = cfg or load_config()
+        self._now_fn   = now_fn or (lambda: datetime.now(tz=timezone.utc))
+        # ************** Added by Prateek Mittal on 16th July 2026 ******************
+        # Stable fingerprints make every Agent 1 decision reproducible.
+        self._repository = repository
+        self._config_version = self._hash_payload(asdict(self._cfg))
+        self._master_data_version = self._hash_payload({
+            "assets": {key: value.model_dump() for key, value in sorted(self._assets.items())},
+            "bearings": {key: value.model_dump() for key, value in sorted(self._bearings.items())},
+        })
+        # ***********************
 
     # ------------------------------------------------------------------
     # Public interface
@@ -87,7 +115,8 @@ class DataFoundationAgent:
         captured in the returned TrustedBearingSignal.
         """
         cfg          = self._cfg
-        processed_at = datetime.now(tz=timezone.utc).isoformat()
+        now          = self._now_fn()
+        processed_at = now.isoformat()
         validation   = ValidationDetail()
 
         # ── Step 1: Parse ───────────────────────────────────────────────
@@ -96,13 +125,36 @@ class DataFoundationAgent:
                 raw, validation, processed_at,
                 f"Input must be a dict, got {type(raw).__name__}"
             )
+        # ************** Added by Prateek Mittal on 16th July 2026 ******************
+        # Normalize source-specific payloads before enforcing the canonical schema,
+        # then validate timestamp syntax and live-event freshness.
+        source_profile = str(raw.get("data_source", "default")).lower()
+        profile = cfg.source_profiles.get(source_profile, {})
+        aliases = {**cfg.field_aliases, **profile.get("field_aliases", {})}
+        conversions = {**cfg.unit_conversions, **profile.get("unit_conversions", {})}
+        normalized = normalize_record(
+            raw, aliases, conversions,
+            set(BearingSignalFact.model_fields.keys()),
+        )
         try:
-            fact = BearingSignalFact.from_dict(raw)
+            fact = BearingSignalFact.from_dict(normalized.record)
         except (ValueError, TypeError) as e:
             return self._reject(raw, validation, processed_at,
-                                f"Failed to parse record: {e}")
+                                f"Failed to parse record: {e}",
+                                normalization_actions=normalized.actions,
+                                unknown_fields=normalized.unknown_fields)
 
         signal_dict = fact.to_dict()
+
+        freshness = validate_timestamp(
+            fact.timestamp_utc, fact.data_source, now,
+            cfg.require_timestamp_timezone, cfg.max_future_seconds,
+            cfg.max_age_seconds, cfg.live_sources,
+        )
+        validation.freshness_valid = freshness.valid
+        if freshness.reasons:
+            validation.reasons.extend(freshness.reasons)
+        # ***********************
 
         # ── Step 2: Asset mapping  (HARD REJECT) ────────────────────────
         asset_ok, asset_reason = validate_asset_id(fact.asset_id, self._assets)
@@ -119,12 +171,20 @@ class DataFoundationAgent:
             if cfg.log_rejected:
                 logger.info("REJECTED [%s] asset mapping — %s",
                             fact.telemetry_id, asset_reason)
+            decision = evaluate_routing(ValidationStatus.REJECTED.value, cfg.routes)
             return TrustedBearingSignal(
                 raw=fact, validation=validation,
                 data_quality_score=0.0,
                 validation_status=ValidationStatus.REJECTED,
                 quality_report=report,
                 processed_at=processed_at,
+                normalization_actions=normalized.actions,
+                unknown_fields=normalized.unknown_fields,
+                record_age_seconds=freshness.age_seconds,
+                downstream_eligible=decision.downstream_eligible,
+                next_route=decision.route,
+                routing_reason=decision.reason,
+                **self._provenance(source_profile),
             )
 
         # ── Step 3: Bearing + channel mapping  (HARD REJECT) ────────────
@@ -145,16 +205,41 @@ class DataFoundationAgent:
             if cfg.log_rejected:
                 logger.info("REJECTED [%s] bearing mapping — %s",
                             fact.telemetry_id, bearing_reason)
+            decision = evaluate_routing(ValidationStatus.REJECTED.value, cfg.routes)
             return TrustedBearingSignal(
                 raw=fact, validation=validation,
                 data_quality_score=0.0,
                 validation_status=ValidationStatus.REJECTED,
                 quality_report=report,
                 processed_at=processed_at,
+                normalization_actions=normalized.actions,
+                unknown_fields=normalized.unknown_fields,
+                record_age_seconds=freshness.age_seconds,
+                downstream_eligible=decision.downstream_eligible,
+                next_route=decision.route,
+                routing_reason=decision.reason,
+                **self._provenance(source_profile),
             )
 
         asset_record   = self._assets[fact.asset_id]
         bearing_record = self._bearings[fact.bearing_id]
+
+        # ************** Added by Prateek Mittal on 16th July 2026 ******************
+        # Complete the identity chain by verifying that the bearing belongs to
+        # the supplied asset, not merely that bearing and channel agree.
+        relationship_ok, relationship_reason = validate_asset_bearing_relationship(
+            fact.asset_id, bearing_record
+        )
+        if not relationship_ok:
+            validation.bearing_mapping = False
+            validation.reasons.append(relationship_reason)
+            return self._reject(
+                normalized.record, validation, processed_at, relationship_reason,
+                normalization_actions=normalized.actions,
+                unknown_fields=normalized.unknown_fields,
+                record_age_seconds=freshness.age_seconds,
+            )
+        # ***********************
 
         # ── Step 4: Range checks  (Validity / Conformity) ───────────────
         ranges_ok, range_reasons = validate_ranges(signal_dict, cfg, bearing_record)
@@ -204,7 +289,7 @@ class DataFoundationAgent:
             if not any(kw in r for kw in cfg.advisory_reason_keywords)
         ]
 
-        if dq_score >= cfg.flagged_threshold and not substantive_reasons:
+        if dq_score >= cfg.flagged_threshold and not substantive_reasons and freshness.valid:
             status = ValidationStatus.VALID
         else:
             status = ValidationStatus.FLAGGED
@@ -248,6 +333,10 @@ class DataFoundationAgent:
             logger.info("VALID    [%s] %s/%s score=%.3f",
                         fact.telemetry_id, fact.asset_id, fact.bearing_id, dq_score)
 
+        # ************** Added by Prateek Mittal on 16th July 2026 ******************
+        # Emit an explicit, auditable downstream route with normalization,
+        # freshness, and provenance metadata.
+        decision = evaluate_routing(status.value, cfg.routes)
         return TrustedBearingSignal(
             raw                = fact,
             asset_ctx          = asset_ctx,
@@ -257,7 +346,77 @@ class DataFoundationAgent:
             validation_status  = status,
             quality_report     = report,
             processed_at       = processed_at,
+            normalization_actions = normalized.actions,
+            unknown_fields        = normalized.unknown_fields,
+            record_age_seconds    = freshness.age_seconds,
+            downstream_eligible   = decision.downstream_eligible,
+            next_route            = decision.route,
+            routing_reason        = decision.reason,
+            **self._provenance(source_profile),
         )
+        # ***********************
+
+    # ************** Added by Prateek Mittal on 16th July 2026 ******************
+    # Durable ingestion path: validate, reject duplicates, detect late events,
+    # persist the complete decision, and fail safely on repository errors.
+    def process_and_store(self, raw: Dict[str, Any]) -> TrustedBearingSignal:
+        """Validate one record, enforce ingestion idempotency/order, and persist it."""
+        if self._repository is None:
+            raise RuntimeError("process_and_store requires a trusted-signal repository")
+
+        result = self.process(raw)
+        telemetry_id = result.raw.telemetry_id
+        if self._cfg.reject_duplicates and self._repository.exists(telemetry_id):
+            result.duplicate_detected = True
+            result.persistence_status = "duplicate_not_stored"
+            result.downstream_eligible = False
+            result.next_route = "stop"
+            result.routing_reason = "duplicate telemetry_id already persisted"
+            return result
+
+        event_epoch = None
+        try:
+            text = result.raw.timestamp_utc
+            parsed = datetime.fromisoformat(text[:-1] + "+00:00" if text.endswith("Z") else text)
+            if parsed.tzinfo is not None:
+                event_epoch = parsed.timestamp()
+        except (TypeError, ValueError):
+            pass
+
+        latest = self._repository.latest_event_epoch(result.raw.bearing_id)
+        if (self._cfg.flag_out_of_order and event_epoch is not None and latest is not None
+                and event_epoch < latest):
+            result.out_of_order = True
+            result.validation_status = ValidationStatus.FLAGGED
+            result.validation.reasons.append("event timestamp is older than the latest persisted bearing event")
+            decision = evaluate_routing(ValidationStatus.FLAGGED.value, self._cfg.routes)
+            result.downstream_eligible = decision.downstream_eligible
+            result.next_route = decision.route
+            result.routing_reason = decision.reason
+
+        try:
+            result.persistence_status = "stored"
+            self._repository.save(result, event_epoch)
+        except Exception as exc:
+            result.persistence_status = "failed"
+            result.downstream_eligible = False
+            result.next_route = "data_review"
+            result.routing_reason = f"persistence failed: {exc}"
+        return result
+
+    @staticmethod
+    def _hash_payload(payload) -> str:
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()[:16]
+
+    def _provenance(self, source_profile: str) -> Dict[str, str]:
+        return {
+            "schema_version": "1.2",
+            "config_version": self._config_version,
+            "master_data_version": self._master_data_version,
+            "source_profile": source_profile if source_profile in self._cfg.source_profiles else "default",
+        }
+    # ***********************
 
     # ------------------------------------------------------------------
     # Quality report builder
@@ -369,7 +528,9 @@ class DataFoundationAgent:
 
     def _reject(
         self, raw, validation: ValidationDetail,
-        processed_at: str, reason: str
+        processed_at: str, reason: str,
+        normalization_actions=None, unknown_fields=None,
+        record_age_seconds=None,
     ) -> TrustedBearingSignal:
         validation.reasons.append(reason)
         fact = BearingSignalFact(
@@ -396,12 +557,20 @@ class DataFoundationAgent:
                 )
             ],
         )
+        decision = evaluate_routing(ValidationStatus.REJECTED.value, cfg.routes)
         return TrustedBearingSignal(
             raw=fact, validation=validation,
             data_quality_score=0.0,
             validation_status=ValidationStatus.REJECTED,
             quality_report=report,
             processed_at=processed_at,
+            normalization_actions=normalization_actions or [],
+            unknown_fields=unknown_fields or [],
+            record_age_seconds=record_age_seconds,
+            downstream_eligible=decision.downstream_eligible,
+            next_route=decision.route,
+            routing_reason=decision.reason,
+            **self._provenance(str(raw.get("data_source", "default")).lower() if isinstance(raw, dict) else "default"),
         )
 
     # ------------------------------------------------------------------
@@ -411,15 +580,29 @@ class DataFoundationAgent:
     def process_batch(self, raw_records: list) -> list:
         return [self.process(r) for r in raw_records]
 
+    # ************** Added by Prateek Mittal on 16th July 2026 ******************
+    # Batch durable ingestion and repository-aware factories.
+    def process_and_store_batch(self, raw_records: list) -> list:
+        return [self.process_and_store(record) for record in raw_records]
+
     # ------------------------------------------------------------------
     # Factories
     # ------------------------------------------------------------------
 
     @classmethod
-    def from_data_files(cls) -> "DataFoundationAgent":
+    def from_data_files(cls, repository=None) -> "DataFoundationAgent":
         """Load lookups and config from standard file locations."""
         from src.tools.data_loader import load_asset_master, load_bearing_master
         asset_lookup             = load_asset_master()
         bearing_lookup, channel_lookup = load_bearing_master()
         cfg                      = load_config()
-        return cls(asset_lookup, bearing_lookup, channel_lookup, cfg)
+        return cls(asset_lookup, bearing_lookup, channel_lookup, cfg, repository=repository)
+
+    @classmethod
+    def with_sqlite_repository(cls, path: str = None) -> "DataFoundationAgent":
+        """Factory for durable local ingestion with duplicate/order checks."""
+        from src.tools.trusted_signal_repository import SQLiteTrustedSignalRepository
+        cfg = load_config()
+        repository = SQLiteTrustedSignalRepository(path or cfg.repository_sqlite_path)
+        return cls.from_data_files(repository=repository)
+    # ***********************

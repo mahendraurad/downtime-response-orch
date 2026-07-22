@@ -1,0 +1,5 @@
+{
+  "reflection": {"enabled": true, "llm_enabled": false, "max_response_characters": 4000},
+  "chat": {"max_message_characters": 2000, "default_persona": "supervisor"},
+  "audit": {"jsonl_path": "logs/orchestrator_audit.jsonl", "include_payloads": false}
+}

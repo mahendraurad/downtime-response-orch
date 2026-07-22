@@ -44,13 +44,16 @@ Pipeline:
 from __future__ import annotations
 
 import logging
+import hashlib
+import json
+from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Optional, List
 
 import numpy as np
 
 from src.schemas.bearing_signal import TrustedBearingSignal
-from src.schemas.anomaly import AnomalyEvent
+from src.schemas.anomaly import AnomalyEvent, MonitoringResult
 from src.tools.baseline_features import (
     build_correlation_matrix,
     build_covariance_matrix,
@@ -67,7 +70,7 @@ from src.tools.baseline_features import (
     build_anomaly_reason,
 )
 from src.tools.config_loader import MonitoringConfig, load_monitoring_config
-from src.tools.ewma_store import load_state as load_ewma_state, save_state as save_ewma_state
+from src.tools.ewma_store import mutate_state
 
 logger = logging.getLogger(__name__)
 
@@ -75,16 +78,111 @@ logger = logging.getLogger(__name__)
 class MonitoringAgent:
     """Stateless agent. Config injected at construction."""
 
-    def __init__(self, cfg: MonitoringConfig = None):
+    def __init__(self, cfg: MonitoringConfig = None, decision_repository=None, now_fn=None):
         self._cfg = cfg or load_monitoring_config()
+        # ************** Added by Prateek Mittal on 17th July 2026 ******************
+        # Agent 2 provenance, auditable decision persistence, and deterministic clock.
+        self._decision_repository = decision_repository
+        self._now_fn = now_fn or (lambda: datetime.now(tz=timezone.utc))
+        encoded = json.dumps(asdict(self._cfg), sort_keys=True, default=str).encode("utf-8")
+        self._config_version = hashlib.sha256(encoded).hexdigest()[:16]
+        # ***********************
 
     @classmethod
     def from_config(cls) -> "MonitoringAgent":
         return cls(load_monitoring_config())
 
+    # ************** Added by Prateek Mittal on 17th July 2026 ******************
+    # Convenience factory for auditable local/pilot monitoring decisions.
+    @classmethod
+    def with_sqlite_repository(cls, path: str = None) -> "MonitoringAgent":
+        from src.tools.monitoring_decision_repository import SQLiteMonitoringDecisionRepository
+        cfg = load_monitoring_config()
+        repository = SQLiteMonitoringDecisionRepository(path or cfg.decision_repository_path)
+        return cls(cfg, decision_repository=repository)
+    # ***********************
+
     # ------------------------------------------------------------------
 
+    # ************** Added by Prateek Mittal on 17th July 2026 ******************
+    # Detailed assessment API. It preserves every non-anomaly outcome instead
+    # of collapsing healthy, suppressed, and unassessable inputs into `None`.
+    def assess(self, trusted: TrustedBearingSignal) -> MonitoringResult:
+        raw = trusted.raw
+        now = self._now_fn().isoformat()
+        base = dict(
+            telemetry_id=raw.telemetry_id, asset_id=raw.asset_id,
+            bearing_id=raw.bearing_id, timestamp_utc=raw.timestamp_utc,
+            processed_at=now, monitoring_config_version=self._config_version,
+            source_schema_version=getattr(trusted, "schema_version", ""),
+            source_config_version=getattr(trusted, "config_version", ""),
+            source_master_data_version=getattr(trusted, "master_data_version", ""),
+        )
+
+        # Duplicate and late-event identities are more specific than the
+        # general Agent 1 ineligible route and are reported first.
+        if getattr(trusted, "duplicate_detected", False):
+            return MonitoringResult(status="duplicate", suppression_reason="duplicate event cannot update monitoring state", **base)
+        if getattr(trusted, "out_of_order", False):
+            return MonitoringResult(status="out_of_order", suppression_reason="late event cannot update monitoring state", **base)
+        if not getattr(trusted, "downstream_eligible", False):
+            return MonitoringResult(status="ineligible", suppression_reason=(
+                getattr(trusted, "routing_reason", "") or "Agent 1 marked input ineligible"
+            ), **base)
+        if raw.startup_shutdown_flag:
+            return MonitoringResult(status="suppressed", suppression_reason="startup_shutdown", **base)
+        if trusted.bearing_ctx is None:
+            return MonitoringResult(status="insufficient_data", suppression_reason="missing_bearing_context", **base)
+
+        rated_rpm = trusted.asset_ctx.rated_rpm if trusted.asset_ctx else None
+        regime = classify_regime(raw.rpm, raw.load_pct, raw.machine_state, rated_rpm, self._cfg)
+        if not regime["running"]:
+            return MonitoringResult(status="suppressed", suppression_reason="non_running_regime", regime=regime["label"], **base)
+
+        imputed = set(trusted.imputed_fields) if self._cfg.exclude_imputed_fields else set()
+        usable, excluded = [], []
+        for field in self._cfg.signal_order:
+            attrs = self._cfg.signal_baselines.get(field, {})
+            value = getattr(raw, field, None)
+            mean = getattr(trusted.bearing_ctx, attrs.get("mean", ""), None)
+            std = getattr(trusted.bearing_ctx, attrs.get("std", ""), None)
+            if field in imputed:
+                excluded.append(field)
+            elif value is not None and mean is not None and std not in (None, 0):
+                usable.append(field)
+        if len(usable) < self._cfg.min_signals_for_t2:
+            return MonitoringResult(
+                status="insufficient_data", suppression_reason="insufficient_usable_signals",
+                regime=regime["label"], usable_signals=usable,
+                excluded_signals=excluded, **base,
+            )
+
+        event, state_recovered, detector_status = self._detect(trusted)
+        status = detector_status
+        return MonitoringResult(
+            status=status, assessed=True, anomaly_event=event,
+            regime=regime["label"], usable_signals=usable,
+            excluded_signals=excluded, state_recovered=state_recovered, **base,
+        )
+
+    def assess_and_store(self, trusted: TrustedBearingSignal) -> MonitoringResult:
+        if self._decision_repository is None:
+            raise RuntimeError("assess_and_store requires a monitoring decision repository")
+        result = self.assess(trusted)
+        try:
+            result.persistence_status = "stored"
+            self._decision_repository.save(result)
+        except Exception as exc:
+            result.persistence_status = "failed"
+            result.suppression_reason = f"decision persistence failed: {exc}"
+        return result
+
     def process(self, trusted: TrustedBearingSignal) -> Optional[AnomalyEvent]:
+        """Compatibility API: return only an emitted anomaly event."""
+        return self.assess(trusted).anomaly_event
+    # ***********************
+
+    def _detect(self, trusted: TrustedBearingSignal) -> tuple[Optional[AnomalyEvent], bool, str]:
         """Assess one trusted signal. Returns an AnomalyEvent or None."""
         cfg  = self._cfg
         raw  = trusted.raw
@@ -92,10 +190,10 @@ class MonitoringAgent:
 
         # ── Step 1: startup/shutdown suppression ────────────────────────
         if raw.startup_shutdown_flag:
-            return None
+            return None, False, "suppressed"
 
         if bctx is None:
-            return None
+            return None, False, "insufficient_data"
 
         # ── Step 2: regime ──────────────────────────────────────────────
         rated_rpm = trusted.asset_ctx.rated_rpm if trusted.asset_ctx else None
@@ -103,7 +201,7 @@ class MonitoringAgent:
             raw.rpm, raw.load_pct, raw.machine_state, rated_rpm, cfg
         )
         if not regime["running"]:
-            return None
+            return None, False, "suppressed"
 
         # ── Step 3: collect usable signals ──────────────────────────────
         imputed      = set(trusted.imputed_fields) if cfg.exclude_imputed_fields else set()
@@ -134,17 +232,22 @@ class MonitoringAgent:
 
         p = len(avail_names)
         if p < cfg.min_signals_for_t2:
-            return None
+            return None, False, "insufficient_data"
 
         # ── Step 4: build covariance sub-matrix and invert ──────────────
         full_corr = build_correlation_matrix(bctx)
         corr_sub  = full_corr[np.ix_(avail_idx, avail_idx)]
         cov_sub   = build_covariance_matrix(std_vals, corr_sub)
 
+        # ************** Added by Prateek Mittal on 17th July 2026 ******************
+        # Preserve whether diagonal fallback was used; checking `cov_inv is None`
+        # after replacement previously made the evidence always report false.
         cov_inv = invert_covariance(cov_sub)
+        cov_inv_fallback = cov_inv is None
         if cov_inv is None:
             # Singular matrix — fall back to diagonal (independent z-scores)
             cov_inv = diagonal_inverse(std_vals)
+        # ***********************
 
         # ── Step 5: T² and anomaly score ────────────────────────────────
         x  = np.array(x_vals)
@@ -182,39 +285,45 @@ class MonitoringAgent:
         ewma_score      = 0.0
         ewma_triggered  = []
         ewma_per_signal = {}
+        state_recovered = False
 
         if cfg.ewma_enabled and cfg.ewma_signals:
-            state         = load_ewma_state(cfg.ewma_state_file)
-            bearing_state = state.setdefault(raw.bearing_id, {})
-            imputed_set   = set(trusted.imputed_fields) if cfg.ewma_exclude_imputed else set()
+            # ************** Added by Prateek Mittal on 17th July 2026 ******************
+            # One atomic mutation isolates EWMA state by configuration/baseline,
+            # bearing, and operating regime and reports corrupt-state recovery.
+            state_version = (
+                f"{cfg.state_namespace_version}:{self._config_version}:"
+                f"{getattr(trusted, 'master_data_version', '')}"
+            )
+            imputed_set = set(trusted.imputed_fields) if cfg.ewma_exclude_imputed else set()
 
-            for field in cfg.ewma_signals:
-                value = getattr(raw, field, None)
-                attrs = cfg.signal_baselines.get(field, {})
-                mean  = getattr(bctx, attrs.get("mean", ""), None)
-                std   = getattr(bctx, attrs.get("std",  ""), None)
+            def update_state(state):
+                namespace = state.setdefault("namespaces", {}).setdefault(state_version, {})
+                bearing_state = namespace.setdefault(raw.bearing_id, {}).setdefault(regime["label"], {})
+                details, triggered_fields = {}, []
+                for field in cfg.ewma_signals:
+                    value = getattr(raw, field, None)
+                    attrs = cfg.signal_baselines.get(field, {})
+                    mean = getattr(bctx, attrs.get("mean", ""), None)
+                    std = getattr(bctx, attrs.get("std", ""), None)
+                    if value is None or mean is None or std in (None, 0) or field in imputed_set:
+                        continue
+                    prev = bearing_state.get(field, mean)
+                    new_ewma = update_ewma(prev, value, cfg.ewma_alpha)
+                    z = ewma_z(new_ewma, mean, std, cfg.ewma_alpha)
+                    bearing_state[field] = new_ewma
+                    details[field] = {
+                        "value": value, "ewma": round(new_ewma, 4),
+                        "mean": mean, "std": std, "z": round(z, 4),
+                    }
+                    if abs(z) >= cfg.ewma_control_limit:
+                        triggered_fields.append(field)
+                return details, triggered_fields
 
-                if value is None or mean is None or std is None or std == 0:
-                    continue
-                if field in imputed_set:
-                    continue
-
-                prev      = bearing_state.get(field, mean)  # cold-start at baseline mean
-                new_ewma  = update_ewma(prev, value, cfg.ewma_alpha)
-                z         = ewma_z(new_ewma, mean, std, cfg.ewma_alpha)
-                bearing_state[field] = new_ewma
-
-                ewma_per_signal[field] = {
-                    "value": value,
-                    "ewma":  round(new_ewma, 4),
-                    "mean":  mean,
-                    "std":   std,
-                    "z":     round(z, 4),
-                }
-                if abs(z) >= cfg.ewma_control_limit:
-                    ewma_triggered.append(field)
-
-            save_ewma_state(state, cfg.ewma_state_file)
+            (ewma_per_signal, ewma_triggered), state_recovered = mutate_state(
+                cfg.ewma_state_file, update_state
+            )
+            # ***********************
 
             if ewma_triggered:
                 ewma_fired = True
@@ -223,17 +332,31 @@ class MonitoringAgent:
                     max_abs_z, cfg.ewma_control_limit, cfg.anomaly_threshold
                 )
 
-        processed_at = datetime.now(tz=timezone.utc).isoformat()
+        processed_at = self._now_fn().isoformat()
 
         # ── Step 8: verdict (T² OR EWMA can fire) ───────────────────────
         t2_fired = anomaly_score >= cfg.anomaly_threshold
 
         if not t2_fired and not ewma_fired:
+            _, _, alert_recovered = self._apply_alert_policy(
+                trusted, regime["label"], raw_anomaly=False
+            )
+            state_recovered = state_recovered or alert_recovered
             if cfg.log_healthy:
                 logger.info("HEALTHY [%s] %s/%s T²=%.2f score=%.3f",
                             raw.telemetry_id, raw.asset_id, raw.bearing_id,
                             t2, anomaly_score)
-            return None
+            return None, state_recovered, "healthy"
+
+        # ************** Added by Prateek Mittal on 17th July 2026 ******************
+        # Apply configurable persistence/debounce policy after detector firing.
+        alert_allowed, alert_status, alert_recovered = self._apply_alert_policy(
+            trusted, regime["label"], raw_anomaly=True
+        )
+        state_recovered = state_recovered or alert_recovered
+        if not alert_allowed:
+            return None, state_recovered, alert_status
+        # ***********************
 
         triggered_methods = []
         if t2_fired:   triggered_methods.append("hotelling_t2")
@@ -276,7 +399,8 @@ class MonitoringAgent:
                 "excluded_imputed":   excluded,
                 "data_quality_score": trusted.data_quality_score,
                 "validation_status":  trusted.validation_status.value,
-                "cov_inv_fallback":   cov_inv is None,
+                "cov_inv_fallback":   cov_inv_fallback,
+                "state_recovered":    state_recovered,
                 "ewma": {
                     "fired":              ewma_fired,
                     "score":              round(ewma_score, 4),
@@ -288,6 +412,13 @@ class MonitoringAgent:
             },
             baseline_ref = raw.bearing_id,
             processed_at = processed_at,
+            # ************** Added by Prateek Mittal on 17th July 2026 ******************
+            # Link every anomaly to the effective detector and Agent 1 provenance.
+            monitoring_config_version = self._config_version,
+            source_schema_version      = getattr(trusted, "schema_version", ""),
+            source_config_version      = getattr(trusted, "config_version", ""),
+            source_master_data_version = getattr(trusted, "master_data_version", ""),
+            # ***********************
         )
 
         if cfg.log_anomalies:
@@ -297,7 +428,40 @@ class MonitoringAgent:
                 triggered_methods, t2, anomaly_score, ewma_score,
                 confidence, combined_triggered,
             )
-        return event
+        return event, state_recovered, "anomaly"
+
+    # ************** Added by Prateek Mittal on 17th July 2026 ******************
+    # Lightweight alert lifecycle policy. Detector evidence remains untouched;
+    # emission may wait for persistence or cooldown to avoid repeated alerts.
+    def _apply_alert_policy(self, trusted, regime_label: str, raw_anomaly: bool):
+        cfg = self._cfg
+        now_epoch = self._now_fn().timestamp()
+        state_version = (
+            f"{cfg.state_namespace_version}:{self._config_version}:"
+            f"{getattr(trusted, 'master_data_version', '')}"
+        )
+
+        def update(state):
+            alerts = state.setdefault("alert_policy", {}).setdefault(state_version, {})
+            slot = alerts.setdefault(trusted.raw.bearing_id, {}).setdefault(
+                regime_label, {"consecutive": 0, "last_emitted_epoch": None}
+            )
+            if not raw_anomaly:
+                slot["consecutive"] = 0
+                return True, "healthy"
+            slot["consecutive"] = int(slot.get("consecutive", 0)) + 1
+            if slot["consecutive"] < cfg.min_consecutive_anomalies:
+                return False, "pending_alert"
+            last = slot.get("last_emitted_epoch")
+            if last is not None and now_epoch - float(last) < cfg.alert_cooldown_seconds:
+                return False, "cooldown"
+            slot["last_emitted_epoch"] = now_epoch
+            slot["consecutive"] = 0
+            return True, "anomaly"
+
+        (allowed, status), recovered = mutate_state(cfg.ewma_state_file, update)
+        return allowed, status, recovered
+    # ***********************
 
     # ------------------------------------------------------------------
 

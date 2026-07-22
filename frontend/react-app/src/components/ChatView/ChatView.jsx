@@ -698,38 +698,33 @@ function HITLKnowledgeMsg({ msg, doThink, appendA, persona }) {
 }
 
 function buildLearningHtml(lr) {
-  const pathColor  = { A: '#10b981', B: '#3b82f6', C: '#f59e0b' }[lr.path] || '#6b7280';
-  const pathLabel  = { A: 'EXISTING KNOWLEDGE RETRIEVED', B: 'NEW CASE GENERATED & STORED', C: 'PARTIAL MATCH — GAPS FLAGGED' }[lr.path] || `PATH ${lr.path}`;
-  const dimColors  = { COMPLETE: '#10b981', PARTIAL: '#f59e0b', MISSING: '#ef4444' };
+  const statusColors = { learned: '#10b981', duplicate: '#3b82f6', invalid_input: '#ef4444', persistence_failed: '#f59e0b' };
+  const statusLabels = { learned: 'CASE LEARNED & STORED', duplicate: 'DUPLICATE — ALREADY KNOWN', invalid_input: 'INVALID INPUT — NOT STORED', persistence_failed: 'STORAGE ERROR' };
+  const color = statusColors[lr.learning_status] || '#6b7280';
+  const label = statusLabels[lr.learning_status] || lr.learning_status?.toUpperCase() || 'UNKNOWN';
 
-  let dimHtml = '';
-  if (lr.dimensions) {
-    dimHtml = Object.entries(lr.dimensions).map(([k, v]) => {
-      const c = dimColors[v] || '#6b7280';
-      return `<span style="display:inline-flex;align-items:center;gap:3px;font-size:10px;margin:2px 4px 2px 0">`
-        + `<span style="width:6px;height:6px;border-radius:50%;background:${c};flex-shrink:0"></span>`
-        + `<span style="color:var(--t3)">${k.replace(/_/g, ' ')}</span>`
-        + `<span style="color:${c};font-weight:700">${v}</span></span>`;
-    }).join('');
+  let tagsHtml = '';
+  if (lr.tags && lr.tags.length) {
+    tagsHtml = `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px">`
+      + lr.tags.map(t => `<span style="font-size:10px;padding:2px 7px;border-radius:3px;background:rgba(59,130,246,0.12);color:var(--t2)">${t.replace(/_/g, ' ')}</span>`).join('')
+      + `</div>`;
   }
 
-  let metaHtml = `<div style="font-size:12px;color:var(--t2);line-height:2;margin-bottom:8px">`
-    + `Path: <strong style="color:${pathColor}">PATH ${lr.path}</strong>`
-    + (lr.similarity_score > 0 ? ` &nbsp;|&nbsp; Similarity: <strong style="font-family:var(--m)">${lr.similarity_score}</strong>` : '')
-    + `<br/>`;
-  if (lr.matched_case_id) {
-    metaHtml += `Matched case: <strong style="font-family:var(--m);color:var(--t)">${lr.matched_case_id}</strong><br/>`;
-  }
-  if (lr.case_id) {
-    metaHtml += `Case stored: <strong style="font-family:var(--m);color:${pathColor}">${lr.case_id}</strong><br/>`;
-  }
+  let metaHtml = `<div style="font-size:12px;color:var(--t2);line-height:2;margin-bottom:8px">`;
+  if (lr.case_id) metaHtml += `Case ID: <strong style="font-family:var(--m);color:${color}">${lr.case_id}</strong><br/>`;
+  if (lr.fault_mode) metaHtml += `Fault mode: <strong>${lr.fault_mode}</strong><br/>`;
+  if (lr.outcome) metaHtml += `Outcome: <strong>${lr.outcome}</strong><br/>`;
+  if (lr.persistence_status && lr.persistence_status !== 'not_requested') metaHtml += `Persistence: <strong>${lr.persistence_status}</strong><br/>`;
+  if (lr.status_reason) metaHtml += `<span style="color:#6b7280;font-size:11px">${lr.status_reason}</span><br/>`;
   metaHtml += `</div>`;
 
-  return `<div style="border:1.5px solid ${pathColor};border-radius:10px;padding:14px;background:rgba(59,130,246,0.03);margin-top:2px">`
-    + `<div style="font-size:9px;font-weight:700;color:${pathColor};font-family:var(--m);margin-bottom:10px">PHASE 10 · LEARNING & MEMORY AGENT · ${pathLabel}</div>`
+  const bodyText = lr.content || '';
+
+  return `<div style="border:1.5px solid ${color};border-radius:10px;padding:14px;background:rgba(59,130,246,0.03);margin-top:2px">`
+    + `<div style="font-size:9px;font-weight:700;color:${color};font-family:var(--m);margin-bottom:10px">PHASE 10 · LEARNING & MEMORY AGENT · ${label}</div>`
     + metaHtml
-    + (dimHtml ? `<div style="margin-bottom:10px;line-height:1.8">${dimHtml}</div>` : '')
-    + `<div style="font-size:11px;color:var(--t2);background:rgba(59,130,246,0.06);padding:9px 11px;border-radius:6px;border-left:2px solid ${pathColor};line-height:1.6">${lr.summary}</div>`
+    + tagsHtml
+    + (bodyText ? `<div style="font-size:11px;color:var(--t2);background:rgba(59,130,246,0.06);padding:9px 11px;border-radius:6px;border-left:2px solid ${color};line-height:1.6">${bodyText}</div>` : '')
     + `</div>`;
 }
 
@@ -764,9 +759,6 @@ function HITLExecutorMsg({ msg, doThink, appendA }) {
         }
         html += '</div>';
         appendA(html, ['executor · result']);
-        if (approved && data.learning) {
-          appendA(buildLearningHtml(data.learning), ['phase 10 · learning & memory agent']);
-        }
       } catch (err) { appendA('Executor call failed: ' + err.message, []); }
     });
   }

@@ -28,6 +28,8 @@ from src.orchestrator.routing import (
     route_after_diagnosis,
     route_after_risk,
     route_after_knowledge,
+    route_after_prescriptive,
+    route_after_executor,
 )
 
 logger = logging.getLogger(__name__)
@@ -64,11 +66,7 @@ def _build_agents():
     )
 
     ka = KnowledgeAgent()
-
-    from src.agents.prescriptive_optimization_agent import PrescriptiveOptimizationAgent
-    poa = PrescriptiveOptimizationAgent()
-
-    return dfa, mon, fia, pra, ka, poa
+    return dfa, mon, fia, pra, ka
 
 
 def _load_taxonomy():
@@ -78,6 +76,7 @@ def _load_taxonomy():
 
 # Lazy initialisation — agents built on first graph invocation
 _agents = None
+_action_agents = None
 
 
 def _get_agents():
@@ -85,6 +84,18 @@ def _get_agents():
     if _agents is None:
         _agents = _build_agents()
     return _agents
+
+
+# ************** Added by Prateek Mittal on 20th July 2026 ******************
+def _get_action_agents():
+    global _action_agents
+    if _action_agents is None:
+        from src.agents.prescriptive_optimization_agent import PrescriptiveOptimizationAgent
+        from src.agents.executor_agent import ExecutorAgent
+        from src.agents.learning_memory_agent import LearningMemoryAgent
+        _action_agents = (PrescriptiveOptimizationAgent(), ExecutorAgent(), LearningMemoryAgent())
+    return _action_agents
+# ***********************
 
 
 # ── Node functions ────────────────────────────────────────────────────────────
@@ -152,11 +163,12 @@ def node_predictive_risk(state: DROGraphState) -> DROGraphState:
 
 
 def node_knowledge(state: DROGraphState) -> DROGraphState:
-    *_, ka, _ = _get_agents()
+    *_, ka = _get_agents()
     log = list(state.get("pipeline_log") or [])
     try:
         guidance, ms = _timed(
-            ka.process, state["fault_diagnosis"], state["trusted_signal"]
+            ka.process, state["fault_diagnosis"], state["trusted_signal"],
+            state.get("risk_assessment")
         )
         log.append({"node": "knowledge", "status": "ok", "latency_ms": ms})
         return {**state, "knowledge_guidance": guidance, "pipeline_log": log}
@@ -166,23 +178,36 @@ def node_knowledge(state: DROGraphState) -> DROGraphState:
         return {**state, "error": str(exc), "pipeline_log": log}
 
 
-def node_prescriptive(state: DROGraphState) -> DROGraphState:
-    *_, poa = _get_agents()
+# ************** Added by Prateek Mittal on 20th July 2026 ******************
+def node_prescriptive(state):
+    agent, _, _ = _get_action_agents()
     log = list(state.get("pipeline_log") or [])
     try:
-        rec, ms = _timed(
-            poa.process,
-            state["risk_assessment"],
-            state["fault_diagnosis"],
-            state["knowledge_guidance"],
-        )
-        log.append({"node": "prescriptive", "status": "ok", "latency_ms": ms,
-                    "recommendation_status": rec.recommendation_status})
-        return {**state, "recommendation": rec, "pipeline_log": log}
+        result, ms = _timed(agent.process, state["risk_assessment"], state["fault_diagnosis"],
+            state["knowledge_guidance"], state.get("inventory_lookup") or {}, state.get("context_lookup") or {})
+        log.append({"node": "prescriptive", "status": "ok", "latency_ms": ms})
+        return {**state, "recommendation": result, "pipeline_log": log}
     except Exception as exc:
         logger.error("prescriptive failed: %s", exc)
         log.append({"node": "prescriptive", "status": "error", "latency_ms": 0})
         return {**state, "error": str(exc), "pipeline_log": log}
+
+
+def node_executor(state):
+    _, agent, _ = _get_action_agents()
+    log = list(state.get("pipeline_log") or [])
+    result, ms = _timed(agent.process, state["recommendation"], state.get("approval_status") == "approved")
+    log.append({"node": "executor", "status": result.status, "latency_ms": ms})
+    return {**state, "execution_result": result, "pipeline_log": log}
+
+
+def node_learning(state):
+    _, _, agent = _get_action_agents()
+    log = list(state.get("pipeline_log") or [])
+    result, ms = _timed(agent.process, state["execution_result"], state.get("feedback_event"))
+    log.append({"node": "learning", "status": getattr(result, "learning_status", "unknown"), "latency_ms": ms})
+    return {**state, "learned_case": result, "pipeline_log": log}
+# ***********************
 
 
 # ── Build and compile graph ───────────────────────────────────────────────────
@@ -196,6 +221,8 @@ def _build_graph():
     g.add_node("predictive_risk",      node_predictive_risk)
     g.add_node("knowledge",            node_knowledge)
     g.add_node("prescriptive",         node_prescriptive)
+    g.add_node("executor",             node_executor)
+    g.add_node("learning",             node_learning)
 
     g.set_entry_point("data_foundation")
 
@@ -219,7 +246,9 @@ def _build_graph():
         "knowledge", route_after_knowledge,
         {"prescriptive": "prescriptive", END: END},
     )
-    g.add_edge("prescriptive", END)
+    g.add_conditional_edges("prescriptive", route_after_prescriptive, {"executor": "executor", END: END})
+    g.add_conditional_edges("executor", route_after_executor, {"learning": "learning", END: END})
+    g.add_edge("learning", END)
 
     return g.compile()
 
@@ -237,7 +266,8 @@ def run_from_trusted_signal(trusted_signal, intent: str = "full",
     """
     import uuid
     rid = run_id or str(uuid.uuid4())[:8]
-    _, mon, fia, pra, ka, poa = _get_agents()
+    _, mon, fia, pra, ka = _get_agents()
+    poa, _, _ = _get_action_agents()
 
     log: list = [{"node": "data_foundation", "status": "ok (remediated)", "latency_ms": 0}]
     state: DROGraphState = {
@@ -286,7 +316,7 @@ def run_from_trusted_signal(trusted_signal, intent: str = "full",
         return state
 
     try:
-        guidance, ms = _timed(ka.process, diag, trusted_signal)
+        guidance, ms = _timed(ka.process, diag, trusted_signal, risk)
         log.append({"node": "knowledge", "status": "ok", "latency_ms": ms})
         state["knowledge_guidance"] = guidance
     except Exception as exc:
@@ -315,7 +345,8 @@ def run_from_anomaly_event(anomaly_event, trusted_signal, intent: str = "full",
     """
     import uuid as _uuid
     rid = run_id or str(_uuid.uuid4())[:8]
-    _, _, fia, pra, ka, poa = _get_agents()
+    _, _, fia, pra, ka = _get_agents()
+    poa, _, _ = _get_action_agents()
 
     log: list = [
         {"node": "data_foundation", "status": "ok (resumed)", "latency_ms": 0},
@@ -355,7 +386,7 @@ def run_from_anomaly_event(anomaly_event, trusted_signal, intent: str = "full",
         return state
 
     try:
-        guidance, ms = _timed(ka.process, diag, trusted_signal)
+        guidance, ms = _timed(ka.process, diag, trusted_signal, risk)
         log.append({"node": "knowledge", "status": "ok", "latency_ms": ms})
         state["knowledge_guidance"] = guidance
     except Exception as exc:
@@ -384,7 +415,8 @@ def run_from_diagnosis(diagnosis, anomaly_event, trusted_signal,
     """
     import uuid as _uuid
     rid = run_id or str(_uuid.uuid4())[:8]
-    _, _, _, pra, ka, poa = _get_agents()
+    _, _, _, pra, ka = _get_agents()
+    poa, _, _ = _get_action_agents()
 
     log: list = [
         {"node": "data_foundation", "status": "ok (resumed)", "latency_ms": 0},
@@ -416,7 +448,7 @@ def run_from_diagnosis(diagnosis, anomaly_event, trusted_signal,
         return state
 
     try:
-        guidance, ms = _timed(ka.process, diagnosis, trusted_signal)
+        guidance, ms = _timed(ka.process, diagnosis, trusted_signal, risk)
         log.append({"node": "knowledge", "status": "ok", "latency_ms": ms})
         state["knowledge_guidance"] = guidance
     except Exception as exc:
@@ -438,7 +470,9 @@ def run_from_diagnosis(diagnosis, anomaly_event, trusted_signal,
 
 
 def run_pipeline(raw_signal: Dict[str, Any], run_id: str = "",
-                 intent: str = "full") -> DROGraphState:
+                 intent: str = "full", inventory_lookup: dict = None,
+                 context_lookup: dict = None, approval_status: str = "pending",
+                 feedback_event=None) -> DROGraphState:
     """
     Run the DRO pipeline for a single signal reading.
 
@@ -447,7 +481,7 @@ def run_pipeline(raw_signal: Dict[str, Any], run_id: str = "",
       anomaly   → stop after Monitoring (anomaly yes/no)
       diagnosis → stop after Failure Intelligence (fault identified)
       risk      → stop after Predictive Risk (RUL / risk level)
-      full      → run all agents through Prescriptive Optimisation (default)
+      full      → run all agents through Knowledge (default)
     """
     import uuid
     rid = run_id or str(uuid.uuid4())[:8]
@@ -456,6 +490,10 @@ def run_pipeline(raw_signal: Dict[str, Any], run_id: str = "",
         "case_id": rid,
         "intent": intent,
         "raw_signal": raw_signal,
+        "inventory_lookup": inventory_lookup or {},
+        "context_lookup": context_lookup or {},
+        "approval_status": approval_status,
+        "feedback_event": feedback_event,
         "pipeline_log": [],
     }
     final_state = _graph.invoke(initial)

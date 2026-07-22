@@ -20,3 +20,16 @@ class ExecutionResult(BaseModel):
     notification_status: str                 = ""   # sent | skipped | failed
     audit_reference:    str                  = ""
     executed_at:        str                  = ""
+    # ************** Added by Prateek Mittal on 20th July 2026 ******************
+    execution_eligible: bool                 = True
+    duplicate_detected: bool                 = False
+    persistence_status: str                  = "not_requested"
+    schema_version:     str                  = "1.1"
+    executor_config_version: str             = ""
+    source_recommendation_schema_version: str = ""
+    source_prescriptive_config_version: str  = ""
+    linked_recommendation_case_id: str       = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        return self.model_dump()
+    # ***********************

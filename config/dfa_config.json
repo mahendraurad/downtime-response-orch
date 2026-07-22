@@ -29,6 +29,51 @@
     "stopped_max_vib_mm_s":  1.0
   },
 
+  "_comment_prateek_added_start": "************** Added by Prateek Mittal on 16th July 2026 ****************** - Agent 1 freshness, normalization, routing, source profiles, and repository policies.",
+
+  "freshness": {
+    "require_timezone": true,
+    "max_future_seconds": 30,
+    "max_age_seconds": 300,
+    "live_sources": ["live", "stream", "event_hub"]
+  },
+
+  "normalization": {
+    "field_aliases": {
+      "vibration_rms": "vib_rms_mm_s",
+      "temperature_c": "temp_c",
+      "speed_rpm": "rpm"
+    },
+    "unit_conversions": {
+      "temperature_f": {"target": "temp_c", "multiply": 0.5555555556, "add": -17.77777778},
+      "speed_rps": {"target": "rpm", "multiply": 60.0, "add": 0.0}
+    },
+    "source_profiles": {
+      "opcua": {
+        "field_aliases": {"MotorSpeed": "rpm", "BearingTemp": "temp_c", "VibrationRMS": "vib_rms_mm_s"},
+        "unit_conversions": {}
+      },
+      "event_hub": {
+        "field_aliases": {"assetId": "asset_id", "bearingId": "bearing_id", "channelId": "channel_id", "eventTime": "timestamp_utc"},
+        "unit_conversions": {}
+      }
+    }
+  },
+
+  "repository": {
+    "sqlite_path": "data/trusted_signals.db",
+    "reject_duplicates": true,
+    "flag_out_of_order": true
+  },
+
+  "_comment_prateek_added_end": "***********************",
+
+  "routing": {
+    "VALID": "monitoring",
+    "FLAGGED": "data_review",
+    "REJECTED": "stop"
+  },
+
   "quality_score": {
     "_comment": "Six DAMA data-quality dimensions. Weights must sum to 1.0. Adjust to reflect what matters most for your historian feed.",
     "flagged_threshold":  0.80,
