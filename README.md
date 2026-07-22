@@ -14,7 +14,8 @@ The repository is ready for frontend integration in deterministic local mode. Az
 | Human approval and HITL gates | Implemented |
 | Reflexion and graceful error envelopes | Implemented |
 | Local persistence and mock connectors | Implemented |
-| Automated tests | `634 passed` before the frontend merge |
+| Automated backend tests | `634 passed` |
+| React frontend from `feature/8agents_frontend` | Integrated on `dev` |
 | Real CMMS/ERP/historian and Azure services | Next phase |
 
 ## Agent flow
@@ -41,7 +42,7 @@ The orchestrator stops early when data is ineligible, telemetry is healthy, an u
 ```text
 config/       Configurable agent, orchestration, retrieval and safety policies
 data/         Synthetic masters, telemetry scenarios and SOP corpus
-frontend/     Existing frontend prototype
+frontend/     Legacy prototype plus the React/Vite application
 Reference/    Change records, historical developer docs and legacy diagnostics
 scripts/      Agent and demo runners
 src/agents/   Agents 1–8 plus bounded Reflexion Agent
@@ -86,6 +87,21 @@ Useful URLs:
 - OpenAPI JSON: `http://127.0.0.1:8000/openapi.json`
 - Existing frontend: `http://127.0.0.1:8000/`
 - Health check: `GET /api/assets`
+
+## Start the React frontend
+
+Node.js 18 or newer is recommended. Keep the backend running on port 8000,
+then open a second PowerShell terminal:
+
+```powershell
+cd frontend/react-app
+npm ci
+npm run dev
+```
+
+Open `http://localhost:3000`. The Vite development server proxies `/api` and
+`/ws` to `http://localhost:8000`. For a separately hosted API, set
+`VITE_API_BASE_URL` to its origin before building or starting Vite.
 
 ## Frontend integration
 
@@ -210,7 +226,7 @@ python -m pytest tests/test_agent1_to_agent8_integration.py -q
 Current certification:
 
 ```text
-634 passed (backend compatibility checkpoint before React branch merge)
+634 passed
 0 failed
 ```
 
