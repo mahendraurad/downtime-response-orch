@@ -8,7 +8,7 @@ from src.tools.data_loader import load_telemetry_rows
 def _row(name): return deepcopy(load_telemetry_rows(name)[-1])
 def _nodes(state): return [x["node"] for x in state["pipeline_log"]]
 
-@pytest.mark.parametrize(("intent","expected"),[("status",["data_foundation"]),("anomaly",["data_foundation","monitoring"]),("diagnosis",["data_foundation","monitoring","failure_intelligence"]),("risk",["data_foundation","monitoring","failure_intelligence","predictive_risk"])])
+@pytest.mark.parametrize(("intent","expected"),[("status",["data_foundation"]),("anomaly",["data_foundation","monitoring"]),("diagnosis",["data_foundation","monitoring","failure_intelligence"]),("risk",["data_foundation","monitoring","failure_intelligence","predictive_risk"]),("guidance",["data_foundation","monitoring","failure_intelligence","predictive_risk","knowledge"])])
 def test_intent_calls_only_required_agents(intent,expected): assert _nodes(run_pipeline(_row("outer_race_fault"),intent=intent))==expected
 
 def test_full_fault_calls_agents_1_to_6_and_pauses_for_approval():

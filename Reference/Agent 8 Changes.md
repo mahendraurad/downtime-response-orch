@@ -53,4 +53,14 @@ Agent 8 suite: 45 passed
 ## Completion boundary
 
 Agent 8 is complete for local/pilot closed-loop learning. Azure Blob Storage and Azure AI Search replace the repository adapter; governed model retraining remains a separate offline approval process.
+## 2026-07-22 - Read-side learned-case history
+
+Agent 8 now exposes `recent_cases(limit)` through its repository boundary.
+Results are defensive copies ordered by `created_at`. Chat can therefore query
+confirmed closed-case learning without treating a read as a new learning event.
+
+Tests cover immediate retrieval after learning, newest-three ordering, fewer
+than three available cases, invalid limits, malformed stored rows, and honest
+empty-history behavior.
+
 <!-- *********************** -->

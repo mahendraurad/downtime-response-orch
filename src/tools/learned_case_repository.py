@@ -19,6 +19,13 @@ class JSONLearnedCaseRepository:
         rows.append(document.to_dict()); self.path.write_text(json.dumps(rows, indent=2), encoding="utf-8")
     def get(self, case_id): return next((r for r in self._rows() if r.get("case_id") == case_id), None)
     def count(self): return len(self._rows())
+    def list_recent(self, limit=3):
+        """Return newest valid learned cases without exposing mutable store rows."""
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
+            return []
+        rows = [row for row in self._rows() if isinstance(row, dict)]
+        rows.sort(key=lambda row: str(row.get("created_at", "")), reverse=True)
+        return [dict(row) for row in rows[:limit]]
     def search(self, query, top_k=5, minimum_score=0.15, **_):
         terms = set(re.findall(r"[a-z0-9]+", str(query).lower()))
         hits = []

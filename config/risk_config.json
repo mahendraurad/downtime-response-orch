@@ -37,7 +37,7 @@
 
   "llm_fallback": {
     "_comment": "Optional LLM advisory layer for cases the rule engine cannot assess confidently. Set enabled=true and provide Azure AI Foundry credentials (AZURE_AI_ENDPOINT/KEY/DEPLOYMENT) or Azure OpenAI credentials (AZURE_OPENAI_ENDPOINT/KEY/DEPLOYMENT) in .env. When unavailable, the deterministic assessment is always kept. The LLM augments the assessment with a recommended_action + rationale (advisory_note); the rule-based RUL/exposure numbers remain the auditable source of truth. For the undetermined/monitor case it may also set risk_level.",
-    "enabled": false,
+    "enabled": true,
     "trigger_on_undetermined": true,
     "_trigger_undetermined_comment": "Fire when iso_stage == 0 / no fault_code matched (rules give only a monitor band).",
     "trigger_low_confidence_below": 0,

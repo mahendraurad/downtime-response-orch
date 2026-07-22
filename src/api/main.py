@@ -51,6 +51,34 @@ with open(_ORCH_CONFIG_PATH, "r", encoding="utf-8") as _fh:
 _AUDIT_PATH = os.path.join(os.path.dirname(__file__), "..", "..", _ORCH_CONFIG["audit"]["jsonl_path"])
 _REFLEXION = ReflexionAgent(max_characters=_ORCH_CONFIG["reflection"]["max_response_characters"])
 
+
+def _learning_agent():
+    """Factory kept patchable so tests and deployments can inject storage."""
+    from src.agents.learning_memory_agent import LearningMemoryAgent
+    return LearningMemoryAgent()
+
+
+def _learning_history_draft(persona: str, limit: int = 3):
+    cases = _learning_agent().recent_cases(limit)
+    if not cases:
+        return ({"persona": persona,
+            "response": "No validated closed failure cases are available in Agent 8 memory. Learning is recorded only after successful execution and confirmed closure feedback.",
+            "details": [], "actions": [], "case_references": [],
+            "call_plan": ["agent_8"], "needs_context": False,
+            "agent_outputs": {"learned_cases": []}}, cases)
+    details = [
+        f"{case.get('case_id', 'unknown case')}: {case.get('fault_mode', 'unknown fault')}; outcome: {case.get('outcome', 'not recorded')}. Learning: {case.get('content', 'not recorded')}"
+        for case in cases
+    ]
+    audience = "Executive summary" if str(persona).lower() in {"md", "executive", "manager"} else "Failure history"
+    return ({"persona": persona,
+        "response": f"{audience}: the last {len(cases)} validated closed failure cases are summarized below.",
+        "details": details,
+        "actions": ["Use these confirmed outcomes to review recurring causes and maintenance effectiveness."],
+        "case_references": [f"Learned case {case.get('case_id', '')}" for case in cases],
+        "call_plan": ["agent_8"], "needs_context": False,
+        "agent_outputs": {"learned_cases": cases}}, cases)
+
 # ************** Added by Prateek Mittal on 20th July 2026 ******************
 @app.exception_handler(Exception)
 async def unexpected_error_handler(request: Request, exc: Exception):
@@ -1013,7 +1041,10 @@ def chat(req: ChatRequest):
         try: signal=_get_demo_signal(str(scenario),int(context.get("row_index",-1)))
         except (KeyError,ValueError,TypeError) as exc: raise HTTPException(404,f"Scenario unavailable: {scenario}") from exc
     plan=plan_query(req.message,signal is not None); state={"pipeline_log":[]}
-    if plan.needs_signal and signal is None:
+    if plan.intent == "learning_history":
+        draft,cases=_learning_history_draft(req.persona,3)
+        state={"pipeline_log":[{"node":"learning_memory","status":"history_query","latency_ms":0,"count":len(cases)}]}
+    elif plan.needs_signal and signal is None:
         draft={"persona":req.persona,"response":f"I can answer this {plan.intent} question once telemetry or a named scenario is supplied. No agent decision was fabricated.","call_plan":list(plan.agents),"needs_context":True}
     elif signal is not None:
         state=run_pipeline(deepcopy(signal),run_id=run_id,intent=plan.pipeline_intent,

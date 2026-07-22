@@ -169,7 +169,10 @@ class PrescriptiveOptimizationAgent:
             if hasattr(self._llm, "is_configured") and not self._llm.is_configured():
                 return fallback, "rules"
             response = self._llm.complete_json(
-                system_prompt="Rewrite the supplied maintenance rationale only. Do not change the action or facts.",
+                system_prompt=(
+                    "Rewrite the supplied maintenance rationale only. Do not change the action or facts. "
+                    "Return exactly one JSON object with one string field named rationale; no markdown."
+                ),
                 user_prompt=json.dumps({"rationale": fallback, "risk": risk.risk_level,
                                         "fault": diagnosis.fault_mode,
                                         "sources": guidance.source_documents}),

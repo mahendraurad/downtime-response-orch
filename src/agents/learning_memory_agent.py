@@ -56,6 +56,12 @@ class LearningMemoryAgent:
             doc.status_reason = f"learning persistence failed: {exc}"
         return doc
 
+    def recent_cases(self, limit: int = 3) -> list[dict]:
+        """Read validated learned history; this does not create new learning."""
+        if not hasattr(self._repo, "list_recent"):
+            return []
+        return self._repo.list_recent(limit)
+
     def _input_error(self, execution, feedback):
         if not isinstance(execution, ExecutionResult) or not isinstance(feedback, FeedbackEvent):
             return "typed ExecutionResult and FeedbackEvent are required"
@@ -102,7 +108,8 @@ class LearningMemoryAgent:
         try:
             if hasattr(self._llm, "is_configured") and not self._llm.is_configured(): return fallback, "template"
             response = self._llm.complete_json(system_prompt=(
-                "Rewrite only the learned-case narrative. Preserve all confirmed labels and measurements."),
+                "Rewrite only the learned-case narrative. Preserve all confirmed labels and measurements. "
+                "Return exactly one JSON object with one string field named narrative; no markdown."),
                 user_prompt=fallback, temperature=0.1, max_tokens=500)
             text = response.get("narrative", "") if isinstance(response, dict) else ""
             # Require the immutable confirmed fault and action to remain visible.

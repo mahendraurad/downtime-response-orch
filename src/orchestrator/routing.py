@@ -97,6 +97,8 @@ def route_after_knowledge(state: dict) -> str:
     guidance = state.get("knowledge_guidance")
     if guidance is None or not getattr(guidance, "guidance_eligible", False):
         return END
+    if _intent(state) == "guidance":
+        return END
     return "prescriptive"
 
 

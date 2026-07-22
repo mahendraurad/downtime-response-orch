@@ -94,7 +94,14 @@ def _get_action_agents():
         from src.agents.prescriptive_optimization_agent import PrescriptiveOptimizationAgent
         from src.agents.executor_agent import ExecutorAgent
         from src.agents.learning_memory_agent import LearningMemoryAgent
-        _action_agents = (PrescriptiveOptimizationAgent(), ExecutorAgent(), LearningMemoryAgent())
+        from src.tools.llm_client import LLMClient
+        llm = LLMClient()
+        optional_llm = llm if llm.is_configured() else None
+        _action_agents = (
+            PrescriptiveOptimizationAgent(llm_client=optional_llm),
+            ExecutorAgent(),
+            LearningMemoryAgent(llm_client=optional_llm),
+        )
     return _action_agents
 # ***********************
 

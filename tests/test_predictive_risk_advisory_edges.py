@@ -43,8 +43,8 @@ def _inputs():
     )
 
 
-def test_default_config_disables_optional_llm():
-    assert load_risk_config().llm_enabled is False
+def test_default_config_enables_guarded_llm_advisory():
+    assert load_risk_config().llm_enabled is True
 
 
 def test_llm_exception_preserves_deterministic_monitor_card():

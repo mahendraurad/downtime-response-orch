@@ -14,7 +14,7 @@ The repository is ready for frontend integration in deterministic local mode. Az
 | Human approval and HITL gates | Implemented |
 | Reflexion and graceful error envelopes | Implemented |
 | Local persistence and mock connectors | Implemented |
-| Automated backend tests | `634 passed` |
+| Automated backend tests | `659 passed` |
 | React frontend from `feature/8agents_frontend` | Integrated on `dev` |
 | Real CMMS/ERP/historian and Azure services | Next phase |
 
@@ -142,6 +142,10 @@ const result = await response.json();
 
 Chat returns `run_id`, `intent`, `response`, `details`, `actions`, `call_plan`, actual `pipeline_log`, sources, reflection status and available structured agent outputs. Asking to execute work in chat does not constitute approval.
 
+Recent-failure and lessons-learned questions route directly to Agent 8's
+validated closed-case memory. Arbitrary canonical telemetry supplied in
+`context.signal` routes by question intent and need not match a demo scenario.
+
 ### Pipeline example
 
 ```javascript
@@ -226,7 +230,7 @@ python -m pytest tests/test_agent1_to_agent8_integration.py -q
 Current certification:
 
 ```text
-634 passed
+659 passed
 0 failed
 ```
 

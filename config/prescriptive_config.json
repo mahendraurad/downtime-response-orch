@@ -24,6 +24,6 @@
     "responsible_approver": "Plant Supervisor - James Kowalski",
     "responsible_approver_id": "PERSONA_SUP"
   },
-  "llm_rationale": {"enabled": false, "max_characters": 800},
+  "llm_rationale": {"enabled": true, "max_characters": 800},
   "logging": {"log_recommendations": true}
 }

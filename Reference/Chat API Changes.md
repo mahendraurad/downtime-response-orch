@@ -1,6 +1,17 @@
 <!-- ************** Added by Prateek Mittal on 20th July 2026 ****************** -->
 # Chat API Changes
 
+## 2026-07-22 - Unseen telemetry and learned-history routing
+
+- Arbitrary canonical `context.signal` inputs are tested across status,
+  anomaly, diagnosis, risk, guidance, and recommendation depth.
+- Natural `anomalous` and `maintenance action` phrasing routes correctly.
+- SOP requests stop after Agent 5 instead of invoking Agent 6.
+- Recent-failure questions route to Agent 8 without running Agents 1-7.
+- MD/executive responses return up to three newest validated closed cases,
+  references, structured outputs, and an audited history-query log entry.
+- Empty history is explicit; failures and lessons are never fabricated.
+
 ## Previous state
 
 `POST /api/chat` used canned keyword responses and otherwise told the caller to invoke the pipeline manually. It did not call agents, expose a call plan, reflect answers or audit the interaction.
