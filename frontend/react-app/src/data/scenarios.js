@@ -3,11 +3,24 @@ export const ASSET_SCENARIO = {
   'no sop': 'knowledge_hitl_test',
   'inner race': 'inner_race_fault',
   'unknown asset': 'unknown_asset',
+  // Friendly display names
   'M-104': 'outer_race_fault',
   'P-207': 'lubrication_issue',
   'C-301': 'signal_dropout',
   'M-089': 'healthy',
   'G-112': 'gearbox_fault',
+  // Internal asset IDs from asset_master.json
+  'AST_MTR_001': 'outer_race_fault',
+  'AST_PMP_001': 'lubrication_issue',
+  'AST_MTR_002': 'healthy',
+  'AST_GBX_001': 'gearbox_fault',
+  'AST_PMP_002': 'lubrication_issue',
+  'AST_CON_001': 'inner_race_fault',
+  // Asset names
+  'Conveyor Motor A': 'outer_race_fault',
+  'Cooling Pump A': 'lubrication_issue',
+  'Conveyor Motor B': 'healthy',
+  'Gearbox Unit': 'gearbox_fault',
 };
 
 export const URGENCY_COLOR = { immediate: '#ef4444', urgent: '#f97316', planned: '#3b82f6', monitor: '#6b7280' };
