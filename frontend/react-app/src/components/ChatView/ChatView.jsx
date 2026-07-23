@@ -140,35 +140,6 @@ export default function ChatView() {
     setInputVal('');
     if (inpRef.current) inpRef.current.style.height = 'auto';
     appendU(t);
-    const lower = t.toLowerCase();
-
-    const matchedAssets = Object.entries(ASSET_SCENARIO)
-      .filter(([asid]) => lower.includes(asid.toLowerCase()));
-    // A single asset can use the focused pipeline card. Multi-asset questions
-    // must reach /api/chat intact so the backend can plan every requested asset.
-    if (matchedAssets.length === 1) {
-      const [asid, sc] = matchedAssets[0];
-      if (lower.includes(asid.toLowerCase())) {
-        doThink(async () => {
-          try {
-            const data = await runRealPipeline(sc, -1, persona);
-            if (data) {
-              handlePipelineResult(data, sc, persona);
-            } else {
-              const r = DFLT[Math.floor(Math.random() * DFLT.length)];
-              appendA(r.c, r.r);
-            }
-          } catch (err) {
-            const r = DFLT[Math.floor(Math.random() * DFLT.length)];
-            appendA(r.c, r.r);
-          }
-        });
-        if (/approv/i.test(t)) {
-          try { await patchWorkOrder('WO-2024-1847', { status: 'Approved' }); } catch (e) {}
-        }
-        return;
-      }
-    }
 
     // Local canned Q&A — no backend round-trip needed
     if (CHAT_KB[t]) {
@@ -176,14 +147,32 @@ export default function ChatView() {
       return;
     }
 
-    // Primary path: backend (query_router) detects scenario entities and intent.
-    // ASSET_SCENARIO is kept as a fallback for offline / unrecognised queries only.
+    // All queries go to /api/chat. The backend LLM classifier decides whether
+    // this is a new pipeline request, a conversational follow-up, or general knowledge.
+    // Conversation history is included so the classifier understands follow-up context.
+    // (Future: swap this history source for a Cosmos DB episode fetch.)
+    const conversationHistory = messages
+      .filter(m => m.type === 'user' || m.type === 'agent')
+      .slice(-8)
+      .map(m => ({
+        role: m.type === 'user' ? 'user' : 'assistant',
+        content: m.type === 'user'
+          ? (m.text || '')
+          : (m.html || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 500),
+      }))
+      .filter(m => m.content.length > 0);
+
     doThink(async () => {
       try {
         const resp = await fetch(API + '/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: t, persona, conversation_id: conversationIdRef.current }),
+          body: JSON.stringify({
+            message: t,
+            persona,
+            conversation_id: conversationIdRef.current,
+            conversation_history: conversationHistory,
+          }),
         });
         if (resp.ok) {
           const d = await resp.json();
