@@ -99,7 +99,13 @@ export default function ChatView() {
 
   function doThink(cb) {
     setThinking(true);
-    setTimeout(() => { setThinking(false); cb(); }, 1100);
+    setTimeout(async () => {
+      try {
+        await cb();
+      } finally {
+        setThinking(false);
+      }
+    }, 1100);
   }
 
   function handlePipelineResult(data, scenario, pArg) {
@@ -285,7 +291,10 @@ export default function ChatView() {
           {thinking && (
             <div className="tdg fi">
               <div className="mav" style={{ background: 'var(--ag)' }}>🤖</div>
-              <div className="tdts"><span></span><span></span><span></span></div>
+              <div>
+                <div className="tdts"><span></span><span></span><span></span></div>
+                <div style={{ fontSize: '11px', color: 'var(--t2)', marginTop: '4px', fontStyle: 'italic' }}>Agents are processing…</div>
+              </div>
             </div>
           )}
         </div>
@@ -302,19 +311,26 @@ export default function ChatView() {
               ref={inpRef}
               className="cinptx"
               rows={1}
-              placeholder={`Ask as ${p.nm.split(' — ')[0]}: faults, risk, decisions, what-if…`}
+              placeholder={thinking ? 'Agents are processing…' : `Ask as ${p.nm.split(' — ')[0]}: faults, risk, decisions, what-if…`}
               value={inputVal}
               onChange={e => setInputVal(e.target.value)}
               onKeyDown={handleKeyDown}
               onInput={autoResize}
+              disabled={thinking}
+              style={thinking ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
             />
-            <button className="sbtn" onClick={() => sendMsg()}>
+            <button
+              className="sbtn"
+              onClick={() => sendMsg()}
+              disabled={thinking}
+              style={thinking ? { opacity: 0.35, cursor: 'not-allowed' } : {}}
+            >
               <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" /></svg>
             </button>
           </div>
           <div className="qps">
             {p.qp.map((q, i) => (
-              <button key={i} className="qpb" onClick={() => sendMsg(q)}>{q}</button>
+              <button key={i} className="qpb" onClick={() => sendMsg(q)} disabled={thinking} style={thinking ? { opacity: 0.4, cursor: 'not-allowed' } : {}}>{q}</button>
             ))}
           </div>
         </div>
