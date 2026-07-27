@@ -52,11 +52,21 @@ export async function resolveHITLKnowledge(runId, action, persona) {
   return resp.json();
 }
 
-export async function runExecutor(recommendation, approved) {
+export async function resolveHITLAdvisory(runId, action, persona, revisedNote) {
+  const resp = await fetch(`${API}/api/pipeline/hitl/advisory`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ run_id: runId, action, persona, revised_note: revisedNote || null }),
+  });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  return resp.json();
+}
+
+export async function runExecutor(recommendation, approved, persona = 'supervisor') {
   const resp = await fetch(`${API}/api/executor/run`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ recommendation, approved }),
+    body: JSON.stringify({ recommendation, approved, persona }),
   });
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   return resp.json();

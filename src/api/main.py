@@ -23,10 +23,11 @@ import os
 import random
 import re
 import sys
+import time
 import uuid
 from copy import deepcopy
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Literal
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -65,7 +66,10 @@ _ORCH_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "config"
 with open(_ORCH_CONFIG_PATH, "r", encoding="utf-8") as _fh:
     _ORCH_CONFIG = json.load(_fh)
 _AUDIT_PATH = os.path.join(os.path.dirname(__file__), "..", "..", _ORCH_CONFIG["audit"]["jsonl_path"])
-_REFLEXION = ReflexionAgent(max_characters=_ORCH_CONFIG["reflection"]["max_response_characters"])
+_REFLEXION = ReflexionAgent(
+    max_characters=_ORCH_CONFIG["reflection"]["max_response_characters"],
+    max_iterations=_ORCH_CONFIG["reflection"].get("max_refinement_iterations", 3),
+)
 
 
 def _learning_agent():
@@ -100,6 +104,10 @@ def _learning_history_draft(persona: str, limit: int = 3):
 _CONCEPTS = {
     "rul": "Remaining Useful Life (RUL) is the estimated time or operating usage before an asset reaches a defined failure or maintenance threshold. An asset-specific RUL requires current telemetry, operating context, and a validated model.",
     "signals": "Vibration helps reveal mechanical impacts, imbalance, looseness, and bearing-frequency patterns; temperature helps reveal friction, lubrication, and load-related heating. Their trends must be compared with an asset-specific baseline before a decision is made.",
+    "anomaly": "An anomaly is a statistically meaningful departure from an asset's expected behavior under a comparable operating regime. It is evidence for investigation, not by itself a confirmed fault.",
+    "bpfo": "BPFO is the ball-pass frequency of the outer race. Elevated energy around BPFO and its harmonics can support an outer-race fault diagnosis when operating speed, bearing geometry, and other evidence agree.",
+    "bpfi": "BPFI is the ball-pass frequency of the inner race. Elevated energy around BPFI and its sidebands can support an inner-race fault diagnosis when corroborated by other evidence.",
+    "condition_monitoring": "Condition monitoring compares machine signals and trends with expected behavior so deterioration can be detected and acted on before functional failure.",
 }
 
 _MULTI_ASSET_SCENARIOS = {
@@ -110,10 +118,21 @@ _MULTI_ASSET_SCENARIOS = {
     "G-112": ("AST_GBX_001", "gearbox_fault"),
 }
 
+Persona = Literal["supervisor", "engineer", "maintenance", "manager",
+                  "executive", "md", "ot", "safety"]
+_PERSONAS = {"supervisor", "engineer", "maintenance", "manager",
+             "executive", "md", "ot", "safety"}
+
 
 def _concept_draft(message: str, persona: str):
     text = message.lower()
-    answer = _CONCEPTS["rul"] if ("rul" in text or "remaining useful life" in text) else _CONCEPTS["signals"]
+    if "rul" in text or "remaining useful life" in text: key="rul"
+    elif "bpfo" in text: key="bpfo"
+    elif "bpfi" in text: key="bpfi"
+    elif "anomaly" in text: key="anomaly"
+    elif "condition monitoring" in text: key="condition_monitoring"
+    else: key="signals"
+    answer = _CONCEPTS[key]
     return {"persona": persona, "response": answer, "details": [], "actions": [],
         "call_plan": [], "needs_context": False, "clarification_required": False,
         "source_type": "controlled_glossary"}
@@ -130,11 +149,20 @@ def _clarification_draft(persona: str, intent: str, missing: list[str],
 
 def _asset_from_message(message: str) -> str:
     upper = str(message).upper()
+    display_match = next((asset_id for display,(asset_id,_) in _MULTI_ASSET_SCENARIOS.items()
+                          if display in upper), "")
+    if display_match:
+        return display_match
     known = next((asset_id for asset_id in load_asset_master() if asset_id in upper), "")
     if known:
         return known
     match = re.search(r"\bAST_[A-Z0-9_]+\b", upper)
     return match.group(0) if match else ""
+
+
+def _scenario_for_asset(asset_id: str) -> str:
+    return next((scenario for _,(canonical,scenario) in _MULTI_ASSET_SCENARIOS.items()
+                 if canonical == asset_id), "")
 
 
 def _assets_from_message(message: str) -> list[tuple[str,str,str]]:
@@ -270,14 +298,85 @@ _WO_INDEX = {wo["id"]: wo for wo in _WORKORDERS}
 
 # In-memory HITL session store — keyed by run_id, holds partial pipeline state
 _HITL_STORE: Dict[str, Dict[str, Any]] = {}
+_HITL_RESOLVED: Dict[str, float] = {}
 _CHAT_CONTEXT_STORE: Dict[str, Dict[str, Any]] = {}
 _MAX_CHAT_CONTEXTS = int(_ORCH_CONFIG["chat"].get("max_context_sessions",500))
+_MAX_CHAT_TURNS = int(_ORCH_CONFIG["chat"].get("max_context_turns",12))
+_CHAT_CONTEXT_TTL = int(_ORCH_CONFIG["chat"].get("context_ttl_seconds",1800))
+_HITL_TTL = int(_ORCH_CONFIG.get("hitl",{}).get("session_ttl_seconds",1800))
+_HITL_PERMISSIONS = _ORCH_CONFIG.get("hitl",{}).get("permissions",{})
 
 
 def _remember_chat_context(conversation_id: str, context: dict) -> None:
     if conversation_id not in _CHAT_CONTEXT_STORE and len(_CHAT_CONTEXT_STORE) >= _MAX_CHAT_CONTEXTS:
         _CHAT_CONTEXT_STORE.pop(next(iter(_CHAT_CONTEXT_STORE)))
-    _CHAT_CONTEXT_STORE[conversation_id] = deepcopy(context)
+    stored=deepcopy(context)
+    meta=stored.setdefault("_meta",{})
+    meta["updated_at"]=time.time()
+    meta["turns"]=min(int(meta.get("turns",0))+1,_MAX_CHAT_TURNS+1)
+    _CHAT_CONTEXT_STORE[conversation_id] = stored
+
+
+def _load_chat_context(conversation_id: str) -> dict:
+    context=deepcopy(_CHAT_CONTEXT_STORE.get(conversation_id,{}))
+    meta=context.get("_meta",{})
+    if context and (time.time()-float(meta.get("updated_at",0))>_CHAT_CONTEXT_TTL
+                    or int(meta.get("turns",0))>=_MAX_CHAT_TURNS):
+        _CHAT_CONTEXT_STORE.pop(conversation_id,None)
+        return {}
+    return context
+
+
+def _public_context(context: Optional[Dict]) -> dict:
+    """Reject client attempts to write reserved conversation state keys."""
+    return {str(key):deepcopy(value) for key,value in (context or {}).items()
+            if not str(key).startswith("_")}
+
+
+def _authorize_hitl(persona: str, gate: str) -> None:
+    if persona not in _PERSONAS:
+        raise HTTPException(422,f"Unknown persona: {persona}")
+    if persona not in set(_HITL_PERMISSIONS.get(gate,[])):
+        raise HTTPException(403,f"Persona '{persona}' is not permitted to resolve the {gate} gate.")
+
+
+def _claim_hitl(run_id: str, gate: str, action: str, allowed_actions: set[str], persona: str) -> dict:
+    """Validate a decision before consuming its one-shot HITL session."""
+    action=action.upper()
+    if action not in allowed_actions:
+        raise HTTPException(422,f"Invalid {gate} action. Allowed values: {', '.join(sorted(allowed_actions))}.")
+    _authorize_hitl(persona,gate)
+    stored=_HITL_STORE.get(run_id)
+    if not stored:
+        if run_id in _HITL_RESOLVED:
+            raise HTTPException(409,f"HITL session '{run_id}' has already been resolved.")
+        raise HTTPException(404,f"HITL session '{run_id}' was not found or has expired.")
+    if stored.get("type")!=gate:
+        raise HTTPException(409,f"HITL session '{run_id}' is for {stored.get('type')}, not {gate}.")
+    created=float(stored.get("created_at",time.time()))
+    if time.time()-created>_HITL_TTL:
+        _HITL_STORE.pop(run_id,None)
+        raise HTTPException(410,f"HITL session '{run_id}' has expired.")
+    _HITL_STORE.pop(run_id,None)
+    _HITL_RESOLVED[run_id]=time.time()
+    return stored
+
+
+def _stamp_hitl_sessions() -> None:
+    """Backfill timestamps for sessions created by existing gate code."""
+    now=time.time()
+    for value in _HITL_STORE.values():
+        value.setdefault("created_at",now)
+
+
+def _create_advisory_gate(run_id: str, risk, persona: str, blocked: bool = False):
+    if (blocked or risk is None
+            or getattr(risk,"assessment_source","")!="rules+llm_fallback"
+            or not getattr(risk,"advisory_note","")):
+        return None
+    _HITL_STORE[run_id]={"type":"advisory","risk_assessment":risk,
+        "persona":persona,"created_at":time.time()}
+    return {"type":"advisory","advisory_note":risk.advisory_note,"run_id":run_id}
 
 # Confidence threshold below which the FI HITL gate fires (Agent 3)
 _DIAGNOSIS_CONFIDENCE_THRESHOLD = 0.60
@@ -287,7 +386,7 @@ _DIAGNOSIS_CONFIDENCE_THRESHOLD = 0.60
 
 class PipelineRunRequest(BaseModel):
     signal: Dict[str, Any]
-    persona: str = "supervisor"
+    persona: Persona = "supervisor"
     scenario: Optional[str] = None   # convenience: run a named demo scenario
     row_index: int = -1              # row index within scenario (-1 = last)
     query: Optional[str] = None      # natural-language query → controls pipeline depth
@@ -318,31 +417,38 @@ class PipelineRunResponse(BaseModel):
 class HITLRemediationRequest(BaseModel):
     run_id: str
     action: str        # IMPUTE | DROP | KEEP
-    persona: str = "supervisor"
+    persona: Persona = "supervisor"
 
 
 class HITLMonitoringRequest(BaseModel):
     run_id: str
     action: str        # SUPPRESS | CONFIRM
-    persona: str = "supervisor"
+    persona: Persona = "supervisor"
 
 
 class HITLDiagnosisRequest(BaseModel):
     run_id: str
     action: str        # CONFIRM | MARK_UNDETERMINED
-    persona: str = "supervisor"
+    persona: Persona = "engineer"
 
 
 class HITLKnowledgeRequest(BaseModel):
     run_id: str
     action: str        # FLAG_MANUAL | ACCEPT_EMPTY
-    persona: str = "supervisor"
+    persona: Persona = "maintenance"
     manual_sop_note: Optional[str] = None
+
+
+class HITLAdvisoryRequest(BaseModel):
+    run_id: str
+    action: str        # ACCEPT | REJECT | MODIFY
+    persona: Persona = "engineer"
+    revised_note: Optional[str] = None
 
 
 class ChatRequest(BaseModel):
     message: str
-    persona: str = "supervisor"
+    persona: Persona = "supervisor"
     asset_id: Optional[str] = None
     context: Optional[Dict] = None
     conversation_id: Optional[str] = None
@@ -358,6 +464,7 @@ class WOUpdateRequest(BaseModel):
 class ExecutorRunRequest(BaseModel):
     recommendation: Dict[str, Any]
     approved: bool = False
+    persona: Persona = "supervisor"
 
 
 # ── Helper: load demo scenario signal ────────────────────────────────────────
@@ -553,16 +660,9 @@ def pipeline_run(req: PipelineRunRequest):
     # Not a true pause gate — shown alongside the pipeline result as an
     # accept/reject prompt. The deterministic RUL numbers are always valid;
     # only the LLM-generated text is subject to operator review.
-    hitl_advisory = None
     _risk = state.get("risk_assessment")
-    if (_risk
-            and getattr(_risk, "assessment_source", "") == "rules+llm_fallback"
-            and getattr(_risk, "advisory_note", "")
-            and hitl_monitoring is None and hitl_diagnosis is None):
-        hitl_advisory = {
-            "advisory_note": _risk.advisory_note,
-            "run_id":        run_id,
-        }
+    hitl_advisory = _create_advisory_gate(run_id,_risk,req.persona,
+        blocked=any((hitl_required,hitl_monitoring,hitl_diagnosis,hitl_knowledge)))
 
     # True-pause gates hide downstream results until the operator resolves them
     _mon_paused  = hitl_monitoring is not None
@@ -609,6 +709,7 @@ def pipeline_run(req: PipelineRunRequest):
         ]
         _tags = ["Low Confidence", "FI Gate", "Engineer Review Required"]
 
+    _stamp_hitl_sessions()
     return PipelineRunResponse(
         run_id=run_id,
         persona=req.persona,
@@ -640,13 +741,10 @@ def pipeline_run(req: PipelineRunRequest):
 @app.post("/api/pipeline/hitl/remediation")
 def hitl_remediation(req: HITLRemediationRequest):
     """Resolve a DFA HITL gate: apply IMPUTE/DROP/KEEP and resume the pipeline."""
-    stored = _HITL_STORE.pop(req.run_id, None)
-    if not stored:
-        raise HTTPException(404, f"HITL session '{req.run_id}' not found or already resolved.")
-
-    persona = req.persona or stored.get("persona", "supervisor")
+    action = req.action.upper()
+    stored = _claim_hitl(req.run_id,"remediation",action,{"IMPUTE","DROP","KEEP"},req.persona)
+    persona = req.persona
     intent  = stored.get("intent", "full")
-    action  = req.action.upper()
     trusted = stored["trusted"]
 
     def _to_dict(obj):
@@ -696,10 +794,6 @@ def hitl_remediation(req: HITLRemediationRequest):
     hitl_diagnosis = None
     hitl_knowledge = None
 
-    if (risk and getattr(risk, "assessment_source", "") == "rules+llm_fallback"
-            and getattr(risk, "advisory_note", "")):
-        hitl_advisory = {"advisory_note": risk.advisory_note, "run_id": req.run_id}
-
     if diagnosis is not None and diagnosis.confidence < _DIAGNOSIS_CONFIDENCE_THRESHOLD:
         _HITL_STORE[req.run_id] = {
             "type":           "diagnosis",
@@ -738,7 +832,11 @@ def hitl_remediation(req: HITLRemediationRequest):
                           if trusted and hasattr(trusted, "raw") else ""),
         }
 
+    hitl_advisory=_create_advisory_gate(req.run_id,risk,persona,
+        blocked=bool(hitl_diagnosis or hitl_knowledge))
+
     _diag_paused = hitl_diagnosis is not None
+    _stamp_hitl_sessions()
     return PipelineRunResponse(
         run_id=req.run_id, persona=persona,
         headline=formatted.get("headline", ""),
@@ -760,15 +858,12 @@ def hitl_remediation(req: HITLRemediationRequest):
 @app.post("/api/pipeline/hitl/monitoring")
 def hitl_monitoring_resolution(req: HITLMonitoringRequest):
     """Resolve Monitoring HITL gate: SUPPRESS or CONFIRM a borderline EWMA anomaly."""
-    stored = _HITL_STORE.pop(req.run_id, None)
-    if not stored:
-        raise HTTPException(404, f"HITL session '{req.run_id}' not found or already resolved.")
-
-    persona = req.persona or stored.get("persona", "supervisor")
+    action = req.action.upper()
+    stored = _claim_hitl(req.run_id,"monitoring",action,{"SUPPRESS","CONFIRM"},req.persona)
+    persona = req.persona
     intent  = stored.get("intent", "full")
     trusted = stored["trusted"]
     anomaly = stored["anomaly_event"]
-    action  = req.action.upper()
 
     def _to_dict(obj):
         if obj is None:
@@ -809,10 +904,6 @@ def hitl_monitoring_resolution(req: HITLMonitoringRequest):
     hitl_diagnosis = None
     hitl_knowledge = None
 
-    if (risk and getattr(risk, "assessment_source", "") == "rules+llm_fallback"
-            and getattr(risk, "advisory_note", "")):
-        hitl_advisory = {"advisory_note": risk.advisory_note, "run_id": req.run_id}
-
     if diagnosis is not None and diagnosis.confidence < _DIAGNOSIS_CONFIDENCE_THRESHOLD:
         _HITL_STORE[req.run_id] = {
             "type":           "diagnosis",
@@ -851,7 +942,12 @@ def hitl_monitoring_resolution(req: HITLMonitoringRequest):
                           if trusted and hasattr(trusted, "raw") else ""),
         }
 
+
+    hitl_advisory=_create_advisory_gate(req.run_id,risk,persona,
+        blocked=bool(hitl_diagnosis or hitl_knowledge))
+
     _diag_paused = hitl_diagnosis is not None
+    _stamp_hitl_sessions()
     _headline    = formatted.get("headline", "")
     _details     = formatted.get("details", [])
     _actions     = formatted.get("actions", [])
@@ -890,16 +986,13 @@ def hitl_monitoring_resolution(req: HITLMonitoringRequest):
 @app.post("/api/pipeline/hitl/diagnosis")
 def hitl_diagnosis_resolution(req: HITLDiagnosisRequest):
     """Resolve FI HITL gate: CONFIRM or MARK_UNDETERMINED a low-confidence fault."""
-    stored = _HITL_STORE.pop(req.run_id, None)
-    if not stored:
-        raise HTTPException(404, f"HITL session '{req.run_id}' not found or already resolved.")
-
-    persona           = req.persona or stored.get("persona", "supervisor")
+    action = req.action.upper()
+    stored = _claim_hitl(req.run_id,"diagnosis",action,{"CONFIRM","MARK_UNDETERMINED"},req.persona)
+    persona           = req.persona
     intent            = stored.get("intent", "full")
     trusted           = stored["trusted"]
     anomaly           = stored["anomaly_event"]
     original_diagnosis = stored["fault_diagnosis"]
-    action            = req.action.upper()
 
     def _to_dict(obj):
         if obj is None:
@@ -946,10 +1039,6 @@ def hitl_diagnosis_resolution(req: HITLDiagnosisRequest):
     hitl_advisory  = None
     hitl_knowledge = None
 
-    if (risk and getattr(risk, "assessment_source", "") == "rules+llm_fallback"
-            and getattr(risk, "advisory_note", "")):
-        hitl_advisory = {"advisory_note": risk.advisory_note, "run_id": req.run_id}
-
     if knowledge is not None and not knowledge.source_documents:
         _HITL_STORE[req.run_id] = {
             "type":             "knowledge",
@@ -969,6 +1058,10 @@ def hitl_diagnosis_resolution(req: HITLDiagnosisRequest):
                           if trusted and hasattr(trusted, "raw") else ""),
         }
 
+
+    hitl_advisory=_create_advisory_gate(req.run_id,risk,persona,blocked=bool(hitl_knowledge))
+
+    _stamp_hitl_sessions()
     return PipelineRunResponse(
         run_id=req.run_id, persona=persona,
         headline=formatted.get("headline", ""),
@@ -989,15 +1082,12 @@ def hitl_diagnosis_resolution(req: HITLDiagnosisRequest):
 @app.post("/api/pipeline/hitl/knowledge")
 def hitl_knowledge_resolution(req: HITLKnowledgeRequest):
     """Resolve Knowledge HITL gate: FLAG_MANUAL or ACCEPT_EMPTY when no SOP found."""
-    stored = _HITL_STORE.pop(req.run_id, None)
-    if not stored:
-        raise HTTPException(404, f"HITL session '{req.run_id}' not found or already resolved.")
-
-    persona   = req.persona or stored.get("persona", "supervisor")
+    action = req.action.upper()
+    stored = _claim_hitl(req.run_id,"knowledge",action,{"FLAG_MANUAL","ACCEPT_EMPTY"},req.persona)
+    persona   = req.persona
     diagnosis = stored.get("fault_diagnosis")
     risk      = stored.get("risk_assessment")
     trusted   = stored.get("trusted")
-    action    = req.action.upper()
 
     def _to_dict(obj):
         if obj is None:
@@ -1058,6 +1148,29 @@ def hitl_knowledge_resolution(req: HITLKnowledgeRequest):
     )
 
 
+@app.post("/api/pipeline/hitl/advisory")
+def hitl_advisory_resolution(req: HITLAdvisoryRequest):
+    """Review an LLM advisory without changing deterministic risk facts."""
+    action=req.action.upper()
+    revised=str(req.revised_note or "").strip()
+    if action=="MODIFY" and not revised:
+        raise HTTPException(422,"revised_note is required when action is MODIFY.")
+    if len(revised)>1000:
+        raise HTTPException(422,"revised_note exceeds 1000 characters.")
+    stored=_claim_hitl(req.run_id,"advisory",action,{"ACCEPT","REJECT","MODIFY"},req.persona)
+    risk=stored.get("risk_assessment")
+    original=str(getattr(risk,"advisory_note","") or "")
+    if action=="MODIFY":
+        advisory_note=revised
+    elif action=="ACCEPT":
+        advisory_note=original
+    else:
+        advisory_note=""
+    return {"run_id":req.run_id,"type":"advisory","status":action.lower(),
+        "advisory_note":advisory_note,"original_advisory_note":original,
+        "deterministic_assessment_unchanged":True,"persona":req.persona}
+
+
 @app.post("/api/executor/run")
 def executor_run(req: ExecutorRunRequest):
     """
@@ -1069,6 +1182,8 @@ def executor_run(req: ExecutorRunRequest):
     """
     from src.schemas.recommendation import MaintenanceRecommendation
     from src.agents.executor_agent import ExecutorAgent
+    if req.approved:
+        _authorize_hitl(req.persona,"execution")
     try:
         rec = MaintenanceRecommendation(**req.recommendation)
         result = ExecutorAgent().process(rec, approved=req.approved)
@@ -1168,20 +1283,39 @@ def chat(req: ChatRequest):
     """Simple persona-aware chat — keyword matching + optional pipeline context."""
     run_id=f"CHAT-{uuid.uuid4().hex[:10].upper()}"
     conversation_id=req.conversation_id or f"CONV-{uuid.uuid4().hex[:10].upper()}"
-    context=deepcopy(_CHAT_CONTEXT_STORE.get(conversation_id,{}))
-    context.update(deepcopy(req.context or {}))
-    supplied_asset=req.asset_id or context.get("asset_id") or _asset_from_message(req.message)
+    if len(conversation_id)>80 or not re.fullmatch(r"[A-Za-z0-9_.:-]+",conversation_id):
+        raise HTTPException(422,"conversation_id contains unsupported characters or is too long.")
+    if req.message.strip().lower() in {"reset","start over","new conversation","cancel this request"}:
+        _CHAT_CONTEXT_STORE.pop(conversation_id,None)
+        return {"run_id":run_id,"conversation_id":conversation_id,"intent":"reset",
+            "persona":req.persona,"response":"Conversation context has been cleared.",
+            "details":[],"actions":[],"call_plan":[],"pipeline_log":[],"sources":[],
+            "needs_context":False,"clarification_required":False,"reflection_status":"accepted"}
+    context=_load_chat_context(conversation_id)
+    incoming=_public_context(req.context)
+    explicit_asset=req.asset_id or _asset_from_message(req.message)
+    existing_signal=context.get("signal")
+    if explicit_asset and isinstance(existing_signal,dict) and existing_signal.get("asset_id")!=explicit_asset:
+        context.pop("signal",None); context.pop("scenario",None); context.pop("row_index",None)
+    context.update(incoming)
+    supplied_asset=explicit_asset or context.get("asset_id")
     requested_assets=_assets_from_message(req.message)
     if supplied_asset: context["asset_id"]=supplied_asset
-    _remember_chat_context(conversation_id,context)
     if not req.message or not req.message.strip(): raise HTTPException(422,"Chat message must not be empty.")
     if len(req.message)>_ORCH_CONFIG["chat"]["max_message_characters"]: raise HTTPException(422,"Chat message exceeds the configured length limit.")
     signal=context.get("signal"); scenario=context.get("scenario")
+    if not scenario and signal is None and len(requested_assets)==1:
+        scenario=requested_assets[0][2]
+        context["scenario"]=scenario
+    pending=context.get("_pending_message","")
+    if pending and "fleet" in pending.lower() and not context.get("timeframe"):
+        timeframe=re.search(r"\b(today|this week|next week|last \d+ days?|next \d+ days?)\b",req.message.lower())
+        if timeframe: context["timeframe"]=timeframe.group(1)
     if scenario and signal is None:
         try: signal=_get_demo_signal(str(scenario),int(context.get("row_index",-1)))
         except (KeyError,ValueError,TypeError) as exc: raise HTTPException(404,f"Scenario unavailable: {scenario}") from exc
     effective_message=req.message
-    if context.get("_pending_message") and (req.context or req.asset_id or _asset_from_message(req.message)):
+    if pending and (incoming or explicit_asset or scenario or context.get("timeframe")):
         effective_message=context["_pending_message"]
     plan=plan_query(effective_message,signal is not None); state={"pipeline_log":[]}
     if len(requested_assets)>1:
@@ -1242,7 +1376,12 @@ def chat(req: ChatRequest):
     else:
         context.pop("_pending_message",None)
     _remember_chat_context(conversation_id,context)
-    result={**reflected.response,"run_id":run_id,"conversation_id":conversation_id,"intent":plan_intent,"reflection_status":reflected.status,"pipeline_log":state.get("pipeline_log",[])}
+    result={**reflected.response,"run_id":run_id,"conversation_id":conversation_id,"intent":plan_intent,
+        "reflection_status":reflected.status,"reflection_iterations":reflected.iterations,
+        "reflection_termination_reason":reflected.termination_reason,
+        "pipeline_log":state.get("pipeline_log",[]),
+        "context_status":{"retained_fields":sorted(key for key in context if not key.startswith("_")),
+                          "pending":bool(context.get("_pending_message"))}}
     try: result["audit"]=write_audit(_AUDIT_PATH,event="chat",run_id=run_id,status="ok",intent=plan.intent,agents=plan.agents)
     except Exception: result["audit"]={"status":"audit_write_failed"}
     return result

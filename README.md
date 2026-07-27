@@ -14,7 +14,7 @@ The repository is ready for frontend integration in deterministic local mode. Az
 | Human approval and HITL gates | Implemented |
 | Reflexion and graceful error envelopes | Implemented |
 | Local persistence and mock connectors | Implemented |
-| Automated backend tests | `683 passed` |
+| Automated backend tests | `703 passed` |
 | React frontend from `feature/8agents_frontend` | Integrated on `dev` |
 | Real CMMS/ERP/historian and Azure services | Next phase |
 
@@ -153,6 +153,19 @@ turns so the pending question and collected context can be continued safely.
 Conceptual questions such as "What is RUL?" use the controlled glossary without
 asset data; asset-specific and fleet questions wait for their required context.
 
+All React chat questions now go to the backend before any offline fallback.
+Known demo asset labels can be resolved to validated scenarios by the backend.
+Conversation context has configurable expiry and turn limits, supports an
+explicit reset, rejects reserved internal context keys, and discards stale
+telemetry when the user changes assets.
+
+HITL decisions validate the gate type, allowed action, expiry, replay state and
+selected-persona capability before consuming the pending session. Agent 4 LLM
+advisory Accept/Reject/Modify decisions are wired to a backend endpoint and can
+never change deterministic risk or RUL facts. These capability checks use the
+selected persona only; production authentication and trusted RBAC remain a
+separate security requirement.
+
 Multi-asset questions name every requested asset in `multi_asset_results`. Each
 asset is evaluated independently through the required pipeline depth, receives
 an action and deadline, and carries asset-labelled pipeline logs. A failure or
@@ -242,7 +255,7 @@ python -m pytest tests/test_agent1_to_agent8_integration.py -q
 Current certification:
 
 ```text
-683 passed
+703 passed
 0 failed
 ```
 
@@ -261,6 +274,11 @@ tracing only in an organisation-approved LangSmith workspace. A tracing outage
 does not change pipeline decisions or API responses.
 
 PowerShell uses `$env:LANGSMITH_TRACING="true"`; `export` is Bash syntax.
+
+Reflexion is bounded by `reflection.max_refinement_iterations` in
+`config/orchestrator_config.json` (default `3`). Every chat response reports
+the iterations used and termination reason; the refiner cannot loop without a
+configured upper bound.
 
 All policy files live under `config/`. Important frontend-visible controls include freshness/routing, alert cooldown, retrieval grounding, recommendation approval actions, execution allowlists, learning validation, chat length and reflection limits.
 

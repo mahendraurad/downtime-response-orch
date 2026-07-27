@@ -1,5 +1,16 @@
 {
-  "reflection": {"enabled": true, "llm_enabled": false, "max_response_characters": 4000},
-  "chat": {"max_message_characters": 2000, "default_persona": "supervisor", "max_context_sessions": 500},
+  "reflection": {"enabled": true, "llm_enabled": false, "max_response_characters": 4000, "max_refinement_iterations": 3},
+  "chat": {"max_message_characters": 2000, "default_persona": "supervisor", "max_context_sessions": 500, "max_context_turns": 12, "context_ttl_seconds": 1800},
+  "hitl": {
+    "session_ttl_seconds": 1800,
+    "permissions": {
+      "remediation": ["supervisor", "engineer", "ot"],
+      "monitoring": ["supervisor", "engineer"],
+      "diagnosis": ["engineer"],
+      "advisory": ["supervisor", "engineer"],
+      "knowledge": ["engineer", "maintenance", "safety"],
+      "execution": ["supervisor", "maintenance", "manager"]
+    }
+  },
   "audit": {"jsonl_path": "logs/orchestrator_audit.jsonl", "include_payloads": false}
 }

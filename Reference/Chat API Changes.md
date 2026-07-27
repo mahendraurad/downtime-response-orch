@@ -1,6 +1,26 @@
 <!-- ************** Added by Prateek Mittal on 20th July 2026 ****************** -->
 # Chat API Changes
 
+## 2026-07-27 - Backend wiring, follow-up and HITL hardening
+
+- Removed frontend single-asset and canned-answer bypasses from the primary
+  path; chat reaches `/api/chat` first and uses local fallback only on failure.
+- Added backend resolution of known display asset labels to validated demo
+  scenarios, including follow-up completion of a pending asset question.
+- Added strict supported-persona validation (`md` remains an executive alias).
+- Added bounded conversation turns, expiry, reset, reserved-key filtering and
+  stale-signal removal when an asset changes.
+- Added HITL action allowlists, gate-type validation, session expiry, replay
+  detection and selected-persona permissions before session consumption.
+- Wired Agent 4 advisory Accept/Reject/Modify buttons to a backend endpoint;
+  deterministic risk and RUL values remain unchanged.
+- Added configurable bounded Reflexion iterations with a default maximum of 3,
+  plus iteration and termination metadata in chat responses.
+- Added `tests/test_chat_hitl_hardening.py` for open routing, follow-ups,
+  personas, HITL edges, frontend wiring and Reflexion termination.
+
+Current full-suite certification: `703 passed`.
+
 ## 2026-07-22 - LangSmith agent tracing
 
 - The chat request, orchestrator, Agents 1-8, Agent 8 history retrieval, and

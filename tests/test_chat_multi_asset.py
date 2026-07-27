@@ -63,5 +63,5 @@ def test_each_pipeline_log_entry_identifies_its_asset(client):
 
 def test_frontend_forwards_multi_asset_query_to_chat_api():
     source=Path("frontend/react-app/src/components/ChatView/ChatView.jsx").read_text(encoding="utf-8")
-    assert "matchedAssets.length === 1" in source
+    assert "if (CHAT_KB[t])" not in source
     assert "conversation_id: conversationIdRef.current" in source
