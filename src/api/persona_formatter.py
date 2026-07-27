@@ -44,6 +44,7 @@ def format_for_persona(state: Dict[str, Any], persona: str) -> Dict[str, Any]:
     Return a persona-tailored summary dict from the pipeline state.
     Keys: greeting, headline, details (list), actions (list), tags (list)
     """
+    persona = "executive" if persona == "md" else persona
     trusted   = state.get("trusted_signal")
     anomaly   = state.get("anomaly_event")
     diagnosis = state.get("fault_diagnosis")

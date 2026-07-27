@@ -4,7 +4,7 @@ import { PD } from '../../data/personas';
 import { ASSET_SCENARIO } from '../../data/scenarios';
 import { ts } from '../../utils/helpers';
 import { API } from '../../config/api';
-import { runRealPipeline, resolveHITLRemediation, resolveHITLMonitoring, resolveHITLDiagnosis, resolveHITLKnowledge, runExecutor } from '../../api/pipeline';
+import { runRealPipeline, resolveHITLRemediation, resolveHITLMonitoring, resolveHITLDiagnosis, resolveHITLKnowledge, resolveHITLAdvisory, runExecutor } from '../../api/pipeline';
 import { patchWorkOrder } from '../../api/workOrders';
 import ChatSidebar from './ChatSidebar';
 
@@ -419,7 +419,7 @@ function MessageBubble({ msg, persona, onSq, doThink, appendA, addMessage }) {
     return <HITLRemediationMsg msg={msg} onSq={onSq} doThink={doThink} appendA={appendA} addMessage={addMessage} persona={persona} />;
   }
   if (msg.type === 'hitl_advisory') {
-    return <HITLAdvisoryMsg msg={msg} />;
+    return <HITLAdvisoryMsg msg={msg} doThink={doThink} appendA={appendA} persona={persona} />;
   }
   if (msg.type === 'hitl_monitoring') {
     return <HITLMonitoringMsg msg={msg} onSq={onSq} doThink={doThink} appendA={appendA} addMessage={addMessage} persona={persona} />;
@@ -431,7 +431,7 @@ function MessageBubble({ msg, persona, onSq, doThink, appendA, addMessage }) {
     return <HITLKnowledgeMsg msg={msg} doThink={doThink} appendA={appendA} persona={persona} />;
   }
   if (msg.type === 'hitl_executor') {
-    return <HITLExecutorMsg msg={msg} doThink={doThink} appendA={appendA} />;
+    return <HITLExecutorMsg msg={msg} doThink={doThink} appendA={appendA} persona={persona} />;
   }
 
   return null;
@@ -513,9 +513,22 @@ function HITLRemediationMsg({ msg, doThink, appendA, addMessage, persona }) {
   );
 }
 
-function HITLAdvisoryMsg({ msg }) {
+function HITLAdvisoryMsg({ msg, doThink, appendA, persona }) {
   const [decision, setDecision] = useState(null);
   const h = msg.data.hitl_advisory;
+
+  function resolve(action) {
+    setDecision(action.toLowerCase());
+    doThink(async () => {
+      try {
+        const data = await resolveHITLAdvisory(h.run_id, action, persona);
+        appendA(`LLM advisory ${data.status}. Deterministic risk and RUL values were unchanged.`, ['predictive risk', 'HITL']);
+      } catch (err) {
+        setDecision(null);
+        appendA('Advisory HITL resolution failed: ' + err.message, []);
+      }
+    });
+  }
 
   return (
     <div className="mg fi">
@@ -533,11 +546,11 @@ function HITLAdvisoryMsg({ msg }) {
             <div style={{ fontSize: '11px', color: 'var(--t3)', marginBottom: '10px' }}>Accept to include in the assessment, or reject to use deterministic rules only.</div>
             {!decision ? (
               <div style={{ display: 'flex', gap: '8px' }}>
-                <button onClick={() => setDecision('accept')}
+                <button onClick={() => resolve('ACCEPT')}
                   style={{ padding: '7px 16px', borderRadius: '6px', border: 'none', background: '#8b5cf6', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: '12px' }}>
                   Accept advisory
                 </button>
-                <button onClick={() => setDecision('reject')}
+                <button onClick={() => resolve('REJECT')}
                   style={{ padding: '7px 16px', borderRadius: '6px', border: '1px solid #8b5cf6', background: 'transparent', color: '#8b5cf6', fontWeight: 700, cursor: 'pointer', fontSize: '12px' }}>
                   Reject - rules only
                 </button>
@@ -795,7 +808,7 @@ function buildLearningHtml(lr) {
     + `</div>`;
 }
 
-function HITLExecutorMsg({ msg, doThink, appendA }) {
+function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
   const [resolved, setResolved] = useState(false);
   const { refreshNotifCounts } = useContext(AppContext);
   const rec = msg.rec;
@@ -806,7 +819,7 @@ function HITLExecutorMsg({ msg, doThink, appendA }) {
     setResolved(true);
     doThink(async () => {
       try {
-        const data = await runExecutor(rec, approved);
+        const data = await runExecutor(rec, approved, persona);
         refreshNotifCounts();
         const statusColor = { success: '#10b981', partial: '#f59e0b', blocked: '#6b7280', failed: '#ef4444' };
         const color = statusColor[data.status] || '#6b7280';

@@ -11,7 +11,9 @@ class QueryPlan:
     needs_approval: bool = False
 
 _RULES = [
-    ("concept", ("why vibration", "why temperature", "explain why vibration"),
+    ("concept", ("why vibration", "why temperature", "explain why vibration",
+                 "what is anomaly", "what is bpfo", "what is bpfi",
+                 "what is condition monitoring", "define anomaly"),
      "concept", (), False),
     ("fleet", ("which bearing", "which asset", "highest risk", "fleet",
                "across the plant", "anomalous equipment"), "fleet", (), False),
