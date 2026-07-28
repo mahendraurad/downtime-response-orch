@@ -1,24 +1,10 @@
 import React, { useContext, useEffect, useRef, useState, useCallback } from 'react';
 import { AppContext } from '../../context/AppContext';
 import { PD } from '../../data/personas';
-import { ASSET_SCENARIO } from '../../data/scenarios';
 import { ts } from '../../utils/helpers';
-import { API } from '../../config/api';
-import { runRealPipeline, resolveHITLRemediation, resolveHITLMonitoring, resolveHITLDiagnosis, resolveHITLKnowledge, resolveHITLAdvisory, runExecutor } from '../../api/pipeline';
-import { patchWorkOrder } from '../../api/workOrders';
+import { askChat } from '../../api/chat';
+import { resolveHITLRemediation, resolveHITLMonitoring, resolveHITLDiagnosis, resolveHITLKnowledge, resolveHITLAdvisory, runExecutor } from '../../api/pipeline';
 import ChatSidebar from './ChatSidebar';
-
-const CHAT_KB = {
-  'Can M-104 safely run until Saturday?': {
-    r: ['Predictive Risk Agent', 'Failure Intel Agent'],
-    c: 'Running M-104 to Saturday increases failure probability to <strong style="color:var(--t)">67%</strong> (from 22% today). Degradation is nonlinear at Stage 3 — the next 72h are the fastest-accelerating window.\n\nExpected consequence: outer race seizure at speed, 12–18h unplanned stop, risk of secondary winding damage (~$80K). That converts a $18K planned repair into $619K+ emergency.\n\n<strong style="color:var(--rd)">Recommendation: Do not run past Wednesday.</strong>'
-  },
-};
-
-const DFLT = [
-  { r: ['Monitoring Agent', 'Failure Intel Agent', 'Knowledge Agent'], c: 'M-104 outer race spall is at <strong style="color:var(--t)">Stage 3 — 25–40% surface damage</strong>. BPFO family at 4.02× is consistent with ISO 13373-1 Stage 3. Three KB cases at this level showed failure in 4.1–9.3 days. Wednesday is the last low-risk window.' },
-  { r: ['Prescriptive Optimisation Agent'], c: '<strong style="color:var(--t)">Prescriptive recommendation: Replace bearing Wednesday 06:00.</strong>\n\nRisk-adjusted analysis: defer to Friday → 67% failure probability. Net avoidance $601K. Parts confirmed, crew available, window available — the decision has a clear answer.' }
-];
 
 let _msgIdCounter = 0;
 function mkId() { return ++_msgIdCounter; }
@@ -52,14 +38,9 @@ export default function ChatView() {
     function onSq(e) { sendMsg(e.detail); }
     function onRunPipeline(e) {
       const { scenario, persona: pArg } = e.detail;
-      doThink(async () => {
-        try {
-          const data = await runRealPipeline(scenario, -1, pArg);
-          if (data) handlePipelineResult(data, scenario, pArg);
-        } catch (err) {
-          const r = DFLT[Math.floor(Math.random() * DFLT.length)];
-          appendA(r.c, r.r);
-        }
+      sendMsg(`Run the orchestrated analysis for scenario ${scenario}`, {
+        scenario,
+        requestedPersona: pArg,
       });
     }
     function onExecutorHITL(e) { renderExecutorHITLCard(e.detail); }
@@ -134,86 +115,29 @@ export default function ChatView() {
     }
   }
 
-  async function sendMsg(txt) {
+  async function sendMsg(txt, options = {}) {
     const t = (txt || inputVal).trim();
     if (!t) return;
     setInputVal('');
     if (inpRef.current) inpRef.current.style.height = 'auto';
     appendU(t);
-    // Local canned Q&A — no backend round-trip needed
-    // Primary path: backend (query_router) detects scenario entities and intent.
-    // ASSET_SCENARIO is kept as a fallback for offline / unrecognised queries only.
     doThink(async () => {
       try {
-        const resp = await fetch(API + '/api/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: t, persona, conversation_id: conversationIdRef.current }),
+        const d = await askChat({
+          message: t,
+          persona: options.requestedPersona || persona,
+          conversationId: conversationIdRef.current,
+          context: options.scenario ? { scenario: options.scenario } : null,
         });
-        if (resp.ok) {
-          const d = await resp.json();
-          // Backend detected a scenario entity — run full pipeline for HITL cards
-          if (d.scenario_detected) {
-            try {
-              const pData = await runRealPipeline(d.scenario_detected, -1, persona);
-              if (pData) {
-                if (/approv/i.test(t)) {
-                  try { await patchWorkOrder('WO-2024-1847', { status: 'Approved' }); } catch (e) {}
-                }
-                handlePipelineResult(pData, d.scenario_detected, persona);
-              } else {
-                appendA(d.response, d.agents || []);
-              }
-            } catch {
-              appendA(d.response, d.agents || []);
-            }
-            return;
-          }
-
-          // Render normal, multi-asset, and clarification responses using the
-          // complete backend contract while retaining conversation context.
-          conversationIdRef.current = d.conversation_id || conversationIdRef.current;
-          const details = d.details && d.details.length ? '<br><br>' + d.details.map(x => '• ' + x).join('<br>') : '';
-          const actions = d.actions && d.actions.length ? '<br><br><strong>Actions:</strong><br>' + d.actions.map(x => '→ ' + x).join('<br>') : '';
-          const questions = d.clarification && d.clarification.questions ? '<br><br><strong>Needed:</strong><br>' + d.clarification.questions.map(x => '? ' + x).join('<br>') : '';
-          appendA(d.response + details + actions + questions,
-            d.pipeline_log ? d.pipeline_log.map(n => n.node ? n.node.replace(/_/g, ' ') : '') : []);
-          return;
-        } else {
-          const r = DFLT[Math.floor(Math.random() * DFLT.length)];
-          appendA(r.c, r.r);
-          return;
-        }
-      } catch {
-        // Network error — fall through to ASSET_SCENARIO fallback below
+        conversationIdRef.current = d.conversation_id || conversationIdRef.current;
+        const details = d.details && d.details.length ? '<br><br>' + d.details.map(x => '• ' + x).join('<br>') : '';
+        const actions = d.actions && d.actions.length ? '<br><br><strong>Actions:</strong><br>' + d.actions.map(x => '→ ' + x).join('<br>') : '';
+        const questions = d.clarification && d.clarification.questions ? '<br><br><strong>Needed:</strong><br>' + d.clarification.questions.map(x => '? ' + x).join('<br>') : '';
+        appendA(d.response + details + actions + questions,
+          d.pipeline_log ? d.pipeline_log.map(n => n.node ? n.node.replace(/_/g, ' ') : '') : []);
+      } catch (error) {
+        appendA(`The orchestrated chat service is currently unavailable. ${error.message}`, ['Chat API']);
       }
-
-      // Fallback: frontend ASSET_SCENARIO map (offline / unrecognised by backend)
-      const lower = t.toLowerCase();
-      for (const [asid, sc] of Object.entries(ASSET_SCENARIO)) {
-        if (lower.includes(asid.toLowerCase())) {
-          try {
-            const data = await runRealPipeline(sc, -1, persona);
-            if (data) {
-              if (/approv/i.test(t)) {
-                try { await patchWorkOrder('WO-2024-1847', { status: 'Approved' }); } catch (e) {}
-              }
-              handlePipelineResult(data, sc, persona);
-            } else {
-              const r = DFLT[Math.floor(Math.random() * DFLT.length)];
-              appendA(r.c, r.r);
-            }
-          } catch {
-            const r = DFLT[Math.floor(Math.random() * DFLT.length)];
-            appendA(r.c, r.r);
-          }
-          return;
-        }
-      }
-
-      // Nothing matched at all
-      const r = DFLT[Math.floor(Math.random() * DFLT.length)];
-      appendA(r.c, r.r);
     });
   }
 

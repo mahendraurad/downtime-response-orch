@@ -14,7 +14,7 @@ The repository is ready for frontend integration in deterministic local mode. Az
 | Human approval and HITL gates | Implemented |
 | Reflexion and graceful error envelopes | Implemented |
 | Local persistence and mock connectors | Implemented |
-| Automated backend tests | `713 passed` |
+| Automated backend tests | `717 passed` |
 | React frontend from `feature/8agents_frontend` | Integrated on `dev` |
 | Real CMMS/ERP/historian and Azure services | Next phase |
 
@@ -156,8 +156,10 @@ turns so the pending question and collected context can be continued safely.
 Conceptual questions such as "What is RUL?" use the controlled glossary without
 asset data; asset-specific and fleet questions wait for their required context.
 
-All React chat questions now go to the backend before any offline fallback.
-Known demo asset labels can be resolved to validated scenarios by the backend.
+All React chat questions, including asset-detail questions, go exclusively to
+`/api/chat`. There is no frontend canned-answer or single-asset pipeline
+fallback. Known demo asset labels are resolved to validated scenarios by the
+backend orchestrator.
 Conversation context has configurable expiry and turn limits, supports an
 explicit reset, rejects reserved internal context keys, and discards stale
 telemetry when the user changes assets.
@@ -265,7 +267,7 @@ python -m pytest tests/test_agent1_to_agent8_integration.py -q
 Current certification:
 
 ```text
-713 passed
+717 passed
 0 failed
 ```
 

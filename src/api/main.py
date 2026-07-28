@@ -1334,24 +1334,10 @@ def get_asset(asset_id: str):
 
 # ── Chat endpoint ─────────────────────────────────────────────────────────────
 
-# Pre-baked canned responses keyed by keyword patterns
-_CANNED = {
-    "outer race": "Outer race spall Stage 3 confirmed. BPFO 4.02× baseline. RUL 5–8 days. Replacement mandatory at Stage 3.",
-    "rul":        "RUL estimate: 5–8 days (median 6.4d). P10: 4.1d, P90: 9.3d. 82% confidence.",
-    "cost":       "Planned intervention: $18K. Emergency failure: $619K+. Net avoidance: $601K (33× ROI).",
-    "loto":       "LOTO EL-104-A is current (Nov 2023, valid Nov 2024). Covers MCB-104A, MCB-104B, IL-104-M.",
-    "parts":      "SKF 6310-2RS confirmed at Bin A-14 (Qty 3). Mobil SHC 100 in stock. All tools available.",
-    "sop":        "SOP M-104-REP-04 Rev 4.1 applies. Torque: 85 Nm. Lubricant: Mobil SHC 100 (80–100 g).",
-    "risk":       "Risk level: CRITICAL. Failure probability by Saturday: 67%. Act before Wednesday.",
-    "approve":    "WO-2024-1847 approved. SAP PM: RELEASED. Crew notified. Parts reserved at Bin A-14.",
-    "safe":       "ISO 10816-3 Zone D. Mandatory LOTO before any approach. Class B hearing + vibration gloves.",
-}
-
-
 @app.post("/api/chat")
 @traceable(name="DRO Chat API", run_type="chain", tags=["dro", "chat-api"])
 def chat(req: ChatRequest):
-    """Simple persona-aware chat — keyword matching + optional pipeline context."""
+    """Route persona-aware natural language through the backend orchestrator."""
     run_id=f"CHAT-{uuid.uuid4().hex[:10].upper()}"
     conversation_id=req.conversation_id or f"CONV-{uuid.uuid4().hex[:10].upper()}"
     if len(conversation_id)>80 or not re.fullmatch(r"[A-Za-z0-9_.:-]+",conversation_id):
