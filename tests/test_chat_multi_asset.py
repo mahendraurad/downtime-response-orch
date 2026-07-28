@@ -64,4 +64,35 @@ def test_each_pipeline_log_entry_identifies_its_asset(client):
 def test_frontend_forwards_multi_asset_query_to_chat_api():
     source=Path("frontend/react-app/src/components/ChatView/ChatView.jsx").read_text(encoding="utf-8")
     assert "if (CHAT_KB[t])" not in source
-    assert "conversation_id: conversationIdRef.current" in source
+    assert "conversationId: conversationIdRef.current" in source
+
+
+def test_main_chat_has_no_single_asset_pipeline_or_offline_shortcut():
+    source=Path("frontend/react-app/src/components/ChatView/ChatView.jsx").read_text(encoding="utf-8")
+    assert "runRealPipeline" not in source
+    assert "ASSET_SCENARIO" not in source
+    assert "patchWorkOrder" not in source
+    assert "const CHAT_KB" not in source
+    assert "const DFLT" not in source
+    assert "askChat({" in source
+
+
+def test_asset_detail_chat_also_uses_orchestrated_chat_api():
+    source=Path(
+        "frontend/react-app/src/components/AssetRegistryView/AssetChat.jsx"
+    ).read_text(encoding="utf-8")
+    assert "askChat({" in source
+    assert "assetId: asset.id" in source
+    assert "chatResp" not in source
+
+
+def test_chat_transport_has_one_natural_language_endpoint():
+    source=Path("frontend/react-app/src/api/chat.js").read_text(encoding="utf-8")
+    assert "`${API}/api/chat`" in source
+    assert "/api/pipeline/run" not in source
+
+
+def test_topbar_live_analysis_enters_chat_orchestrator():
+    source=Path("frontend/react-app/src/components/Topbar.jsx").read_text(encoding="utf-8")
+    assert "new CustomEvent('dro-sq'" in source
+    assert "dro-run-pipeline" not in source

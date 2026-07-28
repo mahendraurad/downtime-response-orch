@@ -14,7 +14,7 @@ The repository is ready for frontend integration in deterministic local mode. Az
 | Human approval and HITL gates | Implemented |
 | Reflexion and graceful error envelopes | Implemented |
 | Local persistence and mock connectors | Implemented |
-| Automated backend tests | `703 passed` |
+| Automated backend tests | `717 passed` |
 | React frontend from `feature/8agents_frontend` | Integrated on `dev` |
 | Real CMMS/ERP/historian and Azure services | Next phase |
 
@@ -118,6 +118,9 @@ The frontend can generate its API client from `/openapi.json`. The principal end
 | `POST` | `/api/pipeline/hitl/monitoring` | Resolve Agent 2 borderline event |
 | `POST` | `/api/pipeline/hitl/diagnosis` | Resolve Agent 3 low-confidence diagnosis |
 | `POST` | `/api/pipeline/hitl/knowledge` | Resolve missing-SOP gate |
+| `POST` | `/api/pipeline/hitl/advisory` | Review a non-authoritative LLM advisory |
+| `GET` | `/api/pipeline/hitl/pending` | List durable pending work permitted for a persona |
+| `GET` | `/api/pipeline/hitl/{run_id}` | Read durable HITL status and decision audit |
 | `POST` | `/api/executor/run` | Execute a typed recommendation after approval |
 | `GET` | `/api/notifications/counts` | Unread counts for frontend personas |
 | `GET` | `/api/notifications/{persona_id}` | Persona notification inbox |
@@ -153,8 +156,10 @@ turns so the pending question and collected context can be continued safely.
 Conceptual questions such as "What is RUL?" use the controlled glossary without
 asset data; asset-specific and fleet questions wait for their required context.
 
-All React chat questions now go to the backend before any offline fallback.
-Known demo asset labels can be resolved to validated scenarios by the backend.
+All React chat questions, including asset-detail questions, go exclusively to
+`/api/chat`. There is no frontend canned-answer or single-asset pipeline
+fallback. Known demo asset labels are resolved to validated scenarios by the
+backend orchestrator.
 Conversation context has configurable expiry and turn limits, supports an
 explicit reset, rejects reserved internal context keys, and discards stale
 telemetry when the user changes assets.
@@ -165,6 +170,13 @@ advisory Accept/Reject/Modify decisions are wired to a backend endpoint and can
 never change deterministic risk or RUL facts. These capability checks use the
 selected persona only; production authentication and trusted RBAC remain a
 separate security requirement.
+
+HITL sessions are durable and atomically claimed. Local development uses
+SQLite; Azure PostgreSQL is supported through `POSTGRES_URL` and
+`HITL_REPOSITORY=postgres`. Configure TTL, claim lease, repository backend,
+SQLite path, and gate permissions under `hitl` in
+`config/orchestrator_config.json`. PostgreSQL schema DDL is versioned in
+`migrations/001_hitl_postgres.sql`.
 
 Multi-asset questions name every requested asset in `multi_asset_results`. Each
 asset is evaluated independently through the required pipeline depth, receives
@@ -255,7 +267,7 @@ python -m pytest tests/test_agent1_to_agent8_integration.py -q
 Current certification:
 
 ```text
-703 passed
+717 passed
 0 failed
 ```
 
@@ -286,7 +298,7 @@ Cloud credentials are never required for deterministic local execution. LLM outp
 
 ## Next steps
 
-1. Add PostgreSQL LangGraph checkpointing and durable HITL sessions.
+1. Add PostgreSQL LangGraph conversation/workflow checkpointing (HITL sessions are already durable).
 2. Add authentication, persona authorization and approval permissions.
 3. Replace local/mocked historian, CMMS, inventory and notification adapters.
 4. Move SOP and learned-case retrieval to Azure Blob Storage and Azure AI Search.

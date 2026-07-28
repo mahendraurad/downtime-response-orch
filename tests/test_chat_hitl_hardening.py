@@ -1,20 +1,23 @@
 """Backend wiring, follow-up, persona, HITL, and bounded Reflexion certification."""
 from pathlib import Path
-from types import SimpleNamespace
-
 import pytest
 from fastapi.testclient import TestClient
 
 import src.api.main as api
 from src.agents.reflexion_agent import ReflexionAgent
+from src.schemas.risk import RiskAssessment
+from src.tools.hitl_repository import SQLiteHITLRepository
 
 
 @pytest.fixture
-def client():
+def client(tmp_path):
+    previous_repository=api._HITL_REPOSITORY
+    api._HITL_REPOSITORY=SQLiteHITLRepository(tmp_path / "api_hitl.db")
     api._CHAT_CONTEXT_STORE.clear()
     api._HITL_STORE.clear()
     api._HITL_RESOLVED.clear()
-    return TestClient(api.app,raise_server_exceptions=False)
+    yield TestClient(api.app,raise_server_exceptions=False)
+    api._HITL_REPOSITORY=previous_repository
 
 
 def test_known_single_asset_chat_uses_backend_pipeline(client):
@@ -72,7 +75,7 @@ def test_expired_context_is_not_reused(client,monkeypatch):
 
 
 def _remediation_session(run_id="HITL-1"):
-    api._HITL_STORE[run_id]={"type":"remediation","trusted":object(),
+    api._HITL_STORE[run_id]={"type":"remediation","trusted":{},
         "persona":"supervisor","intent":"full","created_at":api.time.time()}
     return run_id
 
@@ -112,12 +115,44 @@ def test_diagnosis_gate_requires_engineer(client):
 
 
 def test_advisory_modify_validation_and_decision(client):
-    risk=SimpleNamespace(advisory_note="Original advisory")
+    risk=RiskAssessment(advisory_note="Original advisory",
+                        assessment_source="rules+llm_fallback")
     api._HITL_STORE["ADV"]={"type":"advisory","risk_assessment":risk,"created_at":api.time.time()}
     invalid=client.post("/api/pipeline/hitl/advisory",json={"run_id":"ADV","action":"MODIFY","persona":"engineer"})
     assert invalid.status_code==422 and "ADV" in api._HITL_STORE
     valid=client.post("/api/pipeline/hitl/advisory",json={"run_id":"ADV","action":"MODIFY","persona":"engineer","revised_note":"Reviewed wording"}).json()
     assert valid["advisory_note"]=="Reviewed wording" and valid["deterministic_assessment_unchanged"]
+
+
+def test_pending_and_status_are_persona_filtered_and_audited(client):
+    run_id=_remediation_session("AUDIT")
+    api._stamp_hitl_sessions()
+    assert client.get("/api/pipeline/hitl/pending",
+        params={"persona":"executive"}).json()["items"]==[]
+    pending=client.get("/api/pipeline/hitl/pending",
+        params={"persona":"supervisor"}).json()["items"]
+    assert [item["run_id"] for item in pending]==[run_id]
+    decision=client.post("/api/pipeline/hitl/remediation",json={
+        "run_id":run_id,"action":"DROP","persona":"supervisor",
+        "rationale":"Bad sensor reading",
+    })
+    assert decision.status_code==200
+    status=client.get(f"/api/pipeline/hitl/{run_id}",
+        params={"persona":"supervisor"}).json()
+    assert status["session"]["status"]=="resolved"
+    assert status["decisions"][0]["rationale"]=="Bad sensor reading"
+    assert "payload" not in status["session"]
+
+
+def test_api_can_resolve_session_after_memory_restart(client):
+    run_id=_remediation_session("RESTARTED")
+    api._stamp_hitl_sessions()
+    api._HITL_STORE.clear()  # simulate process loss/restart
+    response=client.post("/api/pipeline/hitl/remediation",json={
+        "run_id":run_id,"action":"DROP","persona":"supervisor",
+    })
+    assert response.status_code==200
+    assert api._HITL_REPOSITORY.get_session(run_id)["status"]=="resolved"
 
 
 def test_execution_approval_checks_selected_persona_before_payload(client):

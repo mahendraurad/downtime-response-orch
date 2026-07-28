@@ -44,6 +44,9 @@ data/curated_signals.json
 data/trusted_signals.db
 data/monitoring_decisions.db
 data/execution_results.db
+data/hitl_sessions.db
+data/hitl_sessions.db-shm
+data/hitl_sessions.db-wal
 data/learned_cases.json
 data/learning_training_rows.jsonl
 data/*.db-shm
