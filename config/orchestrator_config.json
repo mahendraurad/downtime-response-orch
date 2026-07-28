@@ -3,6 +3,9 @@
   "chat": {"max_message_characters": 2000, "default_persona": "supervisor", "max_context_sessions": 500, "max_context_turns": 12, "context_ttl_seconds": 1800},
   "hitl": {
     "session_ttl_seconds": 1800,
+    "claim_lease_seconds": 120,
+    "repository_backend": "auto",
+    "sqlite_path": "data/hitl_sessions.db",
     "permissions": {
       "remediation": ["supervisor", "engineer", "ot"],
       "monitoring": ["supervisor", "engineer"],

@@ -59,6 +59,7 @@ from src.tools.data_loader import load_telemetry_rows, load_asset_master
 from src.orchestrator.query_router import plan_query
 from src.agents.reflexion_agent import ReflexionAgent
 from src.tools.orchestrator_audit import write_audit
+from src.tools.hitl_repository import build_hitl_repository
 
 app = FastAPI(title="DRO API", version="1.0.0")
 
@@ -305,6 +306,8 @@ _MAX_CHAT_TURNS = int(_ORCH_CONFIG["chat"].get("max_context_turns",12))
 _CHAT_CONTEXT_TTL = int(_ORCH_CONFIG["chat"].get("context_ttl_seconds",1800))
 _HITL_TTL = int(_ORCH_CONFIG.get("hitl",{}).get("session_ttl_seconds",1800))
 _HITL_PERMISSIONS = _ORCH_CONFIG.get("hitl",{}).get("permissions",{})
+_HITL_LEASE_SECONDS = int(_ORCH_CONFIG.get("hitl",{}).get("claim_lease_seconds",120))
+_HITL_REPOSITORY = build_hitl_repository(_ORCH_CONFIG)
 
 
 def _remember_chat_context(conversation_id: str, context: dict) -> None:
@@ -340,23 +343,36 @@ def _authorize_hitl(persona: str, gate: str) -> None:
         raise HTTPException(403,f"Persona '{persona}' is not permitted to resolve the {gate} gate.")
 
 
-def _claim_hitl(run_id: str, gate: str, action: str, allowed_actions: set[str], persona: str) -> dict:
+def _claim_hitl(run_id: str, gate: str, action: str, allowed_actions: set[str],
+                persona: str, rationale: str = "") -> dict:
     """Validate a decision before consuming its one-shot HITL session."""
     action=action.upper()
     if action not in allowed_actions:
         raise HTTPException(422,f"Invalid {gate} action. Allowed values: {', '.join(sorted(allowed_actions))}.")
     _authorize_hitl(persona,gate)
-    stored=_HITL_STORE.get(run_id)
-    if not stored:
-        if run_id in _HITL_RESOLVED:
-            raise HTTPException(409,f"HITL session '{run_id}' has already been resolved.")
-        raise HTTPException(404,f"HITL session '{run_id}' was not found or has expired.")
-    if stored.get("type")!=gate:
-        raise HTTPException(409,f"HITL session '{run_id}' is for {stored.get('type')}, not {gate}.")
-    created=float(stored.get("created_at",time.time()))
-    if time.time()-created>_HITL_TTL:
+    memory=_HITL_STORE.get(run_id)
+    persisted=_HITL_REPOSITORY.get_session(run_id)
+    if memory and (not persisted or float(memory.get("created_at",0))>=float(persisted.get("updated_at",0))):
+        created=float(memory.get("created_at",time.time()))
+        _HITL_REPOSITORY.save_session(run_id,memory.get("type",""),memory.get("persona",persona),
+            memory,created,created+_HITL_TTL)
+    claim=_HITL_REPOSITORY.claim(run_id,gate,persona,action,_HITL_LEASE_SECONDS)
+    outcome=claim.get("outcome")
+    if outcome=="not_found":
+        raise HTTPException(404,f"HITL session '{run_id}' was not found.")
+    if outcome=="wrong_gate":
+        raise HTTPException(409,f"HITL session '{run_id}' is for {claim.get('actual_gate')}, not {gate}.")
+    if outcome=="expired":
         _HITL_STORE.pop(run_id,None)
         raise HTTPException(410,f"HITL session '{run_id}' has expired.")
+    if outcome in {"resolved","processing"}:
+        raise HTTPException(409,f"HITL session '{run_id}' is already {outcome}.")
+    if outcome!="claimed":
+        raise HTTPException(409,f"HITL session '{run_id}' cannot be resolved from state {outcome}.")
+    stored=claim["payload"]
+    if not _HITL_REPOSITORY.complete(run_id,claim["claim_token"],gate,action,persona,
+                                     rationale[:1000]):
+        raise HTTPException(409,f"HITL session '{run_id}' lost its decision lease.")
     _HITL_STORE.pop(run_id,None)
     _HITL_RESOLVED[run_id]=time.time()
     return stored
@@ -367,6 +383,23 @@ def _stamp_hitl_sessions() -> None:
     now=time.time()
     for value in _HITL_STORE.values():
         value.setdefault("created_at",now)
+    for run_id,value in _HITL_STORE.items():
+        try:
+            _HITL_REPOSITORY.save_session(run_id,value.get("type",""),
+                value.get("persona","supervisor"),value,float(value["created_at"]),
+                float(value["created_at"])+_HITL_TTL)
+        except (TypeError,ValueError) as exc:
+            raise HTTPException(500,f"HITL session could not be serialized: {exc}") from exc
+        except Exception as exc:
+            raise HTTPException(503,"Durable HITL persistence is unavailable.") from exc
+
+
+def _hitl_public_session(session: dict) -> dict:
+    """Expose operational metadata without leaking the stored pipeline payload."""
+    return {key: session.get(key) for key in (
+        "run_id", "gate", "persona", "status", "created_at", "expires_at",
+        "claimed_at", "claimed_by", "action", "updated_at",
+    )}
 
 
 def _create_advisory_gate(run_id: str, risk, persona: str, blocked: bool = False):
@@ -418,18 +451,21 @@ class HITLRemediationRequest(BaseModel):
     run_id: str
     action: str        # IMPUTE | DROP | KEEP
     persona: Persona = "supervisor"
+    rationale: str = ""
 
 
 class HITLMonitoringRequest(BaseModel):
     run_id: str
     action: str        # SUPPRESS | CONFIRM
     persona: Persona = "supervisor"
+    rationale: str = ""
 
 
 class HITLDiagnosisRequest(BaseModel):
     run_id: str
     action: str        # CONFIRM | MARK_UNDETERMINED
     persona: Persona = "engineer"
+    rationale: str = ""
 
 
 class HITLKnowledgeRequest(BaseModel):
@@ -437,6 +473,7 @@ class HITLKnowledgeRequest(BaseModel):
     action: str        # FLAG_MANUAL | ACCEPT_EMPTY
     persona: Persona = "maintenance"
     manual_sop_note: Optional[str] = None
+    rationale: str = ""
 
 
 class HITLAdvisoryRequest(BaseModel):
@@ -444,6 +481,35 @@ class HITLAdvisoryRequest(BaseModel):
     action: str        # ACCEPT | REJECT | MODIFY
     persona: Persona = "engineer"
     revised_note: Optional[str] = None
+    rationale: str = ""
+
+
+@app.get("/api/pipeline/hitl/pending")
+def hitl_pending(persona: Persona = "supervisor", gate: str = ""):
+    """Return only HITL work the selected persona is authorized to resolve."""
+    if gate and gate not in _HITL_PERMISSIONS:
+        raise HTTPException(422, f"Unknown HITL gate: {gate}")
+    allowed = {name for name, personas in _HITL_PERMISSIONS.items()
+               if persona in set(personas)}
+    rows = _HITL_REPOSITORY.list_pending(persona=persona, gate=gate)
+    return {
+        "persona": persona,
+        "items": [_hitl_public_session(row) for row in rows
+                  if row.get("gate") in allowed],
+    }
+
+
+@app.get("/api/pipeline/hitl/{run_id}")
+def hitl_status(run_id: str, persona: Persona = "supervisor"):
+    """Return durable session state and its audit decisions."""
+    session = _HITL_REPOSITORY.get_session(run_id)
+    if not session:
+        raise HTTPException(404, f"HITL session '{run_id}' was not found.")
+    _authorize_hitl(persona, session["gate"])
+    return {
+        "session": _hitl_public_session(session),
+        "decisions": _HITL_REPOSITORY.decisions(run_id),
+    }
 
 
 class ChatRequest(BaseModel):
@@ -742,7 +808,8 @@ def pipeline_run(req: PipelineRunRequest):
 def hitl_remediation(req: HITLRemediationRequest):
     """Resolve a DFA HITL gate: apply IMPUTE/DROP/KEEP and resume the pipeline."""
     action = req.action.upper()
-    stored = _claim_hitl(req.run_id,"remediation",action,{"IMPUTE","DROP","KEEP"},req.persona)
+    stored = _claim_hitl(req.run_id,"remediation",action,{"IMPUTE","DROP","KEEP"},
+                         req.persona,req.rationale)
     persona = req.persona
     intent  = stored.get("intent", "full")
     trusted = stored["trusted"]
@@ -859,7 +926,8 @@ def hitl_remediation(req: HITLRemediationRequest):
 def hitl_monitoring_resolution(req: HITLMonitoringRequest):
     """Resolve Monitoring HITL gate: SUPPRESS or CONFIRM a borderline EWMA anomaly."""
     action = req.action.upper()
-    stored = _claim_hitl(req.run_id,"monitoring",action,{"SUPPRESS","CONFIRM"},req.persona)
+    stored = _claim_hitl(req.run_id,"monitoring",action,{"SUPPRESS","CONFIRM"},
+                         req.persona,req.rationale)
     persona = req.persona
     intent  = stored.get("intent", "full")
     trusted = stored["trusted"]
@@ -987,7 +1055,8 @@ def hitl_monitoring_resolution(req: HITLMonitoringRequest):
 def hitl_diagnosis_resolution(req: HITLDiagnosisRequest):
     """Resolve FI HITL gate: CONFIRM or MARK_UNDETERMINED a low-confidence fault."""
     action = req.action.upper()
-    stored = _claim_hitl(req.run_id,"diagnosis",action,{"CONFIRM","MARK_UNDETERMINED"},req.persona)
+    stored = _claim_hitl(req.run_id,"diagnosis",action,
+                         {"CONFIRM","MARK_UNDETERMINED"},req.persona,req.rationale)
     persona           = req.persona
     intent            = stored.get("intent", "full")
     trusted           = stored["trusted"]
@@ -1083,7 +1152,8 @@ def hitl_diagnosis_resolution(req: HITLDiagnosisRequest):
 def hitl_knowledge_resolution(req: HITLKnowledgeRequest):
     """Resolve Knowledge HITL gate: FLAG_MANUAL or ACCEPT_EMPTY when no SOP found."""
     action = req.action.upper()
-    stored = _claim_hitl(req.run_id,"knowledge",action,{"FLAG_MANUAL","ACCEPT_EMPTY"},req.persona)
+    stored = _claim_hitl(req.run_id,"knowledge",action,
+                         {"FLAG_MANUAL","ACCEPT_EMPTY"},req.persona,req.rationale)
     persona   = req.persona
     diagnosis = stored.get("fault_diagnosis")
     risk      = stored.get("risk_assessment")
@@ -1157,7 +1227,8 @@ def hitl_advisory_resolution(req: HITLAdvisoryRequest):
         raise HTTPException(422,"revised_note is required when action is MODIFY.")
     if len(revised)>1000:
         raise HTTPException(422,"revised_note exceeds 1000 characters.")
-    stored=_claim_hitl(req.run_id,"advisory",action,{"ACCEPT","REJECT","MODIFY"},req.persona)
+    stored=_claim_hitl(req.run_id,"advisory",action,{"ACCEPT","REJECT","MODIFY"},
+                       req.persona,req.rationale)
     risk=stored.get("risk_assessment")
     original=str(getattr(risk,"advisory_note","") or "")
     if action=="MODIFY":

@@ -62,6 +62,21 @@ export async function resolveHITLAdvisory(runId, action, persona, revisedNote) {
   return resp.json();
 }
 
+export async function getPendingHITL(persona, gate = '') {
+  const params = new URLSearchParams({ persona });
+  if (gate) params.set('gate', gate);
+  const resp = await fetch(`${API}/api/pipeline/hitl/pending?${params}`);
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  return resp.json();
+}
+
+export async function getHITLStatus(runId, persona) {
+  const params = new URLSearchParams({ persona });
+  const resp = await fetch(`${API}/api/pipeline/hitl/${encodeURIComponent(runId)}?${params}`);
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  return resp.json();
+}
+
 export async function runExecutor(recommendation, approved, persona = 'supervisor') {
   const resp = await fetch(`${API}/api/executor/run`, {
     method: 'POST',
