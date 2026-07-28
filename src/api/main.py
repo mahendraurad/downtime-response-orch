@@ -2,11 +2,20 @@
 api/main.py  —  DRO FastAPI server
 
 Endpoints:
+  GET  /api/health               subsystem health check (config, assets, audit, SOP corpus, LLM)
   POST /api/pipeline/run         run full DFA→Monitoring→FI→Risk→Knowledge pipeline
   GET  /api/pipeline/scenarios   list available demo scenarios
+  POST /api/pipeline/hitl/remediation   resolve Agent 1 DFA gate (IMPUTE / DROP / KEEP)
+  POST /api/pipeline/hitl/monitoring    resolve Agent 2 EWMA gate (SUPPRESS / CONFIRM)
+  POST /api/pipeline/hitl/diagnosis     resolve Agent 3 low-confidence gate (CONFIRM / MARK_UNDETERMINED)
+  POST /api/pipeline/hitl/knowledge     resolve Agent 5 missing-SOP gate (FLAG_MANUAL / ACCEPT_EMPTY)
+  POST /api/executor/run         execute a typed maintenance recommendation
+  POST /api/chat                 persona-aware chat (intent classification + pipeline or LLM routing)
   GET  /api/assets               all assets from asset_master.json
   GET  /api/assets/{asset_id}    single asset detail
-  POST /api/chat                 persona-aware chat (routes to pipeline or canned responses)
+  GET  /api/notifications/counts unread notification counts for all personas
+  GET  /api/notifications/{persona_id}         persona notification inbox
+  POST /api/notifications/{persona_id}/read    mark all notifications read
   GET  /api/workorders           in-memory work-order store
   POST /api/workorders           create work order
   PATCH /api/workorders/{wo_id}  update WO status / checklist
@@ -375,6 +384,104 @@ def root():
     if os.path.exists(_FRONTEND_HTML):
         return FileResponse(_FRONTEND_HTML)
     return {"message": "DRO API running. Frontend not found at frontend/index.html."}
+
+
+# ── Health endpoint ───────────────────────────────────────────────────────────
+
+@app.get("/api/health")
+def health_check():
+    """
+    Probe critical subsystems and return an aggregated health status.
+
+    HTTP 200 → status "ok" or "degraded" (pipeline can still serve requests).
+    HTTP 503 → status "unhealthy" (one or more critical checks failed).
+
+    Checks
+    ------
+    config      : orchestrator_config.json loaded at startup (always ok if server is up)
+    asset_master: asset_master.json readable and non-empty  [critical]
+    audit_log   : audit directory is writable               [critical]
+    sop_corpus  : data/sops/ directory exists and has files [degraded if missing]
+    llm         : Azure LLM credentials present             [informational only]
+    """
+    checks: Dict[str, Any] = {}
+    is_unhealthy = False
+    is_degraded = False
+
+    # 1. Config — always passes if the server started successfully
+    checks["config"] = {"status": "ok", "detail": "orchestrator_config.json loaded"}
+
+    # 2. Asset master
+    try:
+        assets = load_asset_master()
+        asset_count = len(assets) if assets else 0
+        if asset_count == 0:
+            checks["asset_master"] = {"status": "error", "detail": "asset_master.json is empty", "asset_count": 0}
+            is_unhealthy = True
+        else:
+            checks["asset_master"] = {"status": "ok", "detail": f"{asset_count} assets loaded", "asset_count": asset_count}
+    except Exception as exc:
+        checks["asset_master"] = {"status": "error", "detail": str(exc), "asset_count": 0}
+        is_unhealthy = True
+
+    # 3. Audit log directory writable
+    try:
+        audit_dir = os.path.dirname(os.path.abspath(_AUDIT_PATH))
+        if not os.path.isdir(audit_dir):
+            checks["audit_log"] = {"status": "error", "detail": f"audit directory missing: {audit_dir}"}
+            is_unhealthy = True
+        else:
+            probe = os.path.join(audit_dir, ".health_probe")
+            with open(probe, "w") as _f:
+                _f.write("")
+            os.remove(probe)
+            checks["audit_log"] = {"status": "ok", "detail": "audit directory writable"}
+    except Exception as exc:
+        checks["audit_log"] = {"status": "error", "detail": str(exc)}
+        is_unhealthy = True
+
+    # 4. SOP corpus (degraded, not unhealthy — synthetic fallbacks exist)
+    try:
+        sop_dir = os.path.join(os.path.dirname(__file__), "..", "..", "data", "sops")
+        sop_dir = os.path.normpath(sop_dir)
+        if not os.path.isdir(sop_dir):
+            checks["sop_corpus"] = {"status": "warning", "detail": "data/sops/ directory not found; using synthetic fallbacks", "document_count": 0}
+            is_degraded = True
+        else:
+            docs = [f for f in os.listdir(sop_dir) if not f.startswith(".") and f.lower().endswith((".pdf", ".txt"))]
+            if not docs:
+                checks["sop_corpus"] = {"status": "warning", "detail": "data/sops/ is empty; using synthetic fallbacks", "document_count": 0}
+                is_degraded = True
+            else:
+                checks["sop_corpus"] = {"status": "ok", "detail": f"{len(docs)} document(s) available", "document_count": len(docs)}
+    except Exception as exc:
+        checks["sop_corpus"] = {"status": "warning", "detail": str(exc), "document_count": 0}
+        is_degraded = True
+
+    # 5. LLM — informational only; pipeline is fully deterministic without it
+    if _CHAT_LLM.is_configured():
+        checks["llm"] = {"status": "ok", "detail": "Azure LLM credentials present"}
+    else:
+        checks["llm"] = {"status": "not_configured", "detail": "Azure LLM credentials absent; deterministic fallbacks active"}
+
+    # Aggregate
+    if is_unhealthy:
+        overall = "unhealthy"
+    elif is_degraded:
+        overall = "degraded"
+    else:
+        overall = "ok"
+
+    response_body = {
+        "status": overall,
+        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "version": app.version,
+        "checks": checks,
+    }
+
+    if is_unhealthy:
+        return JSONResponse(status_code=503, content=response_body)
+    return response_body
 
 
 # ── In-memory work-order store ────────────────────────────────────────────────
