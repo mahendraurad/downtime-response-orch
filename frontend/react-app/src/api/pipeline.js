@@ -1,9 +1,10 @@
 import { API } from '../config/api';
+import { authedFetch } from './http';
 
 export async function runRealPipeline(scenario, rowIndex, persona, demoHITL) {
   const payload = { scenario, row_index: rowIndex ?? -1, persona };
   if (demoHITL) payload.demo_hitl = true;
-  const resp = await fetch(`${API}/api/pipeline/run`, {
+  const resp = await authedFetch(`${API}/api/pipeline/run`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ signal: {}, ...payload }),
@@ -13,7 +14,7 @@ export async function runRealPipeline(scenario, rowIndex, persona, demoHITL) {
 }
 
 export async function resolveHITLRemediation(runId, action, persona) {
-  const resp = await fetch(`${API}/api/pipeline/hitl/remediation`, {
+  const resp = await authedFetch(`${API}/api/pipeline/hitl/remediation`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ run_id: runId, action, persona }),
@@ -23,7 +24,7 @@ export async function resolveHITLRemediation(runId, action, persona) {
 }
 
 export async function resolveHITLMonitoring(runId, action, persona) {
-  const resp = await fetch(`${API}/api/pipeline/hitl/monitoring`, {
+  const resp = await authedFetch(`${API}/api/pipeline/hitl/monitoring`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ run_id: runId, action, persona }),
@@ -33,7 +34,7 @@ export async function resolveHITLMonitoring(runId, action, persona) {
 }
 
 export async function resolveHITLDiagnosis(runId, action, persona) {
-  const resp = await fetch(`${API}/api/pipeline/hitl/diagnosis`, {
+  const resp = await authedFetch(`${API}/api/pipeline/hitl/diagnosis`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ run_id: runId, action, persona }),
@@ -43,7 +44,7 @@ export async function resolveHITLDiagnosis(runId, action, persona) {
 }
 
 export async function resolveHITLKnowledge(runId, action, persona) {
-  const resp = await fetch(`${API}/api/pipeline/hitl/knowledge`, {
+  const resp = await authedFetch(`${API}/api/pipeline/hitl/knowledge`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ run_id: runId, action, persona }),
@@ -53,7 +54,7 @@ export async function resolveHITLKnowledge(runId, action, persona) {
 }
 
 export async function resolveHITLAdvisory(runId, action, persona, revisedNote) {
-  const resp = await fetch(`${API}/api/pipeline/hitl/advisory`, {
+  const resp = await authedFetch(`${API}/api/pipeline/hitl/advisory`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ run_id: runId, action, persona, revised_note: revisedNote || null }),
@@ -65,20 +66,20 @@ export async function resolveHITLAdvisory(runId, action, persona, revisedNote) {
 export async function getPendingHITL(persona, gate = '') {
   const params = new URLSearchParams({ persona });
   if (gate) params.set('gate', gate);
-  const resp = await fetch(`${API}/api/pipeline/hitl/pending?${params}`);
+  const resp = await authedFetch(`${API}/api/pipeline/hitl/pending?${params}`);
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   return resp.json();
 }
 
 export async function getHITLStatus(runId, persona) {
   const params = new URLSearchParams({ persona });
-  const resp = await fetch(`${API}/api/pipeline/hitl/${encodeURIComponent(runId)}?${params}`);
+  const resp = await authedFetch(`${API}/api/pipeline/hitl/${encodeURIComponent(runId)}?${params}`);
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   return resp.json();
 }
 
 export async function runExecutor(recommendation, approved, persona = 'supervisor') {
-  const resp = await fetch(`${API}/api/executor/run`, {
+  const resp = await authedFetch(`${API}/api/executor/run`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ recommendation, approved, persona }),

@@ -2,15 +2,15 @@ import React, { useContext, useEffect, useRef, useState, useCallback } from 'rea
 import { AppContext } from '../../context/AppContext';
 import { PD } from '../../data/personas';
 import { ts } from '../../utils/helpers';
-import { askChat } from '../../api/chat';
+import { authedFetch } from '../../api/http';
+import { API } from '../../config/api';
 import { resolveHITLRemediation, resolveHITLMonitoring, resolveHITLDiagnosis, resolveHITLKnowledge, resolveHITLAdvisory, runExecutor } from '../../api/pipeline';
 import ChatSidebar from './ChatSidebar';
 
-let _msgIdCounter = 0;
-function mkId() { return ++_msgIdCounter; }
+function mkId() { return `m-${Date.now()}-${Math.floor(Math.random() * 1000)}`; }
 
 export default function ChatView() {
-  const { persona, messages, setMessages, addMessage, clearMessages } = useContext(AppContext);
+  const { persona, messages, setMessages, addMessage } = useContext(AppContext);
   const [inputVal, setInputVal] = useState('');
   const [thinking, setThinking] = useState(false);
   const msgsRef = useRef(null);
@@ -23,10 +23,12 @@ export default function ChatView() {
     if (msgsRef.current) msgsRef.current.scrollTop = msgsRef.current.scrollHeight;
   }, [messages, thinking]);
 
-  // Render chat home on persona change
+  // On persona switch: reset conversation, restore stored history or show home
   useEffect(() => {
-    clearMessages();
-    renderChatHome();
+    conversationIdRef.current = null;
+    if (!messages || messages.length === 0) {
+      renderChatHome();
+    }
     if (inpRef.current) {
       inpRef.current.placeholder = `Ask as ${p.nm.split(' — ')[0]}: faults, risk, decisions, what-if…`;
     }
@@ -128,12 +130,6 @@ export default function ChatView() {
     if (inpRef.current) inpRef.current.style.height = 'auto';
     appendU(t);
 
-    // Local canned Q&A — no backend round-trip needed
-    if (CHAT_KB[t]) {
-      doThink(() => appendA(CHAT_KB[t].c, CHAT_KB[t].r));
-      return;
-    }
-
     // All queries go to /api/chat. The backend LLM classifier decides whether
     // this is a new pipeline request, a conversational follow-up, or general knowledge.
     // Conversation history is included so the classifier understands follow-up context.
@@ -151,7 +147,7 @@ export default function ChatView() {
 
     doThink(async () => {
       try {
-        const resp = await fetch(API + '/api/chat', {
+        const resp = await authedFetch(`${API}/api/chat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -161,12 +157,41 @@ export default function ChatView() {
             conversation_history: conversationHistory,
           }),
         });
+        if (!resp.ok) throw new Error(`Chat request failed (HTTP ${resp.status}).`);
+        const d = await resp.json();
         conversationIdRef.current = d.conversation_id || conversationIdRef.current;
+        const routes = d.pipeline_log ? d.pipeline_log.map(n => n.node ? n.node.replace(/_/g, ' ') : '') : [];
+
+        // HITL blocking gates — show card and stop rendering the response
+        if (d.hitl_required?.type === 'remediation') {
+          addMessage({ id: mkId(), type: 'hitl_remediation', data: d, scenario: null, persona, time: ts() });
+          return;
+        }
+        if (d.hitl_monitoring) {
+          addMessage({ id: mkId(), type: 'hitl_monitoring', data: d, scenario: null, persona, time: ts() });
+          return;
+        }
+        if (d.hitl_diagnosis) {
+          addMessage({ id: mkId(), type: 'hitl_diagnosis', data: d, scenario: null, persona, time: ts() });
+          return;
+        }
+
+        // Normal response
         const details = d.details && d.details.length ? '<br><br>' + d.details.map(x => '• ' + x).join('<br>') : '';
         const actions = d.actions && d.actions.length ? '<br><br><strong>Actions:</strong><br>' + d.actions.map(x => '→ ' + x).join('<br>') : '';
         const questions = d.clarification && d.clarification.questions ? '<br><br><strong>Needed:</strong><br>' + d.clarification.questions.map(x => '? ' + x).join('<br>') : '';
-        appendA(d.response + details + actions + questions,
-          d.pipeline_log ? d.pipeline_log.map(n => n.node ? n.node.replace(/_/g, ' ') : '') : []);
+        appendA(d.response + details + actions + questions, routes);
+
+        // Non-blocking gates shown alongside the response
+        if (d.hitl_advisory?.advisory_note) {
+          addMessage({ id: mkId(), type: 'hitl_advisory', data: d, time: ts() });
+        }
+        if (d.hitl_knowledge) {
+          addMessage({ id: mkId(), type: 'hitl_knowledge', data: d, persona, time: ts() });
+        }
+        if (d.recommendation?.recommendation_status === 'ok') {
+          addMessage({ id: mkId(), type: 'hitl_executor', rec: d.recommendation, time: ts() });
+        }
       } catch (error) {
         appendA(`The orchestrated chat service is currently unavailable. ${error.message}`, ['Chat API']);
       }
@@ -736,7 +761,7 @@ function buildLearningHtml(lr) {
 
 function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
   const [resolved, setResolved] = useState(false);
-  const { refreshNotifCounts } = useContext(AppContext);
+  const { refreshNotifCounts, pushNotification } = useContext(AppContext);
   const rec = msg.rec;
   const action = rec.recommended_action;
   const urgencyColor = { immediate: '#ef4444', urgent: '#f97316', planned: '#3b82f6', monitor: '#6b7280' }[rec.urgency] || '#6b7280';
@@ -747,6 +772,21 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
       try {
         const data = await runExecutor(rec, approved, persona);
         refreshNotifCounts();
+
+        // Notify maintenance persona when a work order is successfully created
+        if (approved && data.status !== 'blocked' && data.work_order_id) {
+          const notifHtml = `<div style="border:1.5px solid #10b981;border-radius:8px;padding:12px;background:rgba(16,185,129,0.06)">`
+            + `<div style="font-size:9px;font-weight:700;color:#10b981;font-family:var(--m);margin-bottom:8px">WORK ORDER ASSIGNED TO MAINTENANCE</div>`
+            + `<strong>Work order ${data.work_order_id} created — action required</strong>`
+            + `<div style="font-size:12px;color:var(--t2);margin-top:8px;line-height:1.9">`
+            + `Asset: <strong>${rec.asset_id}</strong><br/>`
+            + `Action: <strong>${action.name.replace(/_/g, ' ')}</strong><br/>`
+            + `Urgency: <strong style="color:${urgencyColor}">${rec.urgency.toUpperCase()}</strong><br/>`
+            + `Window: <strong>${rec.window_chosen}</strong><br/>`
+            + `Approved by: <strong>${rec.responsible_approver}</strong></div></div>`;
+          pushNotification('maintenance', { id: mkId(), type: 'agent', html: notifHtml, routes: ['executor · notification'], chips: [], time: ts() });
+        }
+
         const statusColor = { success: '#10b981', partial: '#f59e0b', blocked: '#6b7280', failed: '#ef4444' };
         const color = statusColor[data.status] || '#6b7280';
         const label = approved ? '✓ APPROVED & EXECUTED' : '✗ REJECTED';

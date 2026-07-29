@@ -1,4 +1,5 @@
 import { API } from '../config/api';
+import { authedFetch } from './http';
 
 /** Natural-language questions always enter through the backend orchestrator. */
 export async function askChat({
@@ -8,7 +9,7 @@ export async function askChat({
   assetId = null,
   context = null,
 }) {
-  const resp = await fetch(`${API}/api/chat`, {
+  const resp = await authedFetch(`${API}/api/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({

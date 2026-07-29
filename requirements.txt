@@ -17,6 +17,10 @@ python-dotenv>=1.0.0,<2.0.0
 fastapi>=0.100.0,<1.0.0
 uvicorn[standard]>=0.20.0,<1.0.0
 
+# JWT authentication and password hashing
+python-jose[cryptography]>=3.3.0,<4.0.0
+bcrypt>=4.0.0,<6.0.0
+
 # Tests and FastAPI TestClient transport
 pytest>=7.0.0,<10.0.0
 httpx>=0.24.0,<1.0.0

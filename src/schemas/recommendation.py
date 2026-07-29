@@ -3,7 +3,7 @@ schemas/recommendation.py  —  Phase 7 (Prescriptive Optimization Agent output)
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
@@ -34,7 +34,7 @@ class MaintenanceRecommendation(BaseModel):
     urgency:                str                  = ""   # planned | urgent | immediate | monitor
     ranked_alternatives:    List[Dict[str, Any]] = Field(default_factory=list)
     required_parts:         List[RequiredPart]   = Field(default_factory=list)
-    window_chosen:          str                  = ""
+    window_chosen:          Optional[str]        = None
     rationale:              str                  = ""
     evidence:               Dict[str, Any]       = Field(default_factory=dict)
     recommendation_status:  str                  = ""   # ok | no_action | fallback

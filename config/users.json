@@ -1,0 +1,26 @@
+[
+  {
+    "username": "admin",
+    "password_hash": "$2b$12$Ld05b5ITwR.I1ySaoRyETu53ArUZw3wsa06a/8Msdl/SIkCWTHeMG",
+    "role": "admin",
+    "display_name": "System Admin"
+  },
+  {
+    "username": "john_ops",
+    "password_hash": "$2b$12$WQ8CYzneyl1y3LfukV7TM.9vw8WCsbku8EtZfwdMnqqKIDu.gIxJy",
+    "role": "plant_ops",
+    "display_name": "John (Operations)"
+  },
+  {
+    "username": "sarah_mgr",
+    "password_hash": "$2b$12$KIRV49EtdGYJSW.sZE/ZBeFeK3EmXd2nST8lGkkonWUiD016GrXHG",
+    "role": "leadership",
+    "display_name": "Sarah (Management)"
+  },
+  {
+    "username": "raj_safety",
+    "password_hash": "$2b$12$6bQbPgVUCdtWBZBWZeVItuEvayNXKxxk60stGmBZsxneAfus0d3Ai",
+    "role": "safety",
+    "display_name": "Raj (Safety)"
+  }
+]

@@ -38,7 +38,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Literal
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
+from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
@@ -63,6 +63,12 @@ except ImportError:
                 os.environ.setdefault(_name.strip(), _value.strip().strip('"').strip("'"))
 
 from src.orchestrator.graph import run_pipeline
+from src.api.auth import (
+    LoginRequest, LoginResponse,
+    authenticate_user, create_access_token,
+    get_current_user, require_persona,
+    _EXPIRE_HOURS as _JWT_EXPIRE_HOURS,
+)
 from src.api.persona_formatter import format_for_persona
 from src.tools.data_loader import load_telemetry_rows, load_asset_master
 from src.orchestrator.query_router import plan_query
@@ -98,17 +104,21 @@ _INTENT_CLASSIFIER_SYSTEM = (
     "Given conversation history and the latest user message, return one of three intent types.\n\n"
     "Return JSON: {\"intent_type\": \"pipeline\" | \"conversational\" | \"general\", \"reasoning\": \"<one sentence>\"}\n\n"
     "Rules:\n"
-    "- \"pipeline\": user wants to run a NEW diagnostic analysis, fault check, risk assessment, or "
-    "maintenance action on an asset. The request is forward-looking and action-oriented. "
-    "Examples: 'check M-104', 'analyze AST_MTR_001', 'what is the status of P-207', 'run diagnostics'.\n"
-    "- \"conversational\": user is asking about the OUTCOME of a prior step already shown in the "
-    "conversation — a past rejection, approval, recommendation, or analysis result. "
-    "Examples: 'I rejected M-104 how will it affect', 'what happens if I approve this', "
-    "'why did it recommend that', 'what does stage 3 mean for my decision'.\n"
-    "- \"general\": user is asking a conceptual or educational question not tied to running a new analysis. "
+    "- \"pipeline\": use this when the user needs specific technical data about an asset — fault type, "
+    "risk level, RUL, sensor readings, financial impact, anomaly status, or any numeric/diagnostic fact. "
+    "This includes follow-up technical questions even if the asset was recently discussed. "
+    "The system will re-run only the minimal agents needed to answer precisely. "
+    "Examples: 'check M-104', 'what is the fault type?', 'can it run until Saturday?', "
+    "'production impact if it fails', 'what is the risk level?', 'what is the RUL?'.\n"
+    "- \"conversational\": ONLY use this when the user is asking about the outcome of a past "
+    "OPERATOR DECISION — an approval, rejection, HITL action, or work order they explicitly acted on. "
+    "Do NOT use for any question that requires technical asset data. "
+    "Examples: 'I rejected M-104 — how will that affect production?', "
+    "'what happens if I approve this work order?', 'why did the system recommend replacement?'.\n"
+    "- \"general\": user is asking a conceptual or educational question with no asset data needed. "
     "Examples: 'what is RUL?', 'explain ISO 13373', 'how does vibration analysis work'.\n\n"
-    "IMPORTANT: if the message references a past action (rejected, approved, declined, dismissed) "
-    "or asks about consequences of something already shown, classify as 'conversational'."
+    "CRITICAL: questions about technical facts (fault type, vibration reading, risk, RUL, cost) "
+    "are ALWAYS 'pipeline' — even as follow-ups. Only past operator decisions are 'conversational'."
 )
 
 _CONVERSATIONAL_LLM_SYSTEM = (
@@ -345,7 +355,7 @@ def _multi_asset_plan(requested_assets, persona: str, run_id: str):
                 "status":status,"action":action,"deadline":deadline,"reason":reason,
                 "recommendation":recommendation.to_dict() if recommendation else None,
                 "pipeline_log":log})
-        except Exception as exc:
+        except Exception:
             results.append({"display_asset_id":display,"asset_id":asset_id,"scenario":scenario,
                 "status":"unavailable","action":"manual review","deadline":"before planning",
                 "reason":"asset analysis was unavailable","recommendation":None,"pipeline_log":[]})
@@ -483,6 +493,46 @@ def health_check():
     if is_unhealthy:
         return JSONResponse(status_code=503, content=response_body)
     return response_body
+
+
+# ── Auth endpoints ────────────────────────────────────────────────────────────
+
+@app.post("/api/auth/login", response_model=LoginResponse)
+def login(req: LoginRequest):
+    """
+    Authenticate with username + password. Returns a JWT valid for DRO_JWT_EXPIRE_HOURS.
+
+    The token encodes the user's role and the persona list they are permitted to act as.
+    Include it as  Authorization: Bearer <token>  on all protected requests.
+    """
+    user = authenticate_user(req.username, req.password)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password.",
+        )
+    token = create_access_token(user)
+    from src.api.auth import _load_roles
+    allowed_personas = _load_roles().get(user.get("role", ""), [])
+    return LoginResponse(
+        access_token=token,
+        username=user["username"],
+        display_name=user.get("display_name", user["username"]),
+        role=user.get("role", ""),
+        allowed_personas=allowed_personas,
+        expires_in_hours=_JWT_EXPIRE_HOURS,
+    )
+
+
+@app.get("/api/auth/me")
+def auth_me(user: Dict = Depends(get_current_user)):
+    """Return the current user's profile decoded from their JWT. No DB hit."""
+    return {
+        "username":        user.get("sub"),
+        "display_name":    user.get("display_name"),
+        "role":            user.get("role"),
+        "allowed_personas": user.get("allowed_personas", []),
+    }
 
 
 # ── In-memory work-order store ────────────────────────────────────────────────
@@ -637,6 +687,94 @@ def _create_advisory_gate(run_id: str, risk, persona: str, blocked: bool = False
 
 # Confidence threshold below which the FI HITL gate fires (Agent 3)
 _DIAGNOSIS_CONFIDENCE_THRESHOLD = 0.60
+
+
+def _build_hitl_gates(state: Dict, run_id: str, persona: str, intent: str) -> Dict:
+    """Compute HITL gate payloads from raw pipeline state and register with _HITL_STORE.
+    Used by both /api/pipeline/run and inline pipeline execution in /api/chat."""
+    trusted  = state.get("trusted_signal")
+    anomaly  = state.get("anomaly_event")
+    diagnosis= state.get("fault_diagnosis")
+    knowledge= state.get("knowledge_guidance")
+
+    hitl_required = None
+    if trusted is not None:
+        from src.schemas.bearing_signal import ValidationStatus as _VS
+        if getattr(trusted, "validation_status", None) == _VS.FLAGGED:
+            from src.tools.remediation import missing_critical_fields as _mcf, imputable_fields as _impf
+            from src.tools.config_loader import load_config as _lcfg
+            _dfa_cfg = _lcfg()
+            _HITL_STORE[run_id] = {"type":"remediation","trusted":trusted,"persona":persona,"intent":intent}
+            hitl_required = {
+                "type":"remediation","run_id":run_id,
+                "missing_fields":_mcf(trusted,_dfa_cfg),
+                "imputable_fields":_impf(trusted,_dfa_cfg),
+                "quality_score":(trusted.quality_report.overall_score
+                                 if getattr(trusted,"quality_report",None) else None),
+            }
+
+    hitl_monitoring = None
+    if hitl_required is None and anomaly is not None:
+        _ev = anomaly.evidence or {}
+        _ewma = _ev.get("ewma", {})
+        if _ewma.get("fired", False) and not _ev.get("t2_fired", True):
+            _HITL_STORE[run_id] = {"type":"monitoring","trusted":trusted,
+                                   "anomaly_event":anomaly,"persona":persona,"intent":intent}
+            hitl_monitoring = {
+                "type":"monitoring","run_id":run_id,
+                "anomaly_score":anomaly.anomaly_score,
+                "triggered_features":anomaly.triggered_features,
+                "reason":anomaly.reason,"regime":anomaly.regime,
+                "ewma_triggered":_ewma.get("triggered_features",[]),
+                "ewma_score":_ewma.get("score",0.0),
+            }
+
+    hitl_diagnosis = None
+    if hitl_required is None and hitl_monitoring is None and diagnosis is not None:
+        if diagnosis.confidence < _DIAGNOSIS_CONFIDENCE_THRESHOLD:
+            _HITL_STORE[run_id] = {"type":"diagnosis","trusted":trusted,"anomaly_event":anomaly,
+                                   "fault_diagnosis":diagnosis,"persona":persona,"intent":intent}
+            hitl_diagnosis = {
+                "type":"diagnosis","run_id":run_id,
+                "fault_mode":diagnosis.fault_mode,"fault_code":diagnosis.fault_code,
+                "confidence":diagnosis.confidence,"iso_stage":diagnosis.iso_stage,
+                "narrative":diagnosis.narrative,
+            }
+
+    hitl_knowledge = None
+    if (hitl_required is None and hitl_monitoring is None
+            and hitl_diagnosis is None and knowledge is not None):
+        if not knowledge.source_documents:
+            _HITL_STORE[run_id] = {"type":"knowledge","trusted":trusted,"anomaly_event":anomaly,
+                                   "fault_diagnosis":diagnosis,"risk_assessment":state.get("risk_assessment"),
+                                   "knowledge_guidance":knowledge,"persona":persona,"intent":intent}
+            hitl_knowledge = {
+                "type":"knowledge","run_id":run_id,
+                "fault_mode":diagnosis.fault_mode if diagnosis else "unknown",
+                "asset_id":(trusted.raw.asset_id if trusted and hasattr(trusted,"raw") else ""),
+            }
+
+    _risk = state.get("risk_assessment")
+    hitl_advisory = _create_advisory_gate(run_id, _risk, persona,
+                    blocked=any((hitl_required,hitl_monitoring,hitl_diagnosis,hitl_knowledge)))
+
+    rec = state.get("recommendation")
+    recommendation = None
+    if rec is not None:
+        try:
+            recommendation = (rec.model_dump() if hasattr(rec,"model_dump")
+                              else rec.to_dict() if hasattr(rec,"to_dict") else None)
+        except Exception:
+            recommendation = None
+
+    return {
+        "hitl_required":  hitl_required,
+        "hitl_monitoring":hitl_monitoring,
+        "hitl_diagnosis": hitl_diagnosis,
+        "hitl_knowledge": hitl_knowledge,
+        "hitl_advisory":  hitl_advisory,
+        "recommendation": recommendation,
+    }
 
 
 # ── Pydantic request/response models ─────────────────────────────────────────
@@ -810,8 +948,9 @@ def _classify_intent(query: str) -> str:
 # ── Pipeline endpoint ─────────────────────────────────────────────────────────
 
 @app.post("/api/pipeline/run", response_model=PipelineRunResponse)
-def pipeline_run(req: PipelineRunRequest):
+def pipeline_run(req: PipelineRunRequest, user: Dict = Depends(get_current_user)):
     """Run the DRO pipeline on a signal; depth controlled by query intent."""
+    require_persona(req.persona, user)
     intent = _classify_intent(req.query)
     try:
         if req.scenario:
@@ -1032,8 +1171,9 @@ def pipeline_run(req: PipelineRunRequest):
 
 
 @app.post("/api/pipeline/hitl/remediation")
-def hitl_remediation(req: HITLRemediationRequest):
+def hitl_remediation(req: HITLRemediationRequest, user: Dict = Depends(get_current_user)):
     """Resolve a DFA HITL gate: apply IMPUTE/DROP/KEEP and resume the pipeline."""
+    require_persona(req.persona, user)
     action = req.action.upper()
     stored = _claim_hitl(req.run_id,"remediation",action,{"IMPUTE","DROP","KEEP"},
                          req.persona,req.rationale)
@@ -1150,8 +1290,9 @@ def hitl_remediation(req: HITLRemediationRequest):
 # ── Monitoring HITL: resolve borderline EWMA anomaly ─────────────────────────
 
 @app.post("/api/pipeline/hitl/monitoring")
-def hitl_monitoring_resolution(req: HITLMonitoringRequest):
+def hitl_monitoring_resolution(req: HITLMonitoringRequest, user: Dict = Depends(get_current_user)):
     """Resolve Monitoring HITL gate: SUPPRESS or CONFIRM a borderline EWMA anomaly."""
+    require_persona(req.persona, user)
     action = req.action.upper()
     stored = _claim_hitl(req.run_id,"monitoring",action,{"SUPPRESS","CONFIRM"},
                          req.persona,req.rationale)
@@ -1279,8 +1420,9 @@ def hitl_monitoring_resolution(req: HITLMonitoringRequest):
 # ── FI HITL: confirm or override low-confidence fault classification ──────────
 
 @app.post("/api/pipeline/hitl/diagnosis")
-def hitl_diagnosis_resolution(req: HITLDiagnosisRequest):
+def hitl_diagnosis_resolution(req: HITLDiagnosisRequest, user: Dict = Depends(get_current_user)):
     """Resolve FI HITL gate: CONFIRM or MARK_UNDETERMINED a low-confidence fault."""
+    require_persona(req.persona, user)
     action = req.action.upper()
     stored = _claim_hitl(req.run_id,"diagnosis",action,
                          {"CONFIRM","MARK_UNDETERMINED"},req.persona,req.rationale)
@@ -1376,8 +1518,9 @@ def hitl_diagnosis_resolution(req: HITLDiagnosisRequest):
 # ── Knowledge HITL: resolve missing SOP ──────────────────────────────────────
 
 @app.post("/api/pipeline/hitl/knowledge")
-def hitl_knowledge_resolution(req: HITLKnowledgeRequest):
+def hitl_knowledge_resolution(req: HITLKnowledgeRequest, user: Dict = Depends(get_current_user)):
     """Resolve Knowledge HITL gate: FLAG_MANUAL or ACCEPT_EMPTY when no SOP found."""
+    require_persona(req.persona, user)
     action = req.action.upper()
     stored = _claim_hitl(req.run_id,"knowledge",action,
                          {"FLAG_MANUAL","ACCEPT_EMPTY"},req.persona,req.rationale)
@@ -1446,8 +1589,9 @@ def hitl_knowledge_resolution(req: HITLKnowledgeRequest):
 
 
 @app.post("/api/pipeline/hitl/advisory")
-def hitl_advisory_resolution(req: HITLAdvisoryRequest):
+def hitl_advisory_resolution(req: HITLAdvisoryRequest, user: Dict = Depends(get_current_user)):
     """Review an LLM advisory without changing deterministic risk facts."""
+    require_persona(req.persona, user)
     action=req.action.upper()
     revised=str(req.revised_note or "").strip()
     if action=="MODIFY" and not revised:
@@ -1470,7 +1614,7 @@ def hitl_advisory_resolution(req: HITLAdvisoryRequest):
 
 
 @app.post("/api/executor/run")
-def executor_run(req: ExecutorRunRequest):
+def executor_run(req: ExecutorRunRequest, user: Dict = Depends(get_current_user)):
     """
     Execute an approved (or rejected) MaintenanceRecommendation.
 
@@ -1478,6 +1622,7 @@ def executor_run(req: ExecutorRunRequest):
     The recommendation dict must match the MaintenanceRecommendation schema
     (RecommendedAction + RequiredPart sub-models).
     """
+    require_persona(req.persona, user)
     from src.schemas.recommendation import MaintenanceRecommendation
     from src.agents.executor_agent import ExecutorAgent
     if req.approved:
@@ -1563,8 +1708,9 @@ def get_asset(asset_id: str):
 
 @app.post("/api/chat")
 @traceable(name="DRO Chat API", run_type="chain", tags=["dro", "chat-api"])
-def chat(req: ChatRequest):
+def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
     """Route persona-aware natural language through the backend orchestrator."""
+    require_persona(req.persona, user)
     run_id=f"CHAT-{uuid.uuid4().hex[:10].upper()}"
     conversation_id=req.conversation_id or f"CONV-{uuid.uuid4().hex[:10].upper()}"
     if len(conversation_id)>80 or not re.fullmatch(r"[A-Za-z0-9_.:-]+",conversation_id):
@@ -1579,7 +1725,12 @@ def chat(req: ChatRequest):
     incoming=_public_context(req.context)
     explicit_asset=req.asset_id or _asset_from_message(req.message)
     existing_signal=context.get("signal")
-    if explicit_asset and isinstance(existing_signal,dict) and existing_signal.get("asset_id")!=explicit_asset:
+    existing_scenario=context.get("scenario")
+    _ctx_scenario_asset=next((aid for _,(aid,sc) in _MULTI_ASSET_SCENARIOS.items() if sc==existing_scenario),"")
+    if explicit_asset and (
+        (isinstance(existing_signal,dict) and existing_signal.get("asset_id")!=explicit_asset) or
+        (_ctx_scenario_asset and _ctx_scenario_asset!=explicit_asset)
+    ):
         context.pop("signal",None); context.pop("scenario",None); context.pop("row_index",None)
     context.update(incoming)
     supplied_asset=explicit_asset or context.get("asset_id")
@@ -1602,6 +1753,20 @@ def chat(req: ChatRequest):
     if pending and (incoming or explicit_asset or scenario or context.get("timeframe")):
         effective_message=context["_pending_message"]
     plan=plan_query(effective_message,signal is not None); state={"pipeline_log":[]}
+
+    # ── Social / acknowledgment short-circuit ────────────────────────────────
+    _SOCIAL_PHRASES=frozenset({"thanks","thank you","ok","okay","got it","understood","noted",
+                               "great","awesome","perfect","sounds good","alright","sure",
+                               "hi","hello","hey","bye","goodbye","cheers","cool","np","nice",
+                               "good","excellent","brilliant","appreciate it","appreciated"})
+    if effective_message.strip().lower().rstrip(" !.,") in _SOCIAL_PHRASES:
+        _soc={"run_id":run_id,"conversation_id":conversation_id,"intent":"conversational",
+              "persona":req.persona,"reflection_status":"accepted",
+              "response":"You're welcome! Let me know if there's anything else I can help you with.",
+              "details":[],"actions":[],"call_plan":[],"pipeline_log":[],
+              "needs_context":False,"clarification_required":False}
+        _remember_chat_context(conversation_id,context)
+        return _soc
 
     # ── Intent classification ─────────────────────────────────────────────────
     # LLM reads message + conversation history to distinguish:
@@ -1635,6 +1800,7 @@ def chat(req: ChatRequest):
                     "conversation_id":conversation_id,"run_id":run_id,"intent":"pipeline"}
         # No recognized scenario → fall through to plan_query routing below
 
+    _hitl_fields: Dict = {}  # populated when pipeline runs inline
     if len(requested_assets)>1:
         draft,state=_multi_asset_plan(requested_assets,req.persona,run_id)
         plan_intent="multi_asset_plan"
@@ -1732,9 +1898,45 @@ def chat(req: ChatRequest):
             state=run_pipeline(deepcopy(signal),run_id=run_id,intent=plan.pipeline_intent,
                 inventory_lookup=context.get("inventory_lookup"),context_lookup=context.get("operations_context"),approval_status="pending")
             formatted=format_for_persona(state,req.persona)
-            draft={"persona":req.persona,"response":formatted.get("headline","Analysis complete."),"details":formatted.get("details",[]),"actions":formatted.get("actions",[]),"call_plan":list(plan.agents),"needs_context":False,"clarification_required":False,
+            _pipeline_headline=formatted.get("headline","Analysis complete.")
+            draft={"persona":req.persona,"response":_pipeline_headline,"details":formatted.get("details",[]),"actions":formatted.get("actions",[]),"call_plan":list(plan.agents),"needs_context":False,"clarification_required":False,
                    "agent_outputs":{"recommendation":state["recommendation"].to_dict() if state.get("recommendation") else None,
                                     "execution_result":state["execution_result"].to_dict() if state.get("execution_result") else None}}
+            # LLM synthesis: convert structured pipeline results into a direct answer
+            if _CHAT_LLM.is_configured():
+                try:
+                    _pipe_summary=(
+                        f"Headline: {_pipeline_headline}\n"
+                        f"Details: {'; '.join(formatted.get('details',[]))}\n"
+                        f"Recommended actions: {'; '.join(formatted.get('actions',[]))}"
+                    )
+                    _synth=_CHAT_LLM.complete_json(
+                        system_prompt=(
+                            "You are a rotating-equipment reliability engineer. "
+                            "Use ONLY the pipeline data provided to answer the user's question directly. "
+                            "If the question is yes/no, start with YES or NO. "
+                            "Be concise (2-4 sentences). Never fabricate data not in the pipeline result. "
+                            'Return JSON: {"answer": "<synthesized plain-text answer>"}'
+                        ),
+                        user_prompt=f"User question: {req.message}\n\nPipeline data:\n{_pipe_summary}",
+                        temperature=0.2,
+                        max_tokens=200,
+                    )
+                    if _synth and isinstance(_synth.get("answer"),str) and _synth["answer"].strip():
+                        draft["response"]=_synth["answer"].strip()
+                        # Targeted queries: synthesis already contains the key facts,
+                        # so suppress the raw bullet details to avoid duplication.
+                        # Full-pipeline intent keeps them for the richer HITL cards.
+                        if plan.pipeline_intent != "full":
+                            draft["details"] = []
+                            draft["actions"] = []
+                except Exception:
+                    pass  # keep structured headline on LLM failure
+            # Only engage HITL gates for explicit full-pipeline requests
+            # (e.g. "Analyse M-104"). Targeted questions (risk, status, diagnosis)
+            # get a synthesized answer without operator interruption.
+            if plan.pipeline_intent == "full":
+                _hitl_fields = _build_hitl_gates(state, run_id, req.persona, plan.pipeline_intent)
         plan_intent=plan.intent
     else:
         llm_draft = None
@@ -1792,6 +1994,8 @@ def chat(req: ChatRequest):
         "pipeline_log":state.get("pipeline_log",[]),
         "context_status":{"retained_fields":sorted(key for key in context if not key.startswith("_")),
                           "pending":bool(context.get("_pending_message"))}}
+    if _hitl_fields:
+        result.update(_hitl_fields)
     try: result["audit"]=write_audit(_AUDIT_PATH,event="chat",run_id=run_id,status="ok",intent=plan.intent,agents=plan.agents)
     except Exception: result["audit"]={"status":"audit_write_failed"}
     return result
