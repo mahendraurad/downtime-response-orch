@@ -1,0 +1,144 @@
+{
+  "_comment": "Data Foundation Agent configuration. Edit values here — no code changes needed.",
+
+  "validation": {
+    "min_signal_quality_score":   0.50,
+    "max_rpm":                    20000,
+    "max_load_pct":               110,
+    "min_kurtosis":               1.0,
+
+    "critical_signal_fields": [
+      "vib_rms_mm_s",
+      "kurtosis",
+      "temp_c",
+      "bpfo_energy",
+      "bpfi_energy"
+    ],
+
+    "advisory_reason_keywords": [
+      "startup_shutdown"
+    ]
+  },
+
+  "consistency": {
+    "_comment": "Cross-field logical rules. A record can be in-range on every field yet still be physically self-contradictory — these catch that.",
+    "running_states":        ["running", "fault"],
+    "stopped_states":        ["idle", "shutdown"],
+    "running_min_rpm":       50,
+    "stopped_rpm_threshold": 10,
+    "stopped_max_vib_mm_s":  1.0
+  },
+
+  "_comment_prateek_added_start": "************** Added by Prateek Mittal on 16th July 2026 ****************** - Agent 1 freshness, normalization, routing, source profiles, and repository policies.",
+
+  "freshness": {
+    "require_timezone": true,
+    "max_future_seconds": 30,
+    "max_age_seconds": 300,
+    "live_sources": ["live", "stream", "event_hub"]
+  },
+
+  "normalization": {
+    "field_aliases": {
+      "vibration_rms": "vib_rms_mm_s",
+      "temperature_c": "temp_c",
+      "speed_rpm": "rpm"
+    },
+    "unit_conversions": {
+      "temperature_f": {"target": "temp_c", "multiply": 0.5555555556, "add": -17.77777778},
+      "speed_rps": {"target": "rpm", "multiply": 60.0, "add": 0.0}
+    },
+    "source_profiles": {
+      "opcua": {
+        "field_aliases": {"MotorSpeed": "rpm", "BearingTemp": "temp_c", "VibrationRMS": "vib_rms_mm_s"},
+        "unit_conversions": {}
+      },
+      "event_hub": {
+        "field_aliases": {"assetId": "asset_id", "bearingId": "bearing_id", "channelId": "channel_id", "eventTime": "timestamp_utc"},
+        "unit_conversions": {}
+      }
+    }
+  },
+
+  "repository": {
+    "sqlite_path": "data/trusted_signals.db",
+    "reject_duplicates": true,
+    "flag_out_of_order": true
+  },
+
+  "_comment_prateek_added_end": "***********************",
+
+  "routing": {
+    "VALID": "monitoring",
+    "FLAGGED": "data_review",
+    "REJECTED": "stop"
+  },
+
+  "quality_score": {
+    "_comment": "Six DAMA data-quality dimensions. Weights must sum to 1.0. Adjust to reflect what matters most for your historian feed.",
+    "flagged_threshold":  0.80,
+
+    "weights": {
+      "asset_mapping":    0.25,
+      "bearing_mapping":  0.20,
+      "completeness":     0.20,
+      "ranges_valid":     0.15,
+      "accuracy":         0.10,
+      "consistency":      0.10
+    },
+
+    "dimension_labels": {
+      "asset_mapping":   "Integrity — asset found in master table",
+      "bearing_mapping": "Integrity — bearing + channel found and matched",
+      "completeness":    "Completeness — all critical signal fields present",
+      "ranges_valid":    "Validity / Conformity — values within sensor bounds",
+      "accuracy":        "Accuracy — historian signal-quality / sensor fidelity",
+      "consistency":     "Consistency — cross-field values agree physically"
+    },
+
+    "dimension_descriptions": {
+      "asset_mapping":   "Referential integrity of the asset key. The asset_id must resolve to a row in the asset master (Table 3); without it no asset context (line, criticality, downtime cost) can be joined and the record cannot be routed. Hard requirement.",
+      "bearing_mapping": "Referential integrity of the bearing key. The bearing_id and channel_id must both resolve to the same bearing master row (Table 2); a mismatch means a mis-labelled sensor channel. Hard requirement.",
+      "completeness":    "Fraction of critical signal fields that are populated (not null). Measures how much of the expected payload actually arrived from the historian. Scored continuously: 1.0 minus the share of missing critical fields.",
+      "ranges_valid":    "Conformity of each value to its physical / sensor operating bounds (rpm, load %, vibration, temperature, kurtosis floor, non-negative band energies). Per-bearing bounds from the master take priority over config fallbacks. Catches scaling errors, dead channels and impossible readings.",
+      "accuracy":        "Trustworthiness of the reading as reported by the historian's own signal_quality_score (0–1), a proxy for sensor fidelity (cable noise, dropout, saturation). Scored as that value directly; below the quality floor it signals a likely sensor fault.",
+      "consistency":     "Whether independent fields tell the same physical story — e.g. a 'running' state with near-zero rpm, or a stopped machine still reporting strong vibration. Catches contradictions that per-field range checks cannot see."
+    },
+
+    "improvement_hints": {
+      "asset_mapping":   "Register the asset_id in asset_master.json (Table 3)",
+      "bearing_mapping": "Register the bearing_id and channel_id in bearing_master.json (Table 2)",
+      "completeness":    "Ensure historian publishes all critical fields: vib_rms_mm_s, kurtosis, temp_c, bpfo_energy, bpfi_energy",
+      "ranges_valid":    "Check sensor calibration and scaling factors in the historian configuration",
+      "accuracy":        "Inspect the sensor cable and junction-box connection; a low signal_quality_score usually means a noisy, loose or failing transducer",
+      "consistency":     "Reconcile the operating-state, speed and vibration tags — confirm the historian is reading rpm, machine_state and vibration from the same asset at the same instant"
+    }
+  },
+
+  "remediation": {
+    "_comment": "Controls what happens to a FLAGGED record with missing fields. 'default_action' is used for unattended runs; a human (CLI prompt now, frontend later) can override it per record. A field is imputable ONLY if it appears in 'imputable_fields', which maps the signal field to the bearing-master baseline used to fill it. Identity fields can never be imputed.",
+    "default_action": "FLAG_FOR_REVIEW",
+    "auto_impute_method": "baseline_mean",
+    "imputable_fields": {
+      "vib_rms_mm_s": "baseline_vib_rms_mean",
+      "kurtosis":     "baseline_kurtosis_mean",
+      "temp_c":       "baseline_temp_mean",
+      "bpfo_energy":  "baseline_bpfo_mean"
+    },
+    "never_impute_fields": ["asset_id", "bearing_id", "channel_id", "telemetry_id", "timestamp_utc"]
+  },
+
+  "fallback_sensor_bounds": {
+    "_comment": "Used only when BearingMaster has no bounds for a given bearing. Per-bearing bounds in bearing_master.json take priority.",
+    "vib_min_mm_s":   0,
+    "vib_max_mm_s":   50,
+    "temp_min_c":     -10,
+    "temp_max_c":     150
+  },
+
+  "logging": {
+    "log_rejected":   true,
+    "log_flagged":    true,
+    "log_valid":      false
+  }
+}

@@ -1,0 +1,34 @@
+# Core numerical and typed contracts
+numpy>=2.0.0
+pydantic>=2.7.0,<3.0.0
+
+# Local PDF knowledge retrieval
+pdfplumber>=0.10.0
+
+# Optional Azure OpenAI / Azure AI Foundry client. Local deterministic runs do
+# not need credentials and degrade safely when no endpoint is configured.
+openai>=1.0.0,<3.0.0
+
+# Orchestration and API
+langgraph>=1.0.0,<2.0.0
+langchain-core>=0.1.0,<2.0.0
+langsmith>=0.4.0,<1.0.0
+python-dotenv>=1.0.0,<2.0.0
+fastapi>=0.100.0,<1.0.0
+uvicorn[standard]>=0.20.0,<1.0.0
+
+# JWT authentication and password hashing
+python-jose[cryptography]>=3.3.0,<4.0.0
+bcrypt>=4.0.0,<6.0.0
+
+# Tests and FastAPI TestClient transport
+pytest>=7.0.0,<10.0.0
+httpx>=0.24.0,<1.0.0
+
+# Production adapters intentionally remain optional until their integrations
+# are configured and approved:
+# azure-search-documents>=11.4.0
+# azure-storage-blob>=12.19.0
+# azure-identity>=1.15.0
+# azure-keyvault-secrets>=4.7.0
+psycopg[binary]>=3.1.0,<4.0.0

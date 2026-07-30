@@ -1,0 +1,2 @@
+# Reserved for Phase 8+ ML model artifacts (RUL regressor, embeddings).
+# Leave empty. Files here are excluded from git via .gitignore.
