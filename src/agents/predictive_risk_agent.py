@@ -98,7 +98,8 @@ class PredictiveRiskAgent:
 
     def process(self, diagnosis: FaultDiagnosis,
                 anomaly: AnomalyEvent,
-                trusted: TrustedBearingSignal) -> RiskAssessment:
+                trusted: TrustedBearingSignal,
+                persona_context=None) -> RiskAssessment:
         """Assess one diagnosis. Never raises."""
         # ************** Added by Prateek Mittal on 20th July 2026 ******************
         # Reject inconsistent Agent 1-3 handoffs explicitly. A runtime input error

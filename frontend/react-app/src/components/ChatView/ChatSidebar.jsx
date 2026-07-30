@@ -1,16 +1,22 @@
 import React, { useEffect, useRef, useState } from 'react';
 
-const AG_STATUS_ROWS = [
-  { cls: 'don', nm: 'Data Foundation', tg: 'OK' },
-  { cls: 'don', nm: 'Monitoring', tg: 'TRIGGERED' },
-  { cls: 'drn', nm: 'Predictive Risk', tg: 'RUNNING', id: 'rptag' },
-  { cls: 'don', nm: 'Failure Intel', tg: 'COMPLETE' },
-  { cls: 'don', nm: 'Knowledge', tg: 'READY' },
-  { cls: 'dof', nm: 'Prescriptive Opt.', tg: 'STANDBY' },
-  { cls: 'dof', nm: 'Executor', tg: 'AWAITING' },
+const PIPELINE_NODES = [
+  { key: 'data_foundation', nm: 'Data Foundation' },
+  { key: 'monitoring', nm: 'Monitoring' },
+  { key: 'failure_intelligence', nm: 'Failure Intel' },
+  { key: 'predictive_risk', nm: 'Predictive Risk' },
+  { key: 'knowledge', nm: 'Knowledge' },
+  { key: 'prescriptive', nm: 'Prescriptive Opt.' },
+  { key: 'executor', nm: 'Executor' },
 ];
 
-const RP_TAGS = ['RUNNING', 'ANALYSING', 'COMPLETE', 'READY'];
+const FLEET_ASSETS = [
+  { nm: 'M-104', tp: 'Motor', status: 'critical', col: 'var(--rd)', q: 'Full risk briefing and recommended action for M-104' },
+  { nm: 'P-207', tp: 'Pump', status: 'alert', col: 'var(--am)', q: 'P-207 bearing condition and urgency — should I act before Wednesday?' },
+  { nm: 'C-301', tp: 'Conveyor', status: 'monitor', col: 'var(--am)', q: 'C-301 cage fault — how urgent and what is the right action?' },
+  { nm: 'M-089', tp: 'Motor', status: 'healthy', col: 'var(--gn)', q: 'M-089 health after recent bearing replacement — any run-in concerns?' },
+  { nm: 'G-112', tp: 'Gearbox', status: 'healthy', col: 'var(--gn)', q: 'G-112 gearbox post-repair performance — is it settling normally?' },
+];
 
 const RUL_ROWS = [
   { nm: 'M-104', tp: 'Motor', w: 12, col: 'var(--rd)', d: '~6d', q: 'Full risk briefing and recommended action for M-104' },
@@ -20,12 +26,13 @@ const RUL_ROWS = [
   { nm: 'G-112', tp: 'Gearbox', w: 90, col: 'var(--gn)', d: '~43d', q: 'G-112 gearbox post-repair performance — is it settling normally?' },
 ];
 
-export default function ChatSidebar({ onSq }) {
+export default function ChatSidebar({ onSq, thinking, pipelineLog }) {
   const [sv1, setSv1] = useState(14.7);
   const [sv2, setSv2] = useState(87.4);
-  const [rpTagIdx, setRpTagIdx] = useState(0);
+  const [animIdx, setAnimIdx] = useState(-1);
   const sv1Ref = useRef(14.7);
   const sv2Ref = useRef(87.4);
+  const animIntervalRef = useRef(null);
 
   useEffect(() => {
     const sensorInterval = setInterval(() => {
@@ -34,19 +41,73 @@ export default function ChatSidebar({ onSq }) {
       setSv1(sv1Ref.current);
       setSv2(sv2Ref.current);
     }, 4200);
-
-    const rpInterval = setInterval(() => {
-      setRpTagIdx(i => (i + 1) % RP_TAGS.length);
-    }, 2800);
-
-    return () => {
-      clearInterval(sensorInterval);
-      clearInterval(rpInterval);
-    };
+    return () => clearInterval(sensorInterval);
   }, []);
+
+  // Animate pipeline nodes sequentially while an agent request is in-flight
+  useEffect(() => {
+    clearInterval(animIntervalRef.current);
+    if (thinking) {
+      setAnimIdx(0);
+      animIntervalRef.current = setInterval(() => {
+        setAnimIdx(i => (i < PIPELINE_NODES.length - 1 ? i + 1 : i));
+      }, 400);
+    } else {
+      setAnimIdx(-1);
+    }
+    return () => clearInterval(animIntervalRef.current);
+  }, [thinking]);
+
+  // Build the pipeline rows to display
+  function getPipelineRows() {
+    if (thinking) {
+      return PIPELINE_NODES.map((n, i) => ({
+        nm: n.nm,
+        tag: i < animIdx ? 'DONE' : i === animIdx ? 'RUNNING' : 'WAITING',
+        cls: i < animIdx ? 'don' : i === animIdx ? 'drn' : 'dof',
+      }));
+    }
+    if (pipelineLog && pipelineLog.length > 0) {
+      const logMap = {};
+      pipelineLog.forEach(n => { logMap[n.node] = n; });
+      return PIPELINE_NODES.map(n => {
+        const entry = logMap[n.key];
+        return entry
+          ? { nm: n.nm, tag: `${entry.latency_ms}ms`, cls: 'don' }
+          : { nm: n.nm, tag: '—', cls: 'dsk' };
+      });
+    }
+    // Idle — all agents healthy and ready
+    return PIPELINE_NODES.map(n => ({ nm: n.nm, tag: 'READY', cls: 'don' }));
+  }
+
+  const pipelineRows = getPipelineRows();
+  const pipelineTotalMs = pipelineLog && pipelineLog.length > 0
+    ? pipelineLog.reduce((s, n) => s + (n.latency_ms || 0), 0)
+    : null;
+  const pipelineLabel = thinking
+    ? ' · Running…'
+    : pipelineLog && pipelineLog.length > 0
+      ? ` · ${pipelineTotalMs}ms`
+      : '';
 
   return (
     <div className="cctx">
+      {/* Fleet asset health ribbon */}
+      <div className="cxs">
+        <div className="sttl">Fleet Health</div>
+        <div className="fleet-ribbon">
+          {FLEET_ASSETS.map((a, i) => (
+            <div key={i} className="fr-item" onClick={() => onSq(a.q)} title={`${a.nm} — ${a.status}`}>
+              <div className="fr-dot" style={{ background: a.col, boxShadow: `0 0 5px ${a.col}` }}></div>
+              <div className="fr-nm">{a.nm}</div>
+              <div className="fr-tp">{a.tp}</div>
+              <div className="fr-st" style={{ color: a.col }}>{a.status}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
       {/* Live sensors */}
       <div className="cxs">
         <div className="sttl">Live Sensors · M-104</div>
@@ -92,21 +153,19 @@ export default function ChatSidebar({ onSq }) {
 
       {/* Agent pipeline status */}
       <div className="cxs">
-        <div className="sttl">Agent Pipeline Status</div>
+        <div className="sttl" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+          <span>Agent Pipeline</span>
+          {thinking && <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: 'var(--am)', display: 'inline-block', animation: 'pulse 1s infinite', flexShrink: 0 }}></span>}
+          <span style={{ color: 'var(--t3)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>{pipelineLabel}</span>
+        </div>
         <div className="aglst">
-          {AG_STATUS_ROWS.map((row, i) => {
-            const tag = row.id === 'rptag' ? RP_TAGS[rpTagIdx] : row.tg;
-            const dotCls = row.id === 'rptag'
-              ? (rpTagIdx === 2 ? 'adc don' : 'adc drn')
-              : `adc ${row.cls}`;
-            return (
-              <div key={i} className="agrow">
-                <div className={dotCls}></div>
-                <div className="anm">{row.nm}</div>
-                <div className="atg">{tag}</div>
-              </div>
-            );
-          })}
+          {pipelineRows.map((row, i) => (
+            <div key={i} className={`agrow${row.cls === 'dsk' ? ' agrow-sk' : ''}`}>
+              <div className={`adc ${row.cls}`}></div>
+              <div className="anm">{row.nm}</div>
+              <div className="atg">{row.tag}</div>
+            </div>
+          ))}
         </div>
       </div>
 

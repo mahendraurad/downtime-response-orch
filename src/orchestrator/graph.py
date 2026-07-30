@@ -98,10 +98,14 @@ def _get_action_agents():
         from src.tools.llm_client import LLMClient
         llm = LLMClient()
         optional_llm = llm if llm.is_configured() else None
+        learning = LearningMemoryAgent(llm_client=optional_llm)
         _action_agents = (
-            PrescriptiveOptimizationAgent(llm_client=optional_llm),
+            PrescriptiveOptimizationAgent(
+                llm_client=optional_llm,
+                historical_case_fn=learning.matching_cases,
+            ),
             ExecutorAgent(),
-            LearningMemoryAgent(llm_client=optional_llm),
+            learning,
         )
     return _action_agents
 # ***********************
@@ -120,7 +124,10 @@ def node_data_foundation(state: DROGraphState) -> DROGraphState:
     dfa, *_ = _get_agents()
     log = list(state.get("pipeline_log") or [])
     try:
-        trusted, ms = _timed(dfa.process, deepcopy(state["raw_signal"]))
+        trusted, ms = _timed(
+            dfa.process, deepcopy(state["raw_signal"]),
+            persona_context=state.get("persona_context"),
+        )
         log.append({"node": "data_foundation", "status": "ok", "latency_ms": ms})
         return {**state, "trusted_signal": trusted, "pipeline_log": log}
     except Exception as exc:
@@ -134,7 +141,10 @@ def node_monitoring(state: DROGraphState) -> DROGraphState:
     _, mon, *_ = _get_agents()
     log = list(state.get("pipeline_log") or [])
     try:
-        anomaly, ms = _timed(mon.process, state["trusted_signal"])
+        anomaly, ms = _timed(
+            mon.process, state["trusted_signal"],
+            persona_context=state.get("persona_context"),
+        )
         log.append({"node": "monitoring", "status": "ok", "latency_ms": ms,
                     "triggered": anomaly is not None})
         return {**state, "anomaly_event": anomaly, "pipeline_log": log}
@@ -149,7 +159,10 @@ def node_failure_intelligence(state: DROGraphState) -> DROGraphState:
     _, _, fia, *_ = _get_agents()
     log = list(state.get("pipeline_log") or [])
     try:
-        diagnosis, ms = _timed(fia.process, state["anomaly_event"], state["trusted_signal"])
+        diagnosis, ms = _timed(
+            fia.process, state["anomaly_event"], state["trusted_signal"],
+            persona_context=state.get("persona_context"),
+        )
         log.append({"node": "failure_intelligence", "status": "ok", "latency_ms": ms})
         return {**state, "fault_diagnosis": diagnosis, "pipeline_log": log}
     except Exception as exc:
@@ -165,7 +178,8 @@ def node_predictive_risk(state: DROGraphState) -> DROGraphState:
     try:
         risk, ms = _timed(
             pra.process, state["fault_diagnosis"],
-            state["anomaly_event"], state["trusted_signal"]
+            state["anomaly_event"], state["trusted_signal"],
+            persona_context=state.get("persona_context"),
         )
         log.append({"node": "predictive_risk", "status": "ok", "latency_ms": ms})
         return {**state, "risk_assessment": risk, "pipeline_log": log}
@@ -182,7 +196,8 @@ def node_knowledge(state: DROGraphState) -> DROGraphState:
     try:
         guidance, ms = _timed(
             ka.process, state["fault_diagnosis"], state["trusted_signal"],
-            state.get("risk_assessment")
+            state.get("risk_assessment"),
+            persona_context=state.get("persona_context"),
         )
         log.append({"node": "knowledge", "status": "ok", "latency_ms": ms})
         return {**state, "knowledge_guidance": guidance, "pipeline_log": log}
@@ -197,8 +212,13 @@ def node_knowledge(state: DROGraphState) -> DROGraphState:
 def node_prescriptive(state):
     agent, _, _ = _get_action_agents(); log = list(state.get("pipeline_log") or [])
     try:
-        result, ms = _timed(agent.process, state["risk_assessment"], state["fault_diagnosis"],
-            state["knowledge_guidance"], state.get("inventory_lookup") or {}, state.get("context_lookup") or {})
+        result, ms = _timed(
+            agent.process, state["risk_assessment"], state["fault_diagnosis"],
+            state["knowledge_guidance"], state.get("inventory_lookup") or {},
+            state.get("context_lookup") or {},
+            persona_context=state.get("persona_context"),
+            trusted_signal=state.get("trusted_signal"),
+        )
         log.append({"node":"prescriptive","status":"ok","latency_ms":ms})
         return {**state,"recommendation":result,"pipeline_log":log}
     except Exception as exc:
@@ -208,14 +228,21 @@ def node_prescriptive(state):
 @traceable(name="Agent 7 - Executor", run_type="tool", tags=["dro", "agent-7"])
 def node_executor(state):
     _, agent, _ = _get_action_agents(); log = list(state.get("pipeline_log") or [])
-    result, ms = _timed(agent.process, state["recommendation"], state.get("approval_status") == "approved")
+    result, ms = _timed(
+        agent.process, state["recommendation"],
+        state.get("approval_status") == "approved",
+        persona_context=state.get("persona_context"),
+    )
     log.append({"node":"executor","status":result.status,"latency_ms":ms})
     return {**state,"execution_result":result,"pipeline_log":log}
 
 @traceable(name="Agent 8 - Learning and Memory", run_type="chain", tags=["dro", "agent-8", "llm-optional"])
 def node_learning(state):
     _, _, agent = _get_action_agents(); log = list(state.get("pipeline_log") or [])
-    result, ms = _timed(agent.process, state["execution_result"], state["feedback_event"])
+    result, ms = _timed(
+        agent.process, state["execution_result"], state["feedback_event"],
+        persona_context=state.get("persona_context"),
+    )
     log.append({"node":"learning","status":result.learning_status,"latency_ms":ms})
     return {**state,"learned_case":result,"pipeline_log":log}
 # ***********************
@@ -223,7 +250,7 @@ def node_learning(state):
 
 # ── Build and compile graph ───────────────────────────────────────────────────
 
-def _build_graph():
+def _build_graph(checkpointer=None):
     g = StateGraph(DROGraphState)
 
     g.add_node("data_foundation",      node_data_foundation)
@@ -261,16 +288,18 @@ def _build_graph():
     g.add_conditional_edges("executor", route_after_executor, {"learning":"learning", END:END})
     g.add_edge("learning", END)
 
-    return g.compile()
+    return g.compile(checkpointer=checkpointer)
 
 
-_graph = _build_graph()
+from src.tools.checkpointing import build_checkpoint_resources
+_checkpoint_resources = build_checkpoint_resources()
+_graph = _build_graph(checkpointer=_checkpoint_resources.saver)
 
 
 # ── Public entry point ────────────────────────────────────────────────────────
 
 def run_from_trusted_signal(trusted_signal, intent: str = "full",
-                             run_id: str = "") -> DROGraphState:
+                             run_id: str = "", persona="supervisor") -> DROGraphState:
     """
     Skip DFA; run monitoring→FI→risk→knowledge on a pre-validated/remediated signal.
     Called by the HITL resolution endpoint after an IMPUTE or KEEP decision.
@@ -278,6 +307,8 @@ def run_from_trusted_signal(trusted_signal, intent: str = "full",
     import uuid
     rid = run_id or str(uuid.uuid4())[:8]
     _, mon, fia, pra, ka = _get_agents()
+    from src.tools.persona_formatter import build_persona_context
+    persona_context = build_persona_context(persona)
 
     log: list = [{"node": "data_foundation", "status": "ok (remediated)", "latency_ms": 0}]
     state: DROGraphState = {
@@ -286,7 +317,7 @@ def run_from_trusted_signal(trusted_signal, intent: str = "full",
     }
 
     try:
-        anomaly, ms = _timed(mon.process, trusted_signal)
+        anomaly, ms = _timed(mon.process, trusted_signal, persona_context=persona_context)
         log.append({"node": "monitoring", "status": "ok", "latency_ms": ms,
                     "triggered": anomaly is not None})
         state["anomaly_event"] = anomaly
@@ -300,7 +331,7 @@ def run_from_trusted_signal(trusted_signal, intent: str = "full",
         return state
 
     try:
-        diag, ms = _timed(fia.process, anomaly, trusted_signal)
+        diag, ms = _timed(fia.process, anomaly, trusted_signal, persona_context=persona_context)
         log.append({"node": "failure_intelligence", "status": "ok", "latency_ms": ms})
         state["fault_diagnosis"] = diag
     except Exception as exc:
@@ -313,7 +344,7 @@ def run_from_trusted_signal(trusted_signal, intent: str = "full",
         return state
 
     try:
-        risk, ms = _timed(pra.process, diag, anomaly, trusted_signal)
+        risk, ms = _timed(pra.process, diag, anomaly, trusted_signal, persona_context=persona_context)
         log.append({"node": "predictive_risk", "status": "ok", "latency_ms": ms})
         state["risk_assessment"] = risk
     except Exception as exc:
@@ -326,7 +357,7 @@ def run_from_trusted_signal(trusted_signal, intent: str = "full",
         return state
 
     try:
-        guidance, ms = _timed(ka.process, diag, trusted_signal, risk)
+        guidance, ms = _timed(ka.process, diag, trusted_signal, risk, persona_context=persona_context)
         log.append({"node": "knowledge", "status": "ok", "latency_ms": ms})
         state["knowledge_guidance"] = guidance
     except Exception as exc:
@@ -338,7 +369,7 @@ def run_from_trusted_signal(trusted_signal, intent: str = "full",
 
 
 def run_from_anomaly_event(anomaly_event, trusted_signal, intent: str = "full",
-                           run_id: str = "") -> DROGraphState:
+                           run_id: str = "", persona="supervisor") -> DROGraphState:
     """
     Skip DFA + Monitoring; run FI → Risk → Knowledge on an operator-confirmed anomaly.
     Called by the Monitoring HITL resolution endpoint after a CONFIRM decision.
@@ -346,6 +377,8 @@ def run_from_anomaly_event(anomaly_event, trusted_signal, intent: str = "full",
     import uuid as _uuid
     rid = run_id or str(_uuid.uuid4())[:8]
     _, _, fia, pra, ka = _get_agents()
+    from src.tools.persona_formatter import build_persona_context
+    persona_context = build_persona_context(persona)
 
     log: list = [
         {"node": "data_foundation", "status": "ok (resumed)", "latency_ms": 0},
@@ -359,7 +392,7 @@ def run_from_anomaly_event(anomaly_event, trusted_signal, intent: str = "full",
     }
 
     try:
-        diag, ms = _timed(fia.process, anomaly_event, trusted_signal)
+        diag, ms = _timed(fia.process, anomaly_event, trusted_signal, persona_context=persona_context)
         log.append({"node": "failure_intelligence", "status": "ok", "latency_ms": ms})
         state["fault_diagnosis"] = diag
     except Exception as exc:
@@ -372,7 +405,7 @@ def run_from_anomaly_event(anomaly_event, trusted_signal, intent: str = "full",
         return state
 
     try:
-        risk, ms = _timed(pra.process, diag, anomaly_event, trusted_signal)
+        risk, ms = _timed(pra.process, diag, anomaly_event, trusted_signal, persona_context=persona_context)
         log.append({"node": "predictive_risk", "status": "ok", "latency_ms": ms})
         state["risk_assessment"] = risk
     except Exception as exc:
@@ -385,7 +418,7 @@ def run_from_anomaly_event(anomaly_event, trusted_signal, intent: str = "full",
         return state
 
     try:
-        guidance, ms = _timed(ka.process, diag, trusted_signal, risk)
+        guidance, ms = _timed(ka.process, diag, trusted_signal, risk, persona_context=persona_context)
         log.append({"node": "knowledge", "status": "ok", "latency_ms": ms})
         state["knowledge_guidance"] = guidance
     except Exception as exc:
@@ -397,7 +430,8 @@ def run_from_anomaly_event(anomaly_event, trusted_signal, intent: str = "full",
 
 
 def run_from_diagnosis(diagnosis, anomaly_event, trusted_signal,
-                       intent: str = "full", run_id: str = "") -> DROGraphState:
+                       intent: str = "full", run_id: str = "",
+                       persona="supervisor") -> DROGraphState:
     """
     Skip DFA + Monitoring + FI; run Risk → Knowledge on an operator-confirmed diagnosis.
     Called by the FI HITL resolution endpoint after a CONFIRM or MARK_UNDETERMINED decision.
@@ -405,6 +439,8 @@ def run_from_diagnosis(diagnosis, anomaly_event, trusted_signal,
     import uuid as _uuid
     rid = run_id or str(_uuid.uuid4())[:8]
     _, _, _, pra, ka = _get_agents()
+    from src.tools.persona_formatter import build_persona_context
+    persona_context = build_persona_context(persona)
 
     log: list = [
         {"node": "data_foundation", "status": "ok (resumed)", "latency_ms": 0},
@@ -423,7 +459,7 @@ def run_from_diagnosis(diagnosis, anomaly_event, trusted_signal,
         return state
 
     try:
-        risk, ms = _timed(pra.process, diagnosis, anomaly_event, trusted_signal)
+        risk, ms = _timed(pra.process, diagnosis, anomaly_event, trusted_signal, persona_context=persona_context)
         log.append({"node": "predictive_risk", "status": "ok", "latency_ms": ms})
         state["risk_assessment"] = risk
     except Exception as exc:
@@ -436,7 +472,7 @@ def run_from_diagnosis(diagnosis, anomaly_event, trusted_signal,
         return state
 
     try:
-        guidance, ms = _timed(ka.process, diagnosis, trusted_signal, risk)
+        guidance, ms = _timed(ka.process, diagnosis, trusted_signal, risk, persona_context=persona_context)
         log.append({"node": "knowledge", "status": "ok", "latency_ms": ms})
         state["knowledge_guidance"] = guidance
     except Exception as exc:
@@ -451,7 +487,7 @@ def run_from_diagnosis(diagnosis, anomaly_event, trusted_signal,
 def run_pipeline(raw_signal: Dict[str, Any], run_id: str = "",
                  intent: str = "full", inventory_lookup: dict = None,
                  context_lookup: dict = None, approval_status: str = "pending",
-                 feedback_event=None) -> DROGraphState:
+                 feedback_event=None, persona="supervisor") -> DROGraphState:
     """
     Run the DRO pipeline for a single signal reading.
 
@@ -464,6 +500,7 @@ def run_pipeline(raw_signal: Dict[str, Any], run_id: str = "",
     """
     import uuid
     rid = run_id or str(uuid.uuid4())[:8]
+    from src.tools.persona_formatter import build_persona_context
     initial: DROGraphState = {
         "run_id": rid,
         "case_id": rid,
@@ -472,6 +509,8 @@ def run_pipeline(raw_signal: Dict[str, Any], run_id: str = "",
         "inventory_lookup": inventory_lookup or {}, "context_lookup": context_lookup or {},
         "approval_status": approval_status, "feedback_event": feedback_event,
         "pipeline_log": [],
+        "persona_context": build_persona_context(persona),
     }
-    final_state = _graph.invoke(initial)
+    invoke_config = {"configurable": {"thread_id": rid}}
+    final_state = _graph.invoke(initial, config=invoke_config)
     return final_state

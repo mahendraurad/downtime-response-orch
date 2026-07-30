@@ -34,6 +34,8 @@ import json
 from typing import List, Dict
 
 import numpy as np
+from langsmith import traceable
+from src.tools.observability import langfuse_observe
 
 from src.tools.sop_catalog import SOP_CHUNKS
 
@@ -216,6 +218,9 @@ def build_index(chunks: List[Dict] = None) -> None:
     _index_built = True
 
 
+@traceable(name="Local SOP Retrieval", run_type="retriever",
+           tags=["dro", "rag", "local"])
+@langfuse_observe("Local SOP Retrieval", as_type="retriever")
 def retrieve(query: str, top_k: int = 3,
              fault_mode: str = "",
              asset_type: str = "",

@@ -1,6 +1,6 @@
 {
   "reflection": {"enabled": true, "llm_enabled": false, "max_response_characters": 4000, "max_refinement_iterations": 3},
-  "chat": {"max_message_characters": 2000, "default_persona": "supervisor", "max_context_sessions": 500, "max_context_turns": 12, "context_ttl_seconds": 1800},
+  "chat": {"max_message_characters": 2000, "default_persona": "supervisor", "max_context_sessions": 500, "max_context_turns": 12, "context_ttl_seconds": 1800, "auto_load_registered_demo_scenarios": true},
   "hitl": {
     "session_ttl_seconds": 1800,
     "claim_lease_seconds": 120,

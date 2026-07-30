@@ -12,6 +12,16 @@ def client():
     return TestClient(app, raise_server_exceptions=False)
 
 
+def test_swagger_and_openapi_surfaces_are_available(client):
+    assert client.get("/docs").status_code == 200
+    schema = client.get("/openapi.json")
+    assert schema.status_code == 200
+    paths = schema.json()["paths"]
+    assert "/api/chat" in paths
+    assert "/api/pipeline/run" in paths
+    assert "/api/recommendations/reject" in paths
+
+
 def test_pipeline_response_has_every_field_read_by_chat_view(client):
     response = client.post("/api/pipeline/run", json={
         "signal": {}, "scenario": "outer_race_fault", "persona": "supervisor"
