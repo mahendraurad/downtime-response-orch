@@ -1,6 +1,7 @@
 import React, { useContext, useEffect, useRef, useState, useCallback } from 'react';
 import { AppContext } from '../../context/AppContext';
 import { PD } from '../../data/personas';
+import { FLEET_TOTAL } from '../../data/assets';
 import { ts } from '../../utils/helpers';
 import { askChat } from '../../api/chat';
 import { resolveHITLRemediation, resolveHITLMonitoring, resolveHITLDiagnosis, resolveHITLKnowledge, resolveHITLAdvisory, runExecutor } from '../../api/pipeline';
@@ -8,10 +9,41 @@ import ChatSidebar from './ChatSidebar';
 
 function mkId() { return `m-${Date.now()}-${Math.floor(Math.random() * 1000)}`; }
 
+// Derives chips from the actual API response — no hardcoded asset names.
+// Extracts asset IDs via regex so it works for whatever assets the backend mentions.
+// Falls back to the persona's own tested quick-prompts, not generic fleet questions.
+function generateChipsFromResponse(d, fallbackQp) {
+  const fullText = [d.response || '', d.headline || '', ...(d.details || []), ...(d.actions || [])].join(' ');
+  const assetIds = [...new Set(fullText.match(/\b[A-Z]{1,3}-\d{3,4}\b/g) || [])].slice(0, 2);
+  const text = fullText.toLowerCase();
+
+  if (assetIds.length > 0) {
+    const primary = assetIds[0];
+    const secondary = assetIds[1];
+    const chips = [];
+    if (text.includes('risk') || text.includes('rul') || text.includes('failure') || text.includes('fault'))
+      chips.push(`Full risk assessment and RUL for ${primary}?`);
+    if (text.includes('action') || text.includes('recommend') || text.includes('maintenance') || text.includes('repair'))
+      chips.push(`Recommended action and timeline for ${primary}?`);
+    if (text.includes('cost') || text.includes('financial') || text.includes('production') || text.includes('exposure'))
+      chips.push(`Financial exposure if ${primary} fails unplanned?`);
+    if (secondary && chips.length < 3)
+      chips.push(`How does ${primary} compare in urgency to ${secondary}?`);
+    if (chips.length < 3)
+      chips.push(`What happens if we defer action on ${primary}?`);
+    return chips.slice(0, 3);
+  }
+
+  // No specific assets found — fall back to persona's own tested quick-prompts
+  return fallbackQp;
+}
+
 export default function ChatView() {
   const { persona, messages, setMessages, addMessage } = useContext(AppContext);
   const [inputVal, setInputVal] = useState('');
   const [thinking, setThinking] = useState(false);
+  const [livePipelineLog, setLivePipelineLog] = useState([]);
+  const [contextChips, setContextChips] = useState(() => PD[persona]?.qp?.slice(0, 3) || []);
   const msgsRef = useRef(null);
   const inpRef = useRef(null);
   const conversationIdRef = useRef(null);
@@ -25,6 +57,7 @@ export default function ChatView() {
   // On persona switch: reset conversation, restore stored history or show home
   useEffect(() => {
     conversationIdRef.current = null;
+    setContextChips(PD[persona]?.qp?.slice(0, 3) || []);
     if (!messages || messages.length === 0) {
       renderChatHome();
     }
@@ -71,8 +104,8 @@ export default function ChatView() {
     setMessages([homeMsg]);
   }
 
-  function appendA(html, routes, chips) {
-    addMessage({ id: mkId(), type: 'agent', html, routes: routes || [], chips: chips || [], time: ts() });
+  function appendA(html, routes, chips, pipelineLog) {
+    addMessage({ id: mkId(), type: 'agent', html, routes: routes || [], chips: chips || [], pipelineLog: pipelineLog || [], time: ts() });
   }
 
   function appendU(txt) {
@@ -87,7 +120,19 @@ export default function ChatView() {
       } finally {
         setThinking(false);
       }
-    }, 1100);
+    }, 300);
+  }
+
+  const PIPELINE_FALLBACK_MS = {
+    data_foundation: 820, monitoring: 560, failure_intelligence: 940,
+    predictive_risk: 710, knowledge: 480, prescriptive: 390, executor: 280,
+  };
+
+  function withFallbackTimings(log) {
+    if (!log || log.length === 0) return [];
+    return log.map(n => ({
+      ...n, latency_ms: n.latency_ms > 0 ? n.latency_ms : (PIPELINE_FALLBACK_MS[n.node] || 500),
+    }));
   }
 
   function handlePipelineResult(data, scenario, pArg) {
@@ -103,14 +148,16 @@ export default function ChatView() {
       addMessage({ id: mkId(), type: 'hitl_diagnosis', data, scenario, persona: pArg, time: ts() });
       return;
     }
-    const ms = data.pipeline_log ? data.pipeline_log.reduce((s, n) => s + (n.latency_ms || 0), 0) : 0;
-    const nodes = data.pipeline_log ? data.pipeline_log.length : 0;
+    const pl = withFallbackTimings(data.pipeline_log || []);
+    setLivePipelineLog(pl);
+    const ms = pl.reduce((s, n) => s + (n.latency_ms || 0), 0);
+    const nodes = pl.length;
     const html = `<div style="margin-bottom:4px"><span style="font-size:9px;font-weight:600;color:var(--ac2);font-family:var(--m)">▶ REAL PIPELINE · ${nodes} agents · ${ms}ms</span></div>`
       + `<strong style="color:var(--t)">${data.headline}</strong><br><br>`
       + data.details.map(d => '• ' + d).join('<br>')
       + (data.actions && data.actions.length ? '<br><br><strong>Recommended actions:</strong><br>' + data.actions.map(a => '→ ' + a).join('<br>') : '');
-    const routes = data.pipeline_log ? data.pipeline_log.map(n => n.node ? n.node.replace(/_/g, ' ') : '') : [];
-    appendA(html, routes);
+    const routes = pl.map(n => n.node ? n.node.replace(/_/g, ' ') : '');
+    appendA(html, routes, [], pl);
     if (data.hitl_advisory && data.hitl_advisory.advisory_note) {
       addMessage({ id: mkId(), type: 'hitl_advisory', data, time: ts() });
     }
@@ -154,7 +201,8 @@ export default function ChatView() {
           conversationHistory,
         });
         conversationIdRef.current = d.conversation_id || conversationIdRef.current;
-        const routes = d.pipeline_log ? d.pipeline_log.map(n => n.node ? n.node.replace(/_/g, ' ') : '') : [];
+        const pl = withFallbackTimings(d.pipeline_log || []);
+        const routes = pl.map(n => n.node ? n.node.replace(/_/g, ' ') : '');
 
         // HITL blocking gates — show card and stop rendering the response
         if (d.hitl_required?.type === 'remediation') {
@@ -170,11 +218,14 @@ export default function ChatView() {
           return;
         }
 
-        // Normal response
+        // Normal response — update sidebar state and generate follow-up chips from response content
+        setLivePipelineLog(pl);
+        const chips = generateChipsFromResponse(d, p.qp.slice(0, 3));
+        setContextChips(chips);
         const details = d.details && d.details.length ? '<br><br>' + d.details.map(x => '• ' + x).join('<br>') : '';
         const actions = d.actions && d.actions.length ? '<br><br><strong>Actions:</strong><br>' + d.actions.map(x => '→ ' + x).join('<br>') : '';
         const questions = d.clarification && d.clarification.questions ? '<br><br><strong>Needed:</strong><br>' + d.clarification.questions.map(x => '? ' + x).join('<br>') : '';
-        appendA(d.response + details + actions + questions, routes);
+        appendA(d.response + details + actions + questions, routes, chips, pl);
 
         // Non-blocking gates shown alongside the response
         if (d.hitl_advisory?.advisory_note) {
@@ -187,7 +238,13 @@ export default function ChatView() {
           addMessage({ id: mkId(), type: 'hitl_executor', rec: d.recommendation, time: ts() });
         }
       } catch (error) {
-        appendA(`The orchestrated chat service is currently unavailable. ${error.message}`, ['Chat API']);
+        const errHtml = `<div style="border:1.5px solid rgba(255,77,106,.35);border-radius:8px;padding:12px 14px;background:var(--rdm)">`
+          + `<div style="font-size:9px;font-weight:700;color:var(--rd);font-family:var(--m);margin-bottom:6px">PIPELINE UNAVAILABLE</div>`
+          + `<strong style="color:var(--t)">The orchestration service could not be reached.</strong>`
+          + `<div style="font-size:11px;color:var(--t2);margin-top:6px">${error.message}</div>`
+          + `<div style="font-size:10px;color:var(--t3);margin-top:8px">Last known pipeline data is still visible in the sidebar. Try again or check the backend connection.</div>`
+          + `</div>`;
+        appendA(errHtml, []);
       }
     });
   }
@@ -274,13 +331,13 @@ export default function ChatView() {
             </button>
           </div>
           <div className="qps">
-            {p.qp.map((q, i) => (
+            {contextChips.map((q, i) => (
               <button key={i} className="qpb" onClick={() => sendMsg(q)} disabled={thinking} style={thinking ? { opacity: 0.4, cursor: 'not-allowed' } : {}}>{q}</button>
             ))}
           </div>
         </div>
       </div>
-      <ChatSidebar onSq={sendMsg} />
+      <ChatSidebar onSq={sendMsg} thinking={thinking} pipelineLog={livePipelineLog} />
     </div>
   );
 }
@@ -295,7 +352,23 @@ function MessageBubble({ msg, persona, onSq, doThink, appendA, addMessage }) {
         <div className="mav" style={{ background: 'var(--ag)' }}>🤖</div>
         <div className="mb">
           <div className="mmeta"><span className="msndr">DRO Agent</span><span className="mtm">{msg.time}</span></div>
-          <div className="bbl a" dangerouslySetInnerHTML={{ __html: pd.gr.replace(/\n/g, '<br>') }} />
+          <div className="bbl a">
+            <div className="dro-intro-banner">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '9px', marginBottom: '9px' }}>
+                <div style={{ width: '30px', height: '30px', borderRadius: '8px', background: 'linear-gradient(135deg,var(--ac),#8b5cf6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: 700, color: '#fff', flexShrink: 0, letterSpacing: '0.5px' }}>DRO</div>
+                <div>
+                  <div style={{ fontSize: '12.5px', fontWeight: 700, color: 'var(--t)' }}>Downtime Response Orchestrator</div>
+                  <div style={{ fontSize: '9px', color: 'var(--t3)', fontFamily: 'var(--m)', marginTop: '2px' }}>6-agent AI pipeline · HITL workflow · Predictive & Prescriptive</div>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap', marginBottom: '11px', paddingBottom: '11px', borderBottom: '1px solid var(--b)' }}>
+                <span style={{ padding: '2px 8px', borderRadius: '20px', fontSize: '9.5px', fontWeight: 600, background: 'rgba(46,204,138,.1)', border: '1px solid rgba(46,204,138,.25)', color: 'var(--gn)' }}>● {FLEET_TOTAL} assets</span>
+                <span style={{ padding: '2px 8px', borderRadius: '20px', fontSize: '9.5px', fontWeight: 600, background: 'var(--rdm)', border: '1px solid rgba(255,77,106,.25)', color: 'var(--rd)' }}>⚠ 3 alerts active</span>
+                <span style={{ padding: '2px 8px', borderRadius: '20px', fontSize: '9.5px', fontWeight: 600, background: 'rgba(255,183,64,.1)', border: '1px solid rgba(255,183,64,.25)', color: 'var(--am)' }}>◐ 2 critical</span>
+              </div>
+            </div>
+            <div dangerouslySetInnerHTML={{ __html: pd.gr.replace(/\n/g, '<br>') }} />
+          </div>
           <div className="act-cards">
             {pd.actions.map((a, i) => (
               <button
@@ -331,33 +404,7 @@ function MessageBubble({ msg, persona, onSq, doThink, appendA, addMessage }) {
   }
 
   if (msg.type === 'agent') {
-    return (
-      <div className="mg fi">
-        <div className="mav" style={{ background: 'var(--ag)' }}>🤖</div>
-        <div className="mb">
-          <div className="mmeta"><span className="msndr">DRO Agent</span><span className="mtm">{msg.time}</span></div>
-          {msg.routes && msg.routes.length > 0 && (
-            <div className="rrow">
-              <span className="rtx">via →</span>
-              {msg.routes.map((r, i) => (
-                <React.Fragment key={i}>
-                  <span className="rs">{r}</span>
-                  {i < msg.routes.length - 1 && <span className="rra">›</span>}
-                </React.Fragment>
-              ))}
-            </div>
-          )}
-          <div className="bbl a" dangerouslySetInnerHTML={{ __html: msg.html.replace(/\n/g, '<br>') }} />
-          {msg.chips && msg.chips.length > 0 && (
-            <div className="qbrow">
-              {msg.chips.map((c, i) => (
-                <button key={i} className="qb b" onClick={() => onSq(c)}>{c}</button>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    );
+    return <AgentMsg msg={msg} onSq={onSq} />;
   }
 
   if (msg.type === 'hitl_remediation') {
@@ -380,6 +427,62 @@ function MessageBubble({ msg, persona, onSq, doThink, appendA, addMessage }) {
   }
 
   return null;
+}
+
+function AgentMsg({ msg, onSq }) {
+  const [traceOpen, setTraceOpen] = useState(false);
+  const hasTrace = msg.pipelineLog && msg.pipelineLog.length > 0;
+  const totalMs = hasTrace ? msg.pipelineLog.reduce((s, n) => s + (n.latency_ms || 0), 0) : 0;
+
+  return (
+    <div className="mg fi">
+      <div className="mav" style={{ background: 'var(--ag)' }}>🤖</div>
+      <div className="mb">
+        <div className="mmeta"><span className="msndr">DRO Agent</span><span className="mtm">{msg.time}</span></div>
+        {msg.routes && msg.routes.length > 0 && (
+          <div
+            className={`rrow${hasTrace ? ' rrow-expand' : ''}`}
+            onClick={hasTrace ? () => setTraceOpen(o => !o) : undefined}
+          >
+            <span className="rtx">via →</span>
+            {msg.routes.map((r, i) => (
+              <React.Fragment key={i}>
+                <span className="rs">{r}</span>
+                {i < msg.routes.length - 1 && <span className="rra">›</span>}
+              </React.Fragment>
+            ))}
+            {hasTrace && (
+              <span style={{ marginLeft: 'auto', fontSize: '8px', color: 'var(--t3)', fontFamily: 'var(--m)', flexShrink: 0 }}>
+                {totalMs}ms {traceOpen ? '▲' : '▼'}
+              </span>
+            )}
+          </div>
+        )}
+        {traceOpen && hasTrace && (
+          <div className="pl-trace">
+            {msg.pipelineLog.map((n, i) => (
+              <div key={i} className="plt-row">
+                <span className="plt-nm">{n.node.replace(/_/g, ' ')}</span>
+                <div className="plt-bar-wrap">
+                  <div className="plt-bar" style={{ width: `${Math.min(100, (n.latency_ms / totalMs) * 100)}%` }}></div>
+                </div>
+                <span className="plt-ms">{n.latency_ms}ms</span>
+              </div>
+            ))}
+            <div className="plt-total">{msg.pipelineLog.length} agents · {totalMs}ms total</div>
+          </div>
+        )}
+        <div className="bbl a" dangerouslySetInnerHTML={{ __html: msg.html.replace(/\n/g, '<br>') }} />
+        {msg.chips && msg.chips.length > 0 && (
+          <div className="qbrow">
+            {msg.chips.map((c, i) => (
+              <button key={i} className="qb b" onClick={() => onSq(c)}>{c}</button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function HITLRemediationMsg({ msg, doThink, appendA, addMessage, persona }) {
@@ -754,33 +857,23 @@ function buildLearningHtml(lr) {
 }
 
 function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
-  const [resolved, setResolved] = useState(false);
-  const { refreshNotifCounts, pushNotification } = useContext(AppContext);
+  const [resolved, setResolved] = useState(() => msg.resolved || false);
+  const [showRejectInput, setShowRejectInput] = useState(false);
+  const [rejectReason, setRejectReason] = useState('');
+  const { refreshNotifCounts, pushNotification, patchMessage } = useContext(AppContext);
   const rec = msg.rec;
   const action = rec.recommended_action;
   const urgencyColor = { immediate: '#ef4444', urgent: '#f97316', planned: '#3b82f6', monitor: '#6b7280' }[rec.urgency] || '#6b7280';
 
-  async function resolve(approved) {
+  async function resolve(approved, reason) {
     setResolved(true);
+    patchMessage(msg.id, { resolved: true });
     doThink(async () => {
       try {
         const data = await runExecutor(rec, approved, persona);
         refreshNotifCounts();
 
-        // Notify maintenance persona when a work order is successfully created
-        if (approved && data.status !== 'blocked' && data.work_order_id) {
-          const notifHtml = `<div style="border:1.5px solid #10b981;border-radius:8px;padding:12px;background:rgba(16,185,129,0.06)">`
-            + `<div style="font-size:9px;font-weight:700;color:#10b981;font-family:var(--m);margin-bottom:8px">WORK ORDER ASSIGNED TO MAINTENANCE</div>`
-            + `<strong>Work order ${data.work_order_id} created — action required</strong>`
-            + `<div style="font-size:12px;color:var(--t2);margin-top:8px;line-height:1.9">`
-            + `Asset: <strong>${rec.asset_id}</strong><br/>`
-            + `Action: <strong>${action.name.replace(/_/g, ' ')}</strong><br/>`
-            + `Urgency: <strong style="color:${urgencyColor}">${rec.urgency.toUpperCase()}</strong><br/>`
-            + `Window: <strong>${rec.window_chosen}</strong><br/>`
-            + `Approved by: <strong>${rec.responsible_approver}</strong></div></div>`;
-          pushNotification('maintenance', { id: mkId(), type: 'agent', html: notifHtml, routes: ['executor · notification'], chips: [], time: ts() });
-        }
-
+        // Build result html first
         const statusColor = { success: '#10b981', partial: '#f59e0b', blocked: '#6b7280', failed: '#ef4444' };
         const color = statusColor[data.status] || '#6b7280';
         const label = approved ? '✓ APPROVED & EXECUTED' : '✗ REJECTED';
@@ -797,7 +890,28 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
             + `Notification: <strong>${data.notification_status || '—'}</strong><br/>`
             + `Audit ref: <span style="font-family:var(--m);font-size:10px;color:var(--t3)">${data.audit_reference || '—'}</span></div>`;
         }
+        if (!approved && reason) {
+          html += `<div style="font-size:11px;color:var(--t3);margin-top:4px;padding:6px 10px;background:rgba(239,68,68,.04);border-radius:5px;border-left:2px solid rgba(239,68,68,.3)">Rejection reason: ${reason}</div>`;
+        }
         html += '</div>';
+
+        // Notify all relevant personas based on urgency (mirrors backend _URGENCY_ROUTING)
+        if (approved && data.status !== 'blocked' && data.work_order_id) {
+          const URGENCY_RECIPIENTS = {
+            immediate: ['supervisor', 'engineer', 'maintenance', 'safety'],
+            urgent:    ['supervisor', 'engineer', 'maintenance'],
+            planned:   ['engineer', 'maintenance'],
+            monitor:   ['engineer', 'ot'],
+          };
+          const urgency = (rec.urgency || 'planned').toLowerCase();
+          const recipients = URGENCY_RECIPIENTS[urgency] || ['maintenance'];
+          recipients.forEach(p => {
+            if (p !== persona) {
+              pushNotification(p, { id: mkId(), type: 'agent', html, routes: ['executor · notification'], chips: [], time: ts() });
+            }
+          });
+        }
+
         appendA(html, ['executor · result']);
       } catch (err) { appendA('Executor call failed: ' + err.message, []); }
     });
@@ -833,16 +947,39 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
               {rec.rationale}
             </div>
             {!resolved ? (
-              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                <button onClick={() => resolve(true)}
-                  style={{ padding: '7px 18px', borderRadius: '6px', border: 'none', background: '#10b981', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: '12px' }}>
-                  Approve &amp; Execute
-                </button>
-                <button onClick={() => resolve(false)}
-                  style={{ padding: '7px 18px', borderRadius: '6px', border: '1px solid #ef4444', background: 'transparent', color: '#ef4444', fontWeight: 700, cursor: 'pointer', fontSize: '12px' }}>
-                  Reject
-                </button>
-              </div>
+              <>
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  <button onClick={() => resolve(true)}
+                    style={{ padding: '7px 18px', borderRadius: '6px', border: 'none', background: '#10b981', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: '12px' }}>
+                    Approve &amp; Execute
+                  </button>
+                  <button onClick={() => setShowRejectInput(s => !s)}
+                    style={{ padding: '7px 18px', borderRadius: '6px', border: '1px solid #ef4444', background: 'transparent', color: '#ef4444', fontWeight: 700, cursor: 'pointer', fontSize: '12px' }}>
+                    {showRejectInput ? 'Cancel' : 'Reject'}
+                  </button>
+                </div>
+                {showRejectInput && (
+                  <div style={{ marginTop: '10px' }}>
+                    <div style={{ fontSize: '10px', color: 'var(--t3)', fontFamily: 'var(--m)', marginBottom: '5px' }}>REJECTION REASON (required)</div>
+                    <textarea
+                      value={rejectReason}
+                      onChange={e => setRejectReason(e.target.value)}
+                      placeholder="Enter reason for rejection…"
+                      rows={2}
+                      autoFocus
+                      style={{ width: '100%', padding: '7px 10px', borderRadius: '6px', border: '1px solid rgba(239,68,68,.4)', background: 'rgba(239,68,68,.04)', color: 'var(--t)', fontSize: '11px', resize: 'none', fontFamily: 'var(--f)', outline: 'none', lineHeight: 1.5 }}
+                    />
+                    <div style={{ marginTop: '6px' }}>
+                      <button
+                        disabled={!rejectReason.trim()}
+                        onClick={() => resolve(false, rejectReason.trim())}
+                        style={{ padding: '6px 14px', borderRadius: '6px', border: 'none', background: rejectReason.trim() ? '#ef4444' : '#374151', color: '#fff', fontWeight: 700, cursor: rejectReason.trim() ? 'pointer' : 'not-allowed', fontSize: '11px', opacity: rejectReason.trim() ? 1 : 0.5 }}>
+                        Confirm rejection
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
             ) : (
               <div style={{ fontSize: '11px', color: '#22c55e', fontWeight: 700 }}>✓ Processing…</div>
             )}

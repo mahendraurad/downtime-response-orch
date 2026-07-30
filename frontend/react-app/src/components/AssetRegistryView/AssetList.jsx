@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ASSETS } from '../../data/assets';
+import { ASSETS, FLEET_TOTAL } from '../../data/assets';
 
 const STATUS_COLOR = { critical: 'var(--rd)', warning: 'var(--am)', healthy: 'var(--gn)' };
 const STATUS_LABEL = { critical: 'CRITICAL', warning: 'WARNING', healthy: 'HEALTHY' };
@@ -21,7 +21,7 @@ export default function AssetList({ selectedAsset, onSelect }) {
     <div className="asl">
       <div className="aslhdr">
         <span style={{ fontSize: '12.5px', fontWeight: 600 }}>Asset Registry</span>
-        <span style={{ fontSize: '10px', color: 'var(--t3)', fontFamily: 'var(--m)' }}>47 assets</span>
+        <span style={{ fontSize: '10px', color: 'var(--t3)', fontFamily: 'var(--m)' }}>{FLEET_TOTAL} assets</span>
       </div>
       <div className="asrch">
         <input

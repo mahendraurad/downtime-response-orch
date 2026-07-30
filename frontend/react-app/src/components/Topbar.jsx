@@ -88,7 +88,7 @@ export default function Topbar() {
           {pipelineRunning ? '⏳ Running…' : '⚡ Live Pipeline'}
         </button>
         <div className="ldot"></div>
-        <div className="ltx">LIVE · 47 assets</div>
+        <div className="ltx">LIVE</div>
         <div className="abdg" onClick={handleAlertsClick}>⚠ 3 ALERTS</div>
       </div>
     </div>
