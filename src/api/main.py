@@ -255,6 +255,20 @@ _MULTI_ASSET_SCENARIOS = {
     "G-112": ("AST_GBX_001", "gearbox_fault"),
 }
 
+# Fleet snapshot shown in the sidebar — injected as LLM context for fleet queries
+# so the model can answer without live telemetry and without setting requires_telemetry=true.
+_FLEET_SNAPSHOT = (
+    "Current fleet status — assets with active telemetry:\n"
+    "  M-104   Motor      CRITICAL  Active outer-race bearing fault. RUL 0–15 days. "
+                                   "Stop-and-replace recommended immediately.\n"
+    "  P-207   Pump       ALERT     Lubrication degradation detected. "
+                                   "Schedule inspection within 7 days.\n"
+    "  C-301   Conveyor   MONITOR   Signal dropout detected. EWMA within threshold. "
+                                   "Watch closely — no immediate action required.\n"
+    "  M-089   Motor      HEALTHY   All signals nominal. No anomalies.\n"
+    "  G-112   Gearbox    HEALTHY   Early-stage gearbox signature. Operating normally.\n"
+)
+
 Persona = Literal["supervisor", "engineer", "maintenance", "manager",
                   "executive", "md", "ot", "safety"]
 _PERSONAS = {"supervisor", "engineer", "maintenance", "manager",
@@ -294,7 +308,11 @@ def _asset_from_message(message: str) -> str:
     if known:
         return known
     match = re.search(r"\bAST_[A-Z0-9_]+\b", upper)
-    return match.group(0) if match else ""
+    if match:
+        return match.group(0)
+    # Capture short asset-ID patterns like G-115, E-501, L-701 that may not yet be registered
+    short_match = re.search(r"\b([A-Z]{1,3}-\d{3,4})\b", upper)
+    return short_match.group(1) if short_match else ""
 
 
 def _scenario_for_asset(asset_id: str) -> str:
@@ -1808,12 +1826,52 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
         draft=_concept_draft(effective_message,req.persona)
         plan_intent=plan.intent
     elif plan.intent == "fleet":
-        missing=[]
-        if not context.get("timeframe"): missing.append("timeframe")
-        if not context.get("fleet_snapshot"): missing.append("fleet_snapshot")
-        draft=_clarification_draft(req.persona,"fleet",missing,
-            ["What timeframe should be assessed?","Which approved fleet snapshot or live fleet source should be used?"],
-            "This is a fleet-level question. I need an approved timeframe and fleet data source before comparing assets.")
+        # Inject the fleet snapshot so the LLM has real data and won't request live telemetry.
+        llm_draft = None
+        if _CHAT_LLM.is_configured():
+            try:
+                llm_resp = _CHAT_LLM.complete_json(
+                    system_prompt=_CHAT_LLM_SYSTEM,
+                    user_prompt=(
+                        f"Fleet context (use this data to answer the question; "
+                        f"set requires_telemetry to false since the snapshot is provided):\n"
+                        f"{_FLEET_SNAPSHOT}\n\n"
+                        f"User question: {req.message}"
+                    ),
+                    temperature=0.3,
+                    max_tokens=600,
+                )
+                if (llm_resp
+                        and isinstance(llm_resp.get("answer"), str)
+                        and llm_resp["answer"].strip()):
+                    llm_draft = {"persona": req.persona,
+                                 "response": llm_resp["answer"].strip(),
+                                 "call_plan": list(plan.agents),
+                                 "needs_context": False,
+                                 "clarification_required": False,
+                                 "source_type": "llm_fleet_knowledge"}
+            except Exception:
+                pass
+        if llm_draft:
+            draft = llm_draft
+        else:
+            # LLM unavailable — synthesise a direct answer from the snapshot
+            draft = {"persona": req.persona,
+                     "response": (
+                         "Fleet health — assets with active telemetry:\n\n"
+                         "• M-104 Motor — CRITICAL: active outer-race fault, RUL 0–15 days, "
+                         "stop-and-replace recommended.\n"
+                         "• P-207 Pump — ALERT: lubrication degradation, schedule inspection within 7 days.\n"
+                         "• C-301 Conveyor — MONITOR: signal dropout detected, EWMA within threshold.\n"
+                         "• M-089 Motor — HEALTHY: all signals nominal.\n"
+                         "• G-112 Gearbox — HEALTHY: early-stage signature, monitoring active.\n\n"
+                         "To run a full pipeline analysis on any asset, ask "
+                         "'Run the complete analysis for M-104' (or any other asset ID)."
+                     ),
+                     "call_plan": [],
+                     "needs_context": False,
+                     "clarification_required": False,
+                     "source_type": "fleet_snapshot"}
         plan_intent=plan.intent
     elif plan.intent == "learning_history":
         draft,cases=_learning_history_draft(req.persona,3)

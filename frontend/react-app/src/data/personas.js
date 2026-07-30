@@ -1,3 +1,6 @@
+import { ASSETS } from './assets';
+const N = ASSETS.length; // fleet total — single source of truth
+
 export const PD = {
   supervisor: {
     nm: 'Plant Supervisor — James Kowalski',
@@ -67,17 +70,17 @@ export const PD = {
     nm: 'VP Operations — Michael Osei',
     ds: 'Portfolio risk, reliability KPIs, financial returns, board-level metrics, DRO value delivery',
     av: '👔', bg: 'var(--adm)', col: 'var(--am)',
-    gr: 'Good morning Michael. <strong style="color:var(--t)">Fleet: 2 critical, 5 warnings</strong> across 47 assets. MTD: 3 failures prevented, ~$1.4M avoided. M-104 exposure: $500K–$750K unmanaged. Q3 MTBF up 18%. Key actions below.',
+    gr: `Good morning Michael. <strong style="color:var(--t)">Fleet: 2 critical, 5 warnings</strong> across ${N} assets. MTD: 3 failures prevented, ~$1.4M avoided. M-104 exposure: $500K–$750K unmanaged. Q3 MTBF up 18%. Key actions below.`,
     actions: [
       { icon: '📊', lbl: 'KPI review', nm: 'Q3 Reliability Performance', col: 'rgba(79,142,255,.12)', bc: 'rgba(79,142,255,.35)', tc: 'var(--ac2)', q: "Q3 reliability KPI report: MTBF trend, MTTR, unplanned downtime %, OEE contribution, DRO avoidance value — are we on target?" },
       { icon: '💼', lbl: 'Board preparation', nm: 'Board Briefing Pack', col: 'rgba(255,183,64,.1)', bc: 'rgba(255,183,64,.35)', tc: 'var(--am)', q: "Board-ready briefing: DRO deployment impact, YTD financial returns, fleet health, Q3 vs target, forward risk outlook for Q4" },
       { icon: '💰', lbl: 'Financial return', nm: 'YTD DRO Value Delivered', col: 'rgba(46,204,138,.1)', bc: 'rgba(46,204,138,.35)', tc: 'var(--gn)', q: "YTD DRO value: avoidance events, total savings, MTBF improvement, maintenance cost reduction — vs deployment investment cost" },
-      { icon: '🌍', lbl: 'Portfolio view', nm: 'Fleet Risk Heat Map', col: 'rgba(255,77,106,.1)', bc: 'rgba(255,77,106,.35)', tc: 'var(--rd)', q: "Fleet risk map: all 47 assets by health status, combined financial exposure by line, top 5 assets needing leadership attention this month" },
+      { icon: '🌍', lbl: 'Portfolio view', nm: 'Fleet Risk Heat Map', col: 'rgba(255,77,106,.1)', bc: 'rgba(255,77,106,.35)', tc: 'var(--rd)', q: `Fleet risk map: all ${N} assets by health status, combined financial exposure by line, top 5 assets needing leadership attention this month` },
       { icon: '📉', lbl: 'Trend analysis', nm: 'Downtime Trend Since DRO', col: 'rgba(167,139,250,.1)', bc: 'rgba(167,139,250,.35)', tc: 'var(--pu)', q: "How has unplanned downtime trended since DRO deployment? Show monthly comparison, bearing MTBF change, unplanned ratio reduction" },
       { icon: '🏭', lbl: 'Strategic', nm: 'Expansion Opportunity', col: 'rgba(45,212,191,.1)', bc: 'rgba(45,212,191,.3)', tc: 'var(--tl)', q: "Based on DRO results so far, what is the business case for expanding to adjacent asset classes (pumps, conveyors, gearboxes) across other plants?" }
     ],
     qp: ['Total financial risk exposure this week?', 'Q3 reliability KPI performance vs targets?', 'YTD DRO value delivered — what is the ROI?', 'Bearing MTBF trend since DRO deployment?'],
-    tags: ['📍 47 assets · 2 critical', '💰 $1.4M avoided MTD', '📈 MTBF +18% vs baseline']
+    tags: [`📍 ${N} assets · 2 critical`, '💰 $1.4M avoided MTD', '📈 MTBF +18% vs baseline']
   },
   ot: {
     nm: 'OT / Controls — Raj Iyer',
@@ -85,14 +88,14 @@ export const PD = {
     av: '📡', bg: 'var(--rdm)', col: 'var(--rd)',
     gr: 'Hi Raj. Integration status:\n\n<strong style="color:var(--t)">M-104: 4/4 channels nominal.</strong> Historian: 99.7% coverage last 30d.\n\n<strong style="color:var(--rd)">C-301 CH-31B dropout: 3.2% missing.</strong> Junction box J-301 — probable connector fault. SAP PM: synced 4m ago.',
     actions: [
-      { icon: '📡', lbl: 'Signal audit', nm: 'Full Fleet Signal Report', col: 'rgba(79,142,255,.12)', bc: 'rgba(79,142,255,.35)', tc: 'var(--ac2)', q: "Full signal quality audit: all 47 assets, each channel status, historian coverage %, dropout events, calibration currency, immediate issues" },
+      { icon: '📡', lbl: 'Signal audit', nm: 'Full Fleet Signal Report', col: 'rgba(79,142,255,.12)', bc: 'rgba(79,142,255,.35)', tc: 'var(--ac2)', q: `Full signal quality audit: all ${N} assets, each channel status, historian coverage %, dropout events, calibration currency, immediate issues` },
       { icon: '🔧', lbl: 'Fault diagnosis', nm: 'Diagnose C-301 Dropout', col: 'rgba(255,77,106,.1)', bc: 'rgba(255,77,106,.35)', tc: 'var(--rd)', q: "Diagnose C-301 CH-31B dropout: analyse pattern, probable cause at J-301, impact on DRO prediction confidence, recommended fix" },
       { icon: '🔗', lbl: 'Integration health', nm: 'CMMS Integration Check', col: 'rgba(46,204,138,.1)', bc: 'rgba(46,204,138,.35)', tc: 'var(--gn)', q: "SAP PM CMMS health: sync frequency, last write, failed writes last 24h, data completeness, outstanding issues to resolve" },
       { icon: '📏', lbl: 'Baseline config', nm: 'Post-Repair Baseline Setup', col: 'rgba(255,183,64,.1)', bc: 'rgba(255,183,64,.35)', tc: 'var(--am)', q: "What historian baselines and alert thresholds need configuring after M-104 bearing replacement? Target values for new SKF 6310-2RS" },
       { icon: '✅', lbl: 'Data validation', nm: 'Validate M-104 Pipeline', col: 'rgba(167,139,250,.1)', bc: 'rgba(167,139,250,.35)', tc: 'var(--pu)', q: "Validate M-104 data pipeline integrity: check for any gaps, calibration drift, signal anomalies, or CMMS sync issues in the last 30 days" },
       { icon: '🛎', lbl: 'Alert config', nm: 'Review Alert Thresholds', col: 'rgba(45,212,191,.1)', bc: 'rgba(45,212,191,.3)', tc: 'var(--tl)', q: "Review vibration and temperature alert thresholds across all critical assets — are they correctly calibrated for each bearing type and operating condition?" }
     ],
-    qp: ['Full signal quality report — all 47 assets?', 'C-301 CH-31B dropout: cause and fix?', 'CMMS integration health — any failed writes?', 'Validate M-104 data pipeline for completeness?'],
+    qp: [`Full signal quality report — all ${N} assets?`, 'C-301 CH-31B dropout: cause and fix?', 'CMMS integration health — any failed writes?', 'Validate M-104 data pipeline for completeness?'],
     tags: ['📡 M-104 signals: 4/4 OK', '⚠ C-301 CH-31B dropout', '🔗 SAP PM: synced 4m ago']
   },
   safety: {
