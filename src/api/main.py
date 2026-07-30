@@ -133,15 +133,6 @@ _CONVERSATIONAL_LLM_SYSTEM = (
 )
 
 
-def _resolve_scenario_from_message(message: str) -> str:
-    """Return a scenario name if the message references a known asset, else empty string."""
-    upper = message.upper()
-    for display, (_asset_id, scenario) in _MULTI_ASSET_SCENARIOS.items():
-        if display in upper or _asset_id in upper:
-            return scenario
-    return ""
-
-
 def _llm_chat_classify(message: str, conversation_history: list | None) -> dict:
     """LLM-based intent classification: pipeline | conversational | general.
     Falls back to 'pipeline' if LLM is unavailable so existing routing is preserved.
@@ -321,11 +312,36 @@ def _deadline_for_recommendation(recommendation) -> str:
             "monitor":"continue monitoring"}.get(recommendation.urgency,"review this week")
 
 
-def _multi_asset_plan(requested_assets, persona: str, run_id: str):
+def _multi_asset_plan(requested_assets, fleet_snapshot: dict, persona: str, run_id: str):
+    """Evaluate named assets only from explicitly supplied fleet evidence."""
     results=[]; combined_log=[]; details=[]; actions=[]
     for display,asset_id,scenario in requested_assets:
+        evidence=(fleet_snapshot.get(display) or fleet_snapshot.get(asset_id)
+                  if isinstance(fleet_snapshot,dict) else None)
+        if not isinstance(evidence,dict):
+            results.append({"display_asset_id":display,"asset_id":asset_id,
+                "status":"unavailable","action":"provide validated telemetry",
+                "deadline":"before planning","reason":"no fleet evidence was supplied for this asset",
+                "recommendation":None,"pipeline_log":[]})
+            details.append(f"{display}: no validated fleet evidence supplied; no agents were run.")
+            actions.append(f"{display}: provide validated telemetry before planning")
+            continue
         try:
-            signal=_get_demo_signal(scenario,-1)
+            signal=evidence.get("signal")
+            selected_scenario=evidence.get("scenario")
+            if signal is None and selected_scenario:
+                signal=_get_demo_signal(str(selected_scenario),int(evidence.get("row_index",-1)))
+            if not isinstance(signal,dict):
+                raise ValueError("fleet evidence must include signal or scenario")
+            if str(signal.get("asset_id","")) != asset_id:
+                results.append({"display_asset_id":display,"asset_id":asset_id,
+                    "scenario":selected_scenario,"status":"data_review",
+                    "action":"correct fleet evidence","deadline":"before planning",
+                    "reason":"fleet evidence asset identity does not match the requested asset",
+                    "recommendation":None,"pipeline_log":[]})
+                details.append(f"{display}: supplied evidence belongs to another asset; no agents were run.")
+                actions.append(f"{display}: correct fleet evidence before planning")
+                continue
             state=run_pipeline(deepcopy(signal),run_id=f"{run_id}-{display}",intent="full",
                 approval_status="pending")
             log=[{**row,"asset":display} for row in state.get("pipeline_log",[])]
@@ -351,17 +367,21 @@ def _multi_asset_plan(requested_assets, persona: str, run_id: str):
                 reason="no actionable recommendation was produced"
                 actions.append(f"{display}: {action}")
             details.append(f"{display}: {action}; due {deadline}. {reason}")
-            results.append({"display_asset_id":display,"asset_id":asset_id,"scenario":scenario,
+            results.append({"display_asset_id":display,"asset_id":asset_id,
+                "scenario":selected_scenario,
                 "status":status,"action":action,"deadline":deadline,"reason":reason,
                 "recommendation":recommendation.to_dict() if recommendation else None,
                 "pipeline_log":log})
         except Exception:
-            results.append({"display_asset_id":display,"asset_id":asset_id,"scenario":scenario,
+            results.append({"display_asset_id":display,"asset_id":asset_id,
+                "scenario":evidence.get("scenario"),
                 "status":"unavailable","action":"manual review","deadline":"before planning",
                 "reason":"asset analysis was unavailable","recommendation":None,"pipeline_log":[]})
             details.append(f"{display}: analysis unavailable; manual review required before planning.")
             actions.append(f"{display}: manual review — before planning")
-    draft={"persona":persona,"response":f"Weekly action plan prepared for {len(results)} requested assets.",
+    evaluated=sum(bool(row["pipeline_log"]) for row in results)
+    draft={"persona":persona,
+        "response":f"Evidence-based action plan evaluated {evaluated} of {len(results)} requested assets.",
         "details":details,"actions":actions,"call_plan":["agents_1_to_6_per_asset"],
         "needs_context":False,"clarification_required":False,
         "multi_asset_results":results,"agent_outputs":{"recommendation":None,"execution_result":None}}
@@ -1739,9 +1759,6 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
     if not req.message or not req.message.strip(): raise HTTPException(422,"Chat message must not be empty.")
     if len(req.message)>_ORCH_CONFIG["chat"]["max_message_characters"]: raise HTTPException(422,"Chat message exceeds the configured length limit.")
     signal=context.get("signal"); scenario=context.get("scenario")
-    if not scenario and signal is None and len(requested_assets)==1:
-        scenario=requested_assets[0][2]
-        context["scenario"]=scenario
     pending=context.get("_pending_message","")
     if pending and "fleet" in pending.lower() and not context.get("timeframe"):
         timeframe=re.search(r"\b(today|this week|next week|last \d+ days?|next \d+ days?)\b",req.message.lower())
@@ -1753,7 +1770,6 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
     if pending and (incoming or explicit_asset or scenario or context.get("timeframe")):
         effective_message=context["_pending_message"]
     plan=plan_query(effective_message,signal is not None); state={"pipeline_log":[]}
-
     # ── Social / acknowledgment short-circuit ────────────────────────────────
     _SOCIAL_PHRASES=frozenset({"thanks","thank you","ok","okay","got it","understood","noted",
                                "great","awesome","perfect","sounds good","alright","sure",
@@ -1770,7 +1786,7 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
 
     # ── Intent classification ─────────────────────────────────────────────────
     # LLM reads message + conversation history to distinguish:
-    #   "pipeline"       → new analysis requested → return scenario_detected to frontend
+    #   "pipeline"       → new analysis requested → evidence-gated routing below
     #   "conversational" → follow-up on a prior result → LLM answers with history context
     #   "general"        → conceptual question → falls through to plan_query routing below
     _intent_class=_llm_chat_classify(effective_message,req.conversation_history)
@@ -1787,22 +1803,15 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
         except Exception: _conv_result["audit"]={"status":"audit_write_failed"}
         return _conv_result
 
-    if _classified=="pipeline" and signal is None and len(requested_assets)<=1:
-        # Single or zero known assets → signal frontend to run the full HITL-capable pipeline.
-        # Multi-asset (len>1) is excluded so it falls through to _multi_asset_plan below.
-        if len(requested_assets)==1:
-            _fwd_scenario=requested_assets[0][2]   # (display, asset_id, scenario)
-        else:
-            _fwd_scenario=_resolve_scenario_from_message(effective_message)
-        if _fwd_scenario:
-            _remember_chat_context(conversation_id,context)
-            return {"persona":req.persona,"response":"","scenario_detected":_fwd_scenario,
-                    "conversation_id":conversation_id,"run_id":run_id,"intent":"pipeline"}
-        # No recognized scenario → fall through to plan_query routing below
-
     _hitl_fields: Dict = {}  # populated when pipeline runs inline
-    if len(requested_assets)>1:
-        draft,state=_multi_asset_plan(requested_assets,req.persona,run_id)
+    if len(requested_assets)>1 and not isinstance(context.get("fleet_snapshot"),dict):
+        draft=_clarification_draft(req.persona,"multi_asset_plan",["fleet_snapshot"],
+            ["Please provide an approved fleet snapshot containing telemetry or an explicitly selected scenario for each named asset."],
+            "Asset names alone are not evidence. No fleet or asset result has been generated.")
+        plan_intent="multi_asset_plan"
+    elif len(requested_assets)>1:
+        draft,state=_multi_asset_plan(requested_assets,context["fleet_snapshot"],
+                                      req.persona,run_id)
         plan_intent="multi_asset_plan"
     elif plan.intent == "concept":
         draft=_concept_draft(effective_message,req.persona)
@@ -1811,9 +1820,12 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
         missing=[]
         if not context.get("timeframe"): missing.append("timeframe")
         if not context.get("fleet_snapshot"): missing.append("fleet_snapshot")
+        if not missing: missing.append("fleet_aggregation_service")
         draft=_clarification_draft(req.persona,"fleet",missing,
-            ["What timeframe should be assessed?","Which approved fleet snapshot or live fleet source should be used?"],
-            "This is a fleet-level question. I need an approved timeframe and fleet data source before comparing assets.")
+            ["What timeframe should be assessed?",
+             "Which approved fleet snapshot or live fleet source should be used?",
+             "Connect the approved fleet aggregation service before requesting a fleet ranking."],
+            "A fleet comparison requires validated fleet evidence and an aggregation path. No ranking has been fabricated.")
         plan_intent=plan.intent
     elif plan.intent == "learning_history":
         draft,cases=_learning_history_draft(req.persona,3)

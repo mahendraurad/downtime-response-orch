@@ -20,11 +20,11 @@ def client(tmp_path):
     api._HITL_REPOSITORY=previous_repository
 
 
-def test_known_single_asset_chat_uses_backend_pipeline(client):
+def test_known_single_asset_chat_requires_explicit_evidence(client):
     data=client.post("/api/chat",json={"message":"What is the RUL for M-104?","persona":"engineer"}).json()
-    assert data["intent"]=="risk" and not data["clarification_required"]
-    assert [row["node"] for row in data["pipeline_log"]]==[
-        "data_foundation","monitoring","failure_intelligence","predictive_risk"]
+    assert data["intent"]=="risk" and data["clarification_required"]
+    assert data["pipeline_log"]==[]
+    assert data["clarification"]["missing_fields"]==["telemetry_or_scenario"]
     assert data["persona"]=="engineer"
 
 
