@@ -30,7 +30,7 @@ from src.schemas.knowledge import (
     SourceDocument,
 )
 from src.schemas.risk import RiskAssessment
-from src.tools.retriever import retrieve, knowledge_index_version
+from src.tools.retrieval_backend import build_retrieval_backend
 from src.tools.config_loader import KnowledgeConfig, load_knowledge_config
 from src.tools.failure_intelligence_utilities import stable_version
 
@@ -103,19 +103,22 @@ class KnowledgeAgent:
         # ************** Added by Prateek Mittal on 20th July 2026 ******************
         # Retrieval policy is validated/configurable. The corpus identifier makes
         # every guidance result traceable to the exact indexed knowledge content.
-        self._retrieve = retriever_fn or retrieve
+        if retriever_fn is None:
+            self._retrieve, configured_index_version = build_retrieval_backend()
+        else:
+            self._retrieve, configured_index_version = retriever_fn, "injected-retriever"
         self._cfg = cfg or load_knowledge_config()
         self._cfg.validate()
         self._config_version = stable_version(self._cfg)
         self._index_version = (
-            index_version or
-            (knowledge_index_version() if retriever_fn is None else "injected-retriever")
+            index_version or configured_index_version
         )
         # ***********************
 
     def process(self, diagnosis: FaultDiagnosis,
                 trusted: TrustedBearingSignal,
-                risk: Optional[RiskAssessment] = None) -> KnowledgeGuidance:
+                risk: Optional[RiskAssessment] = None,
+                persona_context=None) -> KnowledgeGuidance:
         """
         Retrieve relevant SOPs for the diagnosed fault and return structured guidance.
         Always returns a KnowledgeGuidance — never raises.

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
+from typing import Literal
 
 
 class FeedbackEvent(BaseModel):
@@ -54,3 +55,26 @@ class LearnedCaseDocument(BaseModel):
     def to_dict(self) -> Dict[str, Any]:
         return self.model_dump()
     # ***********************
+
+
+class RejectionFeedback(BaseModel):
+    """Structured operator rejection routed to Agent 8 memory."""
+    case_id: str
+    asset_id: str
+    fault_mode: str
+    reason_code: Literal[
+        "diagnosis_wrong", "parts_concern", "second_opinion",
+        "wrong_window", "other",
+    ]
+    free_text: str = ""
+    persona_id: str
+    rejected_at: str
+
+
+class RejectionLearningResult(BaseModel):
+    case_id: str
+    status: str = "recorded"
+    reliability_review_required: bool = False
+    consecutive_rejections: int = 1
+    review_reason: str = ""
+    persistence_status: str = "stored"

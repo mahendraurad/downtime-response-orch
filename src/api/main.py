@@ -76,6 +76,7 @@ from src.agents.reflexion_agent import ReflexionAgent
 from src.tools.orchestrator_audit import write_audit
 from src.tools.llm_client import LLMClient
 from src.tools.hitl_repository import build_hitl_repository
+from src.tools.persona_formatter import build_persona_context
 
 app = FastAPI(title="DRO API", version="1.0.0")
 
@@ -246,20 +247,6 @@ _MULTI_ASSET_SCENARIOS = {
     "G-112": ("AST_GBX_001", "gearbox_fault"),
 }
 
-# Fleet snapshot shown in the sidebar — injected as LLM context for fleet queries
-# so the model can answer without live telemetry and without setting requires_telemetry=true.
-_FLEET_SNAPSHOT = (
-    "Current fleet status — assets with active telemetry:\n"
-    "  M-104   Motor      CRITICAL  Active outer-race bearing fault. RUL 0–15 days. "
-                                   "Stop-and-replace recommended immediately.\n"
-    "  P-207   Pump       ALERT     Lubrication degradation detected. "
-                                   "Schedule inspection within 7 days.\n"
-    "  C-301   Conveyor   MONITOR   Signal dropout detected. EWMA within threshold. "
-                                   "Watch closely — no immediate action required.\n"
-    "  M-089   Motor      HEALTHY   All signals nominal. No anomalies.\n"
-    "  G-112   Gearbox    HEALTHY   Early-stage gearbox signature. Operating normally.\n"
-)
-
 Persona = Literal["supervisor", "engineer", "maintenance", "manager",
                   "executive", "md", "ot", "safety"]
 _PERSONAS = {"supervisor", "engineer", "maintenance", "manager",
@@ -360,8 +347,10 @@ def _multi_asset_plan(requested_assets, fleet_snapshot: dict, persona: str, run_
                 details.append(f"{display}: supplied evidence belongs to another asset; no agents were run.")
                 actions.append(f"{display}: correct fleet evidence before planning")
                 continue
-            state=run_pipeline(deepcopy(signal),run_id=f"{run_id}-{display}",intent="full",
-                approval_status="pending")
+            state=run_pipeline(
+                deepcopy(signal), run_id=f"{run_id}-{display}", intent="full",
+                approval_status="pending", persona=persona,
+            )
             log=[{**row,"asset":display} for row in state.get("pipeline_log",[])]
             combined_log.extend(log)
             recommendation=state.get("recommendation")
@@ -884,6 +873,18 @@ class HITLAdvisoryRequest(BaseModel):
     rationale: str = ""
 
 
+class RecommendationRejectionRequest(BaseModel):
+    case_id: str
+    asset_id: str
+    fault_mode: str
+    reason_code: Literal[
+        "diagnosis_wrong", "parts_concern", "second_opinion",
+        "wrong_window", "other",
+    ]
+    free_text: str = ""
+    persona: Persona = "supervisor"
+
+
 @app.get("/api/pipeline/hitl/pending")
 def hitl_pending(persona: Persona = "supervisor", gate: str = ""):
     """Return only HITL work the selected persona is authorized to resolve."""
@@ -998,10 +999,10 @@ def pipeline_run(req: PipelineRunRequest, user: Dict = Depends(get_current_user)
             idx = req.row_index if 0 <= req.row_index < len(rows) else len(rows) - 1
             signal = deepcopy(rows[idx])
             for i in range(idx):
-                run_pipeline(deepcopy(rows[i]))
-            state = run_pipeline(signal, intent=intent)
+                run_pipeline(deepcopy(rows[i]), persona=req.persona)
+            state = run_pipeline(signal, intent=intent, persona=req.persona)
         else:
-            state = run_pipeline(req.signal, intent=intent)
+            state = run_pipeline(req.signal, intent=intent, persona=req.persona)
     except HTTPException:
         raise
     except Exception as exc:
@@ -1254,7 +1255,9 @@ def hitl_remediation(req: HITLRemediationRequest, user: Dict = Depends(get_curre
 
     # KEEP or successfully IMPUTEd: resume pipeline from monitoring
     from src.orchestrator.graph import run_from_trusted_signal
-    state = run_from_trusted_signal(trusted, intent=intent, run_id=req.run_id)
+    state = run_from_trusted_signal(
+        trusted, intent=intent, run_id=req.run_id, persona=persona
+    )
     formatted = format_for_persona(state, persona)
 
     risk      = state.get("risk_assessment")
@@ -1367,7 +1370,9 @@ def hitl_monitoring_resolution(req: HITLMonitoringRequest, user: Dict = Depends(
 
     # CONFIRM — resume pipeline from FI → Risk → Knowledge
     from src.orchestrator.graph import run_from_anomaly_event
-    state     = run_from_anomaly_event(anomaly, trusted, intent=intent, run_id=req.run_id)
+    state = run_from_anomaly_event(
+        anomaly, trusted, intent=intent, run_id=req.run_id, persona=persona
+    )
     formatted = format_for_persona(state, persona)
 
     diagnosis = state.get("fault_diagnosis")
@@ -1506,7 +1511,10 @@ def hitl_diagnosis_resolution(req: HITLDiagnosisRequest, user: Dict = Depends(ge
         diagnosis = original_diagnosis
 
     from src.orchestrator.graph import run_from_diagnosis
-    state     = run_from_diagnosis(diagnosis, anomaly, trusted, intent=intent, run_id=req.run_id)
+    state = run_from_diagnosis(
+        diagnosis, anomaly, trusted, intent=intent,
+        run_id=req.run_id, persona=persona,
+    )
     formatted = format_for_persona(state, persona)
 
     risk      = state.get("risk_assessment")
@@ -1668,9 +1676,30 @@ def executor_run(req: ExecutorRunRequest, user: Dict = Depends(get_current_user)
     try:
         rec = MaintenanceRecommendation(**req.recommendation)
         result = ExecutorAgent().process(rec, approved=req.approved)
+        if req.approved and result.status in {"success", "partial"}:
+            _learning_agent().record_approval(
+                rec.case_id, rec.asset_id, rec.condition.fault_type
+            )
         return result.model_dump()
     except Exception as exc:
         raise HTTPException(400, f"Executor error: {exc}")
+
+
+@app.post("/api/recommendations/reject")
+def reject_recommendation(
+    req: RecommendationRejectionRequest,
+    user: Dict = Depends(get_current_user),
+):
+    """Persist structured rejection feedback through Agent 8 memory."""
+    require_persona(req.persona, user)
+    from src.schemas.feedback import RejectionFeedback
+    feedback = RejectionFeedback(
+        case_id=req.case_id, asset_id=req.asset_id,
+        fault_mode=req.fault_mode, reason_code=req.reason_code,
+        free_text=req.free_text, persona_id=build_persona_context(req.persona).id,
+        rejected_at=datetime.now(timezone.utc).isoformat(),
+    )
+    return _learning_agent().record_rejection(feedback).model_dump()
 
 
 @app.get("/api/notifications/counts")
@@ -1784,6 +1813,20 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
     if scenario and signal is None:
         try: signal=_get_demo_signal(str(scenario),int(context.get("row_index",-1)))
         except (KeyError,ValueError,TypeError) as exc: raise HTTPException(404,f"Scenario unavailable: {scenario}") from exc
+    # Registered UI demo assets have an explicit backend scenario mapping.
+    # Loading that mapped fixture is evidence-backed demo behavior, not an
+    # inference from the asset name. Deployments can disable it in config.
+    if (signal is None and not scenario and len(requested_assets) == 1
+            and _ORCH_CONFIG["chat"].get("auto_load_registered_demo_scenarios", False)):
+        _, mapped_asset, mapped_scenario = requested_assets[0]
+        if supplied_asset == mapped_asset:
+            signal = _get_demo_signal(mapped_scenario, -1)
+            scenario = mapped_scenario
+            context.update({
+                "scenario": mapped_scenario,
+                "row_index": -1,
+                "evidence_source": "registered_demo_scenario",
+            })
     effective_message=req.message
     if pending and (incoming or explicit_asset or scenario or context.get("timeframe")):
         effective_message=context["_pending_message"]
@@ -1836,52 +1879,15 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
         draft=_concept_draft(effective_message,req.persona)
         plan_intent=plan.intent
     elif plan.intent == "fleet":
-        # Inject the fleet snapshot so the LLM has real data and won't request live telemetry.
-        llm_draft = None
-        if _CHAT_LLM.is_configured():
-            try:
-                llm_resp = _CHAT_LLM.complete_json(
-                    system_prompt=_CHAT_LLM_SYSTEM,
-                    user_prompt=(
-                        f"Fleet context (use this data to answer the question; "
-                        f"set requires_telemetry to false since the snapshot is provided):\n"
-                        f"{_FLEET_SNAPSHOT}\n\n"
-                        f"User question: {req.message}"
-                    ),
-                    temperature=0.3,
-                    max_tokens=600,
-                )
-                if (llm_resp
-                        and isinstance(llm_resp.get("answer"), str)
-                        and llm_resp["answer"].strip()):
-                    llm_draft = {"persona": req.persona,
-                                 "response": llm_resp["answer"].strip(),
-                                 "call_plan": list(plan.agents),
-                                 "needs_context": False,
-                                 "clarification_required": False,
-                                 "source_type": "llm_fleet_knowledge"}
-            except Exception:
-                pass
-        if llm_draft:
-            draft = llm_draft
-        else:
-            # LLM unavailable — synthesise a direct answer from the snapshot
-            draft = {"persona": req.persona,
-                     "response": (
-                         "Fleet health — assets with active telemetry:\n\n"
-                         "• M-104 Motor — CRITICAL: active outer-race fault, RUL 0–15 days, "
-                         "stop-and-replace recommended.\n"
-                         "• P-207 Pump — ALERT: lubrication degradation, schedule inspection within 7 days.\n"
-                         "• C-301 Conveyor — MONITOR: signal dropout detected, EWMA within threshold.\n"
-                         "• M-089 Motor — HEALTHY: all signals nominal.\n"
-                         "• G-112 Gearbox — HEALTHY: early-stage signature, monitoring active.\n\n"
-                         "To run a full pipeline analysis on any asset, ask "
-                         "'Run the complete analysis for M-104' (or any other asset ID)."
-                     ),
-                     "call_plan": [],
-                     "needs_context": False,
-                     "clarification_required": False,
-                     "source_type": "fleet_snapshot"}
+        missing=[]
+        if not context.get("timeframe"): missing.append("timeframe")
+        if not context.get("fleet_snapshot"): missing.append("fleet_snapshot")
+        if not missing: missing.append("fleet_aggregation_service")
+        draft=_clarification_draft(req.persona,"fleet",missing,
+            ["What timeframe should be assessed?",
+             "Which approved fleet snapshot or live fleet source should be used?",
+             "Connect the approved fleet aggregation service before requesting a fleet ranking."],
+            "A fleet comparison requires validated fleet evidence and an aggregation path. No ranking has been fabricated.")
         plan_intent=plan.intent
     elif plan.intent == "learning_history":
         draft,cases=_learning_history_draft(req.persona,3)
@@ -1909,8 +1915,12 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
                 "The telemetry payload is incomplete, so the agent pipeline has not been started.",
                 str(signal.get("asset_id",supplied_asset or "")) if isinstance(signal,dict) else supplied_asset or "")
         else:
-            state=run_pipeline(deepcopy(signal),run_id=run_id,intent=plan.pipeline_intent,
-                inventory_lookup=context.get("inventory_lookup"),context_lookup=context.get("operations_context"),approval_status="pending")
+            state=run_pipeline(
+                deepcopy(signal), run_id=run_id, intent=plan.pipeline_intent,
+                inventory_lookup=context.get("inventory_lookup"),
+                context_lookup=context.get("operations_context"),
+                approval_status="pending", persona=req.persona,
+            )
             formatted=format_for_persona(state,req.persona)
             _pipeline_headline=formatted.get("headline","Analysis complete.")
             draft={"persona":req.persona,"response":_pipeline_headline,"details":formatted.get("details",[]),"actions":formatted.get("actions",[]),"call_plan":list(plan.agents),"needs_context":False,"clarification_required":False,

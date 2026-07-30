@@ -1,0 +1,91 @@
+{
+  "aliases": {
+    "md": "executive"
+  },
+  "personas": {
+    "supervisor": {
+      "display_name": "Plant Supervisor — James Kowalski",
+      "role": "Plant Supervisor",
+      "domain": "Operational decisions, run/defer risk, shift management",
+      "response_depth": "operational",
+      "preferred_format": "verdict_first",
+      "headline_focus": ["rul", "severity", "run_defer"],
+      "details": ["risk_level", "financial_exposure", "vibration", "temperature"],
+      "actions": ["approve_work_order", "brief_operators", "escalate"],
+      "tags": ["asset", "stage", "rul"],
+      "suppress_fields": ["vibration_spectrum_detail", "bearing_history_table"]
+    },
+    "engineer": {
+      "display_name": "Reliability Engineer — Priya Nair",
+      "role": "Reliability Engineer",
+      "domain": "Fault diagnostics, FFT analysis, RUL modelling, root cause analysis",
+      "response_depth": "technical",
+      "preferred_format": "technical_first",
+      "headline_focus": ["fft_analysis", "confidence"],
+      "details": ["fault_mode", "rul_intervals", "health_index"],
+      "actions": ["fft_report", "kb_match", "post_repair_spec"],
+      "tags": ["bpfo", "stage", "confidence"],
+      "suppress_fields": []
+    },
+    "maintenance": {
+      "display_name": "Maintenance Planner — Tom Rodriguez",
+      "role": "Maintenance Planner",
+      "domain": "Scheduling, parts availability, crew allocation, repair sequencing",
+      "response_depth": "scheduling",
+      "preferred_format": "verdict_first",
+      "headline_focus": ["parts", "crew", "duration"],
+      "details": ["action_type", "loto", "sop_documents", "financial_exposure"],
+      "actions": ["confirm_parts", "assign_crew", "schedule"],
+      "tags": ["asset", "action", "loto"],
+      "suppress_fields": ["vibration_spectrum_detail"]
+    },
+    "manager": {
+      "display_name": "Plant Manager — Sarah Chen",
+      "role": "Plant Manager",
+      "domain": "Production impact, cost trade-offs, OEE effects, line-level risk",
+      "response_depth": "financial",
+      "preferred_format": "risk_first",
+      "headline_focus": ["cost", "roi", "oee_impact"],
+      "details": ["risk_level", "unplanned_cost", "planned_cost", "net_avoidance"],
+      "actions": ["approve_work_order", "cost_benefit", "contingency"],
+      "tags": ["avoidance_value", "roi"],
+      "suppress_fields": ["sensor_ids", "vibration_spectrum_detail"]
+    },
+    "executive": {
+      "display_name": "VP Operations — Michael Osei",
+      "role": "VP Operations",
+      "domain": "Portfolio risk, reliability KPIs, financial returns, board metrics",
+      "response_depth": "executive",
+      "preferred_format": "executive_brief",
+      "headline_focus": ["portfolio_exposure", "kpi"],
+      "details": ["risk_level", "failure_probability", "financial_impact", "health_index"],
+      "actions": ["kpi_review", "board_brief", "ytd_value"],
+      "tags": ["portfolio_risk", "roi"],
+      "suppress_fields": ["vibration_raw", "temperature_raw", "sensor_ids", "vibration_spectrum_detail"]
+    },
+    "ot": {
+      "display_name": "OT / Controls — Raj Iyer",
+      "role": "OT / Controls",
+      "domain": "Signal health, historian integrity, CMMS sync, sensor calibration",
+      "response_depth": "integration",
+      "preferred_format": "technical_first",
+      "headline_focus": ["signal_quality", "validation_status"],
+      "details": ["data_quality_score", "historian_coverage", "cmms_status"],
+      "actions": ["signal_audit", "baseline_setup", "integration_check"],
+      "tags": ["status", "quality", "coverage"],
+      "suppress_fields": []
+    },
+    "safety": {
+      "display_name": "Safety Officer — Lisa Park",
+      "role": "Safety Officer",
+      "domain": "LOTO procedures, permit validation, PPE, ISO compliance",
+      "response_depth": "compliance",
+      "preferred_format": "verdict_first",
+      "headline_focus": ["iso_zone", "loto", "ppe"],
+      "details": ["zone", "loto_reference", "stage", "crew_qualifications"],
+      "actions": ["pre_task_brief", "permit_validation", "compliance_audit"],
+      "tags": ["zone", "loto", "stage"],
+      "suppress_fields": ["financial_detail", "vibration_spectrum_detail"]
+    }
+  }
+}

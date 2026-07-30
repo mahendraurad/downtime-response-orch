@@ -34,12 +34,13 @@ def test_asset_specific_rul_requests_asset_and_telemetry(client):
     assert data["pipeline_log"]==[] and data["conversation_id"].startswith("CONV-")
 
 
-def test_follow_up_asset_preserves_pending_rul_question_and_still_needs_evidence(client):
+def test_follow_up_registered_demo_asset_completes_pending_rul_question(client):
     first=client.post("/api/chat",json={"message":"What is the RUL for this bearing?"}).json()
     second=client.post("/api/chat",json={"message":"The asset is AST_MTR_001","conversation_id":first["conversation_id"]}).json()
-    assert second["intent"]=="risk" and second["clarification_required"]
-    assert second["pipeline_log"]==[]
-    assert second["clarification"]["missing_fields"]==["telemetry_or_scenario"]
+    assert second["intent"]=="risk" and not second["clarification_required"]
+    assert [row["node"] for row in second["pipeline_log"]]==[
+        "data_foundation","monitoring","failure_intelligence","predictive_risk",
+    ]
 
 
 def test_follow_up_scenario_completes_pending_rul_pipeline(client):

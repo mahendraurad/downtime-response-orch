@@ -38,6 +38,8 @@ import logging
 import os
 import re
 from typing import Dict, List, Optional
+from langsmith import traceable
+from src.tools.observability import langfuse_observe
 
 logger = logging.getLogger(__name__)
 
@@ -131,6 +133,9 @@ class LLMClient:
 
     # ------------------------------------------------------------------
 
+    @traceable(name="Azure LLM Completion", run_type="llm",
+               tags=["dro", "llm", "azure"])
+    @langfuse_observe("Azure LLM Completion", as_type="generation")
     def complete_json(
         self,
         system_prompt: str,
