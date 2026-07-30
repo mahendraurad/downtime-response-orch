@@ -1,30 +1,15 @@
 import React, { useContext, useEffect, useRef, useState, useCallback } from 'react';
 import { AppContext } from '../../context/AppContext';
 import { PD } from '../../data/personas';
-import { ASSET_SCENARIO } from '../../data/scenarios';
 import { ts } from '../../utils/helpers';
-import { API } from '../../config/api';
-import { runRealPipeline, resolveHITLRemediation, resolveHITLMonitoring, resolveHITLDiagnosis, resolveHITLKnowledge, runExecutor } from '../../api/pipeline';
-import { patchWorkOrder } from '../../api/workOrders';
+import { askChat } from '../../api/chat';
+import { resolveHITLRemediation, resolveHITLMonitoring, resolveHITLDiagnosis, resolveHITLKnowledge, resolveHITLAdvisory, runExecutor } from '../../api/pipeline';
 import ChatSidebar from './ChatSidebar';
 
-const CHAT_KB = {
-  'Can M-104 safely run until Saturday?': {
-    r: ['Predictive Risk Agent', 'Failure Intel Agent'],
-    c: 'Running M-104 to Saturday increases failure probability to <strong style="color:var(--t)">67%</strong> (from 22% today). Degradation is nonlinear at Stage 3 — the next 72h are the fastest-accelerating window.\n\nExpected consequence: outer race seizure at speed, 12–18h unplanned stop, risk of secondary winding damage (~$80K). That converts a $18K planned repair into $619K+ emergency.\n\n<strong style="color:var(--rd)">Recommendation: Do not run past Wednesday.</strong>'
-  },
-};
-
-const DFLT = [
-  { r: ['Monitoring Agent', 'Failure Intel Agent', 'Knowledge Agent'], c: 'M-104 outer race spall is at <strong style="color:var(--t)">Stage 3 — 25–40% surface damage</strong>. BPFO family at 4.02× is consistent with ISO 13373-1 Stage 3. Three KB cases at this level showed failure in 4.1–9.3 days. Wednesday is the last low-risk window.' },
-  { r: ['Prescriptive Optimisation Agent'], c: '<strong style="color:var(--t)">Prescriptive recommendation: Replace bearing Wednesday 06:00.</strong>\n\nRisk-adjusted analysis: defer to Friday → 67% failure probability. Net avoidance $601K. Parts confirmed, crew available, window available — the decision has a clear answer.' }
-];
-
-let _msgIdCounter = 0;
-function mkId() { return ++_msgIdCounter; }
+function mkId() { return `m-${Date.now()}-${Math.floor(Math.random() * 1000)}`; }
 
 export default function ChatView() {
-  const { persona, messages, setMessages, addMessage, clearMessages } = useContext(AppContext);
+  const { persona, messages, setMessages, addMessage } = useContext(AppContext);
   const [inputVal, setInputVal] = useState('');
   const [thinking, setThinking] = useState(false);
   const msgsRef = useRef(null);
@@ -37,10 +22,12 @@ export default function ChatView() {
     if (msgsRef.current) msgsRef.current.scrollTop = msgsRef.current.scrollHeight;
   }, [messages, thinking]);
 
-  // Render chat home on persona change
+  // On persona switch: reset conversation, restore stored history or show home
   useEffect(() => {
-    clearMessages();
-    renderChatHome();
+    conversationIdRef.current = null;
+    if (!messages || messages.length === 0) {
+      renderChatHome();
+    }
     if (inpRef.current) {
       inpRef.current.placeholder = `Ask as ${p.nm.split(' — ')[0]}: faults, risk, decisions, what-if…`;
     }
@@ -52,14 +39,9 @@ export default function ChatView() {
     function onSq(e) { sendMsg(e.detail); }
     function onRunPipeline(e) {
       const { scenario, persona: pArg } = e.detail;
-      doThink(async () => {
-        try {
-          const data = await runRealPipeline(scenario, -1, pArg);
-          if (data) handlePipelineResult(data, scenario, pArg);
-        } catch (err) {
-          const r = DFLT[Math.floor(Math.random() * DFLT.length)];
-          appendA(r.c, r.r);
-        }
+      sendMsg(`Run the orchestrated analysis for scenario ${scenario}`, {
+        scenario,
+        requestedPersona: pArg,
       });
     }
     function onExecutorHITL(e) { renderExecutorHITLCard(e.detail); }
@@ -99,7 +81,13 @@ export default function ChatView() {
 
   function doThink(cb) {
     setThinking(true);
-    setTimeout(() => { setThinking(false); cb(); }, 1100);
+    setTimeout(async () => {
+      try {
+        await cb();
+      } finally {
+        setThinking(false);
+      }
+    }, 1100);
   }
 
   function handlePipelineResult(data, scenario, pArg) {
@@ -134,69 +122,72 @@ export default function ChatView() {
     }
   }
 
-  async function sendMsg(txt) {
+  async function sendMsg(txt, options = {}) {
     const t = (txt || inputVal).trim();
     if (!t) return;
     setInputVal('');
     if (inpRef.current) inpRef.current.style.height = 'auto';
     appendU(t);
-    const lower = t.toLowerCase();
 
-    const matchedAssets = Object.entries(ASSET_SCENARIO)
-      .filter(([asid]) => lower.includes(asid.toLowerCase()));
-    // A single asset can use the focused pipeline card. Multi-asset questions
-    // must reach /api/chat intact so the backend can plan every requested asset.
-    if (matchedAssets.length === 1) {
-      const [asid, sc] = matchedAssets[0];
-      if (lower.includes(asid.toLowerCase())) {
-        doThink(async () => {
-          try {
-            const data = await runRealPipeline(sc, -1, persona);
-            if (data) {
-              handlePipelineResult(data, sc, persona);
-            } else {
-              const r = DFLT[Math.floor(Math.random() * DFLT.length)];
-              appendA(r.c, r.r);
-            }
-          } catch (err) {
-            const r = DFLT[Math.floor(Math.random() * DFLT.length)];
-            appendA(r.c, r.r);
-          }
-        });
-        if (/approv/i.test(t)) {
-          try { await patchWorkOrder('WO-2024-1847', { status: 'Approved' }); } catch (e) {}
-        }
-        return;
-      }
-    }
-
-    if (CHAT_KB[t]) {
-      doThink(() => appendA(CHAT_KB[t].c, CHAT_KB[t].r));
-      return;
-    }
+    // All queries go to /api/chat. The backend LLM classifier decides whether
+    // this is a new pipeline request, a conversational follow-up, or general knowledge.
+    // Conversation history is included so the classifier understands follow-up context.
+    // (Future: swap this history source for a Cosmos DB episode fetch.)
+    const conversationHistory = messages
+      .filter(m => m.type === 'user' || m.type === 'agent')
+      .slice(-8)
+      .map(m => ({
+        role: m.type === 'user' ? 'user' : 'assistant',
+        content: m.type === 'user'
+          ? (m.text || '')
+          : (m.html || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 500),
+      }))
+      .filter(m => m.content.length > 0);
 
     doThink(async () => {
       try {
-        const resp = await fetch(API + '/api/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: t, persona, conversation_id: conversationIdRef.current }),
+        const d = await askChat({
+          message: t,
+          persona: options.requestedPersona || persona,
+          conversationId: conversationIdRef.current,
+          context: options.scenario ? { scenario: options.scenario } : null,
+          conversationHistory,
         });
-        if (resp.ok) {
-          const d = await resp.json();
-          conversationIdRef.current = d.conversation_id || conversationIdRef.current;
-          const details = d.details && d.details.length ? '<br><br>' + d.details.map(x => '• ' + x).join('<br>') : '';
-          const actions = d.actions && d.actions.length ? '<br><br><strong>Actions:</strong><br>' + d.actions.map(x => '→ ' + x).join('<br>') : '';
-          const questions = d.clarification && d.clarification.questions ? '<br><br><strong>Needed:</strong><br>' + d.clarification.questions.map(x => '? ' + x).join('<br>') : '';
-          appendA(d.response + details + actions + questions,
-            d.pipeline_log ? d.pipeline_log.map(n => n.node ? n.node.replace(/_/g, ' ') : '') : []);
-        } else {
-          const r = DFLT[Math.floor(Math.random() * DFLT.length)];
-          appendA(r.c, r.r);
+        conversationIdRef.current = d.conversation_id || conversationIdRef.current;
+        const routes = d.pipeline_log ? d.pipeline_log.map(n => n.node ? n.node.replace(/_/g, ' ') : '') : [];
+
+        // HITL blocking gates — show card and stop rendering the response
+        if (d.hitl_required?.type === 'remediation') {
+          addMessage({ id: mkId(), type: 'hitl_remediation', data: d, scenario: null, persona, time: ts() });
+          return;
         }
-      } catch (e) {
-        const r = DFLT[Math.floor(Math.random() * DFLT.length)];
-        appendA(r.c, r.r);
+        if (d.hitl_monitoring) {
+          addMessage({ id: mkId(), type: 'hitl_monitoring', data: d, scenario: null, persona, time: ts() });
+          return;
+        }
+        if (d.hitl_diagnosis) {
+          addMessage({ id: mkId(), type: 'hitl_diagnosis', data: d, scenario: null, persona, time: ts() });
+          return;
+        }
+
+        // Normal response
+        const details = d.details && d.details.length ? '<br><br>' + d.details.map(x => '• ' + x).join('<br>') : '';
+        const actions = d.actions && d.actions.length ? '<br><br><strong>Actions:</strong><br>' + d.actions.map(x => '→ ' + x).join('<br>') : '';
+        const questions = d.clarification && d.clarification.questions ? '<br><br><strong>Needed:</strong><br>' + d.clarification.questions.map(x => '? ' + x).join('<br>') : '';
+        appendA(d.response + details + actions + questions, routes);
+
+        // Non-blocking gates shown alongside the response
+        if (d.hitl_advisory?.advisory_note) {
+          addMessage({ id: mkId(), type: 'hitl_advisory', data: d, time: ts() });
+        }
+        if (d.hitl_knowledge) {
+          addMessage({ id: mkId(), type: 'hitl_knowledge', data: d, persona, time: ts() });
+        }
+        if (d.recommendation?.recommendation_status === 'ok') {
+          addMessage({ id: mkId(), type: 'hitl_executor', rec: d.recommendation, time: ts() });
+        }
+      } catch (error) {
+        appendA(`The orchestrated chat service is currently unavailable. ${error.message}`, ['Chat API']);
       }
     });
   }
@@ -245,7 +236,10 @@ export default function ChatView() {
           {thinking && (
             <div className="tdg fi">
               <div className="mav" style={{ background: 'var(--ag)' }}>🤖</div>
-              <div className="tdts"><span></span><span></span><span></span></div>
+              <div>
+                <div className="tdts"><span></span><span></span><span></span></div>
+                <div style={{ fontSize: '11px', color: 'var(--t2)', marginTop: '4px', fontStyle: 'italic' }}>Agents are processing…</div>
+              </div>
             </div>
           )}
         </div>
@@ -262,19 +256,26 @@ export default function ChatView() {
               ref={inpRef}
               className="cinptx"
               rows={1}
-              placeholder={`Ask as ${p.nm.split(' — ')[0]}: faults, risk, decisions, what-if…`}
+              placeholder={thinking ? 'Agents are processing…' : `Ask as ${p.nm.split(' — ')[0]}: faults, risk, decisions, what-if…`}
               value={inputVal}
               onChange={e => setInputVal(e.target.value)}
               onKeyDown={handleKeyDown}
               onInput={autoResize}
+              disabled={thinking}
+              style={thinking ? { opacity: 0.5, cursor: 'not-allowed' } : {}}
             />
-            <button className="sbtn" onClick={() => sendMsg()}>
+            <button
+              className="sbtn"
+              onClick={() => sendMsg()}
+              disabled={thinking}
+              style={thinking ? { opacity: 0.35, cursor: 'not-allowed' } : {}}
+            >
               <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" /></svg>
             </button>
           </div>
           <div className="qps">
             {p.qp.map((q, i) => (
-              <button key={i} className="qpb" onClick={() => sendMsg(q)}>{q}</button>
+              <button key={i} className="qpb" onClick={() => sendMsg(q)} disabled={thinking} style={thinking ? { opacity: 0.4, cursor: 'not-allowed' } : {}}>{q}</button>
             ))}
           </div>
         </div>
@@ -363,7 +364,7 @@ function MessageBubble({ msg, persona, onSq, doThink, appendA, addMessage }) {
     return <HITLRemediationMsg msg={msg} onSq={onSq} doThink={doThink} appendA={appendA} addMessage={addMessage} persona={persona} />;
   }
   if (msg.type === 'hitl_advisory') {
-    return <HITLAdvisoryMsg msg={msg} />;
+    return <HITLAdvisoryMsg msg={msg} doThink={doThink} appendA={appendA} persona={persona} />;
   }
   if (msg.type === 'hitl_monitoring') {
     return <HITLMonitoringMsg msg={msg} onSq={onSq} doThink={doThink} appendA={appendA} addMessage={addMessage} persona={persona} />;
@@ -375,7 +376,7 @@ function MessageBubble({ msg, persona, onSq, doThink, appendA, addMessage }) {
     return <HITLKnowledgeMsg msg={msg} doThink={doThink} appendA={appendA} persona={persona} />;
   }
   if (msg.type === 'hitl_executor') {
-    return <HITLExecutorMsg msg={msg} doThink={doThink} appendA={appendA} />;
+    return <HITLExecutorMsg msg={msg} doThink={doThink} appendA={appendA} persona={persona} />;
   }
 
   return null;
@@ -457,9 +458,22 @@ function HITLRemediationMsg({ msg, doThink, appendA, addMessage, persona }) {
   );
 }
 
-function HITLAdvisoryMsg({ msg }) {
+function HITLAdvisoryMsg({ msg, doThink, appendA, persona }) {
   const [decision, setDecision] = useState(null);
   const h = msg.data.hitl_advisory;
+
+  function resolve(action) {
+    setDecision(action.toLowerCase());
+    doThink(async () => {
+      try {
+        const data = await resolveHITLAdvisory(h.run_id, action, persona);
+        appendA(`LLM advisory ${data.status}. Deterministic risk and RUL values were unchanged.`, ['predictive risk', 'HITL']);
+      } catch (err) {
+        setDecision(null);
+        appendA('Advisory HITL resolution failed: ' + err.message, []);
+      }
+    });
+  }
 
   return (
     <div className="mg fi">
@@ -477,11 +491,11 @@ function HITLAdvisoryMsg({ msg }) {
             <div style={{ fontSize: '11px', color: 'var(--t3)', marginBottom: '10px' }}>Accept to include in the assessment, or reject to use deterministic rules only.</div>
             {!decision ? (
               <div style={{ display: 'flex', gap: '8px' }}>
-                <button onClick={() => setDecision('accept')}
+                <button onClick={() => resolve('ACCEPT')}
                   style={{ padding: '7px 16px', borderRadius: '6px', border: 'none', background: '#8b5cf6', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: '12px' }}>
                   Accept advisory
                 </button>
-                <button onClick={() => setDecision('reject')}
+                <button onClick={() => resolve('REJECT')}
                   style={{ padding: '7px 16px', borderRadius: '6px', border: '1px solid #8b5cf6', background: 'transparent', color: '#8b5cf6', fontWeight: 700, cursor: 'pointer', fontSize: '12px' }}>
                   Reject - rules only
                 </button>
@@ -739,9 +753,9 @@ function buildLearningHtml(lr) {
     + `</div>`;
 }
 
-function HITLExecutorMsg({ msg, doThink, appendA }) {
+function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
   const [resolved, setResolved] = useState(false);
-  const { refreshNotifCounts } = useContext(AppContext);
+  const { refreshNotifCounts, pushNotification } = useContext(AppContext);
   const rec = msg.rec;
   const action = rec.recommended_action;
   const urgencyColor = { immediate: '#ef4444', urgent: '#f97316', planned: '#3b82f6', monitor: '#6b7280' }[rec.urgency] || '#6b7280';
@@ -750,8 +764,23 @@ function HITLExecutorMsg({ msg, doThink, appendA }) {
     setResolved(true);
     doThink(async () => {
       try {
-        const data = await runExecutor(rec, approved);
+        const data = await runExecutor(rec, approved, persona);
         refreshNotifCounts();
+
+        // Notify maintenance persona when a work order is successfully created
+        if (approved && data.status !== 'blocked' && data.work_order_id) {
+          const notifHtml = `<div style="border:1.5px solid #10b981;border-radius:8px;padding:12px;background:rgba(16,185,129,0.06)">`
+            + `<div style="font-size:9px;font-weight:700;color:#10b981;font-family:var(--m);margin-bottom:8px">WORK ORDER ASSIGNED TO MAINTENANCE</div>`
+            + `<strong>Work order ${data.work_order_id} created — action required</strong>`
+            + `<div style="font-size:12px;color:var(--t2);margin-top:8px;line-height:1.9">`
+            + `Asset: <strong>${rec.asset_id}</strong><br/>`
+            + `Action: <strong>${action.name.replace(/_/g, ' ')}</strong><br/>`
+            + `Urgency: <strong style="color:${urgencyColor}">${rec.urgency.toUpperCase()}</strong><br/>`
+            + `Window: <strong>${rec.window_chosen}</strong><br/>`
+            + `Approved by: <strong>${rec.responsible_approver}</strong></div></div>`;
+          pushNotification('maintenance', { id: mkId(), type: 'agent', html: notifHtml, routes: ['executor · notification'], chips: [], time: ts() });
+        }
+
         const statusColor = { success: '#10b981', partial: '#f59e0b', blocked: '#6b7280', failed: '#ef4444' };
         const color = statusColor[data.status] || '#6b7280';
         const label = approved ? '✓ APPROVED & EXECUTED' : '✗ REJECTED';

@@ -14,7 +14,7 @@ The repository is ready for frontend integration in deterministic local mode. Az
 | Human approval and HITL gates | Implemented |
 | Reflexion and graceful error envelopes | Implemented |
 | Local persistence and mock connectors | Implemented |
-| Automated backend tests | `683 passed` |
+| Automated backend tests | `739 passed` |
 | React frontend from `feature/8agents_frontend` | Integrated on `dev` |
 | Real CMMS/ERP/historian and Azure services | Next phase |
 
@@ -118,6 +118,9 @@ The frontend can generate its API client from `/openapi.json`. The principal end
 | `POST` | `/api/pipeline/hitl/monitoring` | Resolve Agent 2 borderline event |
 | `POST` | `/api/pipeline/hitl/diagnosis` | Resolve Agent 3 low-confidence diagnosis |
 | `POST` | `/api/pipeline/hitl/knowledge` | Resolve missing-SOP gate |
+| `POST` | `/api/pipeline/hitl/advisory` | Review a non-authoritative LLM advisory |
+| `GET` | `/api/pipeline/hitl/pending` | List durable pending work permitted for a persona |
+| `GET` | `/api/pipeline/hitl/{run_id}` | Read durable HITL status and decision audit |
 | `POST` | `/api/executor/run` | Execute a typed recommendation after approval |
 | `GET` | `/api/notifications/counts` | Unread counts for frontend personas |
 | `GET` | `/api/notifications/{persona_id}` | Persona notification inbox |
@@ -152,6 +155,31 @@ questions. The frontend must return the same `conversation_id` on follow-up
 turns so the pending question and collected context can be continued safely.
 Conceptual questions such as "What is RUL?" use the controlled glossary without
 asset data; asset-specific and fleet questions wait for their required context.
+
+All React chat questions, including asset-detail questions, go exclusively to
+`/api/chat`. There is no frontend canned-answer or single-asset pipeline
+fallback. An asset ID supplies identity, not evidence: asset analysis starts
+only when the request includes canonical telemetry or an explicitly selected
+scenario. Multi-asset planning requires an approved `fleet_snapshot` containing
+evidence for each asset, and fleet rankings remain blocked until a validated
+aggregation path is available.
+Conversation context has configurable expiry and turn limits, supports an
+explicit reset, rejects reserved internal context keys, and discards stale
+telemetry when the user changes assets.
+
+HITL decisions validate the gate type, allowed action, expiry, replay state and
+selected-persona capability before consuming the pending session. Agent 4 LLM
+advisory Accept/Reject/Modify decisions are wired to a backend endpoint and can
+never change deterministic risk or RUL facts. These capability checks use the
+selected persona only; production authentication and trusted RBAC remain a
+separate security requirement.
+
+HITL sessions are durable and atomically claimed. Local development uses
+SQLite; Azure PostgreSQL is supported through `POSTGRES_URL` and
+`HITL_REPOSITORY=postgres`. Configure TTL, claim lease, repository backend,
+SQLite path, and gate permissions under `hitl` in
+`config/orchestrator_config.json`. PostgreSQL schema DDL is versioned in
+`migrations/001_hitl_postgres.sql`.
 
 Multi-asset questions name every requested asset in `multi_asset_results`. Each
 asset is evaluated independently through the required pipeline depth, receives
@@ -242,7 +270,7 @@ python -m pytest tests/test_agent1_to_agent8_integration.py -q
 Current certification:
 
 ```text
-683 passed
+739 passed
 0 failed
 ```
 
@@ -262,13 +290,18 @@ does not change pipeline decisions or API responses.
 
 PowerShell uses `$env:LANGSMITH_TRACING="true"`; `export` is Bash syntax.
 
+Reflexion is bounded by `reflection.max_refinement_iterations` in
+`config/orchestrator_config.json` (default `3`). Every chat response reports
+the iterations used and termination reason; the refiner cannot loop without a
+configured upper bound.
+
 All policy files live under `config/`. Important frontend-visible controls include freshness/routing, alert cooldown, retrieval grounding, recommendation approval actions, execution allowlists, learning validation, chat length and reflection limits.
 
 Cloud credentials are never required for deterministic local execution. LLM output is non-authoritative and cannot alter telemetry facts, risk calculations, action approval or confirmed maintenance outcomes.
 
 ## Next steps
 
-1. Add PostgreSQL LangGraph checkpointing and durable HITL sessions.
+1. Add PostgreSQL LangGraph conversation/workflow checkpointing (HITL sessions are already durable).
 2. Add authentication, persona authorization and approval permissions.
 3. Replace local/mocked historian, CMMS, inventory and notification adapters.
 4. Move SOP and learned-case retrieval to Azure Blob Storage and Azure AI Search.

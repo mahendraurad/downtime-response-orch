@@ -1,5 +1,7 @@
 import React from 'react';
 import { AppProvider, AppContext } from './context/AppContext';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import LoginScreen from './components/LoginScreen';
 import Topbar from './components/Topbar';
 import PersonaPanel from './components/PersonaPanel';
 import ChatView from './components/ChatView/ChatView';
@@ -13,6 +15,7 @@ function AppInner() {
   React.useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
       <Topbar />
@@ -37,10 +40,41 @@ function AppInner() {
   );
 }
 
-export default function App() {
+function AuthGate() {
+  const { user, loading } = useAuth();
+
+  // Apply saved theme even before the user logs in
+  React.useEffect(() => {
+    const theme = localStorage.getItem('dro-theme') || 'light';
+    document.documentElement.setAttribute('data-theme', theme);
+  }, []);
+
+  if (loading) {
+    return (
+      <div style={{
+        alignItems: 'center', background: 'var(--bg)', display: 'flex',
+        height: '100vh', justifyContent: 'center',
+      }}>
+        <div style={{ color: 'var(--t2)', fontFamily: 'var(--f)', fontSize: '13px' }}>
+          Loading…
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) return <LoginScreen />;
+
   return (
     <AppProvider>
       <AppInner />
     </AppProvider>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <AuthGate />
+    </AuthProvider>
   );
 }

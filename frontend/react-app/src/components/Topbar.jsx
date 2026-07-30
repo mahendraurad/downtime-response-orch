@@ -1,9 +1,9 @@
 import React, { useContext, useState } from 'react';
 import { AppContext } from '../context/AppContext';
-import { ASSET_SCENARIO, SAMPLE_REC } from '../data/scenarios';
+import { SAMPLE_REC } from '../data/scenarios';
 
 export default function Topbar() {
-  const { currentView, setCurrentView, agentAsset, persona, setPipelineRunning, pipelineRunning, theme, setTheme } = useContext(AppContext);
+  const { currentView, setCurrentView, agentAsset, setPipelineRunning, pipelineRunning, theme, setTheme } = useContext(AppContext);
   const [execRunning, setExecRunning] = useState(false);
 
   const navItems = [
@@ -25,8 +25,9 @@ export default function Topbar() {
     if (pipelineRunning) return;
     setPipelineRunning(true);
     setCurrentView('chat');
-    const sc = ASSET_SCENARIO[agentAsset] || 'outer_race_fault';
-    window.dispatchEvent(new CustomEvent('dro-run-pipeline', { detail: { scenario: sc, persona } }));
+    window.dispatchEvent(new CustomEvent('dro-sq', {
+      detail: `Run the complete orchestrated analysis for ${agentAsset}`,
+    }));
     // Reset after a delay
     setTimeout(() => setPipelineRunning(false), 5000);
   }

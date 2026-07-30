@@ -3,6 +3,12 @@ export const ASSET_SCENARIO = {
   'no sop': 'knowledge_hitl_test',
   'inner race': 'inner_race_fault',
   'unknown asset': 'unknown_asset',
+  // New real-world scenarios (BRG_012, BRG_004, BRG_006, BRG_007, BRG_008)
+  'cage fault': 'cage_fault',
+  'E-501': 'electrical_anomaly',
+  'thermal event': 'thermal_event',
+  'borderline stage': 'borderline_fault',
+  'L-701': 'load_spike',
   // Friendly display names
   'M-104': 'outer_race_fault',
   'P-207': 'lubrication_issue',

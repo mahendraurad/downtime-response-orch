@@ -1,6 +1,7 @@
 import React, { useContext, useState, useRef, useEffect } from 'react';
 import { AppContext } from '../../context/AppContext';
 import { ts } from '../../utils/helpers';
+import { askChat } from '../../api/chat';
 
 export default function AssetChat({ asset }) {
   const { persona } = useContext(AppContext);
@@ -9,6 +10,7 @@ export default function AssetChat({ asset }) {
   const [thinking, setThinking] = useState(false);
   const msgsRef = useRef(null);
   const inpRef = useRef(null);
+  const conversationIdRef = useRef(null);
 
   useEffect(() => {
     if (msgsRef.current) msgsRef.current.scrollTop = msgsRef.current.scrollHeight;
@@ -17,14 +19,13 @@ export default function AssetChat({ asset }) {
   // Reset chat on asset change
   useEffect(() => {
     setMessages([]);
+    conversationIdRef.current = null;
   }, [asset && asset.id]);
 
   if (!asset) return <div className="achat"></div>;
 
   const insights = (asset.insights && asset.insights[persona]) || [];
-  const defaultResp = (asset.chatResp && asset.chatResp[persona]) || asset.chatResp && asset.chatResp['supervisor'] || 'No information available for this asset.';
-
-  function askA(txt) {
+  async function askA(txt) {
     const t = (txt || inputVal).trim();
     if (!t) return;
     setInputVal('');
@@ -35,12 +36,33 @@ export default function AssetChat({ asset }) {
     ]);
 
     setThinking(true);
-    setTimeout(() => {
-      setThinking(false);
+    try {
+      const data = await askChat({
+        message: t,
+        persona,
+        assetId: asset.id,
+        conversationId: conversationIdRef.current,
+      });
+      conversationIdRef.current = data.conversation_id || conversationIdRef.current;
+      const details = data.details?.length
+        ? `<br><br>${data.details.map(x => `• ${x}`).join('<br>')}` : '';
+      const actions = data.actions?.length
+        ? `<br><br><strong>Actions:</strong><br>${data.actions.map(x => `→ ${x}`).join('<br>')}` : '';
+      const questions = data.clarification?.questions?.length
+        ? `<br><br><strong>Needed:</strong><br>${data.clarification.questions.map(x => `? ${x}`).join('<br>')}`
+        : '';
       setMessages(prev => [...prev,
-        { id: Date.now() + 1, type: 'agent', html: defaultResp, time: ts() }
+        { id: Date.now() + 1, type: 'agent',
+          html: `${data.response}${details}${actions}${questions}`, time: ts() }
       ]);
-    }, 900);
+    } catch (error) {
+      setMessages(prev => [...prev,
+        { id: Date.now() + 1, type: 'agent',
+          html: `The orchestrated chat service is currently unavailable. ${error.message}`, time: ts() }
+      ]);
+    } finally {
+      setThinking(false);
+    }
   }
 
   return (

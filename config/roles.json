@@ -1,0 +1,7 @@
+{
+  "admin":       ["supervisor", "engineer", "maintenance", "manager", "executive", "md", "ot", "safety"],
+  "plant_ops":   ["supervisor", "engineer", "maintenance", "ot"],
+  "leadership":  ["manager", "executive", "md"],
+  "safety":      ["safety", "supervisor"],
+  "engineering": ["engineer", "ot"]
+}
