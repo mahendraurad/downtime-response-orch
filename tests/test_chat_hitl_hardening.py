@@ -62,8 +62,8 @@ def test_conflicting_asset_replaces_stale_signal_context(client):
         "context":{"scenario":"outer_race_fault"}}).json()
     second=client.post("/api/chat",json={"message":"Now assess P-207",
         "conversation_id":first["conversation_id"]}).json()
-    assert second["context_status"]["retained_fields"]==["asset_id","scenario"]
-    assert any("AST_PMP_001" in str(value) for value in second.get("details",[])) or second["pipeline_log"]
+    assert second["context_status"]["retained_fields"]==["asset_id"]
+    assert second["clarification_required"] and second["pipeline_log"]==[]
 
 
 def test_expired_context_is_not_reused(client,monkeypatch):

@@ -14,7 +14,7 @@ The repository is ready for frontend integration in deterministic local mode. Az
 | Human approval and HITL gates | Implemented |
 | Reflexion and graceful error envelopes | Implemented |
 | Local persistence and mock connectors | Implemented |
-| Automated backend tests | `735 passed` |
+| Automated backend tests | `739 passed` |
 | React frontend from `feature/8agents_frontend` | Integrated on `dev` |
 | Real CMMS/ERP/historian and Azure services | Next phase |
 
@@ -270,7 +270,7 @@ python -m pytest tests/test_agent1_to_agent8_integration.py -q
 Current certification:
 
 ```text
-735 passed
+739 passed
 0 failed
 ```
 

@@ -1792,7 +1792,8 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
     _intent_class=_llm_chat_classify(effective_message,req.conversation_history)
     _classified=_intent_class.get("intent_type","pipeline")
 
-    if _classified=="conversational":
+    if (_classified=="conversational" and not plan.needs_signal
+            and not requested_assets and plan.intent not in {"fleet"}):
         # Early return: answer follow-up with LLM and history, skip all pipeline routing
         _conv_draft=_conversational_draft(req.message,req.conversation_history,req.persona)
         _conv_reflected=_REFLEXION.process(_conv_draft,state,plan)
@@ -1833,70 +1834,16 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
         plan_intent=plan.intent
     elif plan.needs_signal and signal is None:
         if supplied_asset and supplied_asset not in load_asset_master():
-            # Asset ID found in message but not registered — LLM can explain this
-            # and guide the user without fabricating any asset-specific data.
-            llm_draft = None
-            if _CHAT_LLM.is_configured():
-                try:
-                    llm_resp = _CHAT_LLM.complete_json(
-                        system_prompt=_CHAT_LLM_SYSTEM,
-                        user_prompt=(
-                            f"{req.message}\n\n"
-                            f"System note: {supplied_asset} is not found in the registered asset database. "
-                            "Acknowledge this clearly and advise the user to verify the asset ID or register the asset "
-                            "with its bearing and channel mappings before any analysis can be performed. "
-                            "Do not fabricate sensor readings or maintenance history for this asset."
-                        ),
-                        temperature=0.3,
-                        max_tokens=300,
-                    )
-                    if llm_resp and isinstance(llm_resp.get("answer"), str) and llm_resp["answer"].strip():
-                        llm_draft = {"persona": req.persona,
-                                     "response": llm_resp["answer"].strip(),
-                                     "call_plan": list(plan.agents),
-                                     "needs_context": False,
-                                     "clarification_required": False,
-                                     "source_type": "llm_asset_lookup"}
-                except Exception:
-                    pass
-            if llm_draft:
-                draft = llm_draft
-            else:
-                draft=_clarification_draft(req.persona,plan.intent,["asset_registration"],
-                    [f"Please register and validate {supplied_asset} with its bearing and channel mappings before resubmitting."],
-                    f"Asset {supplied_asset} is not registered. No analytical agent has been run.",supplied_asset)
+            draft=_clarification_draft(req.persona,plan.intent,["asset_registration"],
+                [f"Please register and validate {supplied_asset} with its bearing and channel mappings before resubmitting."],
+                f"Asset {supplied_asset} is not registered. No analytical agent has been run.",supplied_asset)
         else:
-            # Try LLM for general reliability knowledge before asking for clarification.
-            llm_draft = None
-            if _CHAT_LLM.is_configured():
-                try:
-                    llm_resp = _CHAT_LLM.complete_json(
-                        system_prompt=_CHAT_LLM_SYSTEM,
-                        user_prompt=req.message,
-                        temperature=0.3,
-                        max_tokens=400,
-                    )
-                    if (llm_resp
-                            and isinstance(llm_resp.get("answer"), str)
-                            and llm_resp["answer"].strip()
-                            and not llm_resp.get("requires_telemetry")):
-                        llm_draft = {"persona": req.persona,
-                                     "response": llm_resp["answer"].strip(),
-                                     "call_plan": list(plan.agents),
-                                     "needs_context": False,
-                                     "clarification_required": False,
-                                     "source_type": "llm_general_knowledge"}
-                except Exception:
-                    pass  # any LLM failure falls through to clarification
-            if llm_draft:
-                draft = llm_draft
-            else:
-                missing=["telemetry_or_scenario"]
-                questions=["Please provide current telemetry or a validated scenario for the asset."]
-                if not supplied_asset:
-                    missing.insert(0,"asset_id"); questions.insert(0,"Which asset should be assessed?")
-                draft=_clarification_draft(req.persona,plan.intent,missing,questions,
-                    f"I need clarification before answering this {plan.intent} question. No agent decision was fabricated.",supplied_asset or "")
+            missing=["telemetry_or_scenario"]
+            questions=["Please provide current telemetry or a validated scenario for the asset."]
+            if not supplied_asset:
+                missing.insert(0,"asset_id"); questions.insert(0,"Which asset should be assessed?")
+            draft=_clarification_draft(req.persona,plan.intent,missing,questions,
+                f"I need clarification before answering this {plan.intent} question. No agent decision was fabricated.",supplied_asset or "")
         plan_intent=plan.intent
     elif signal is not None:
         required={"telemetry_id","timestamp_utc","asset_id","bearing_id","channel_id"}

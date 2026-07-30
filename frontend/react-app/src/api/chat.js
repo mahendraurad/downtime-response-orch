@@ -8,6 +8,7 @@ export async function askChat({
   conversationId = null,
   assetId = null,
   context = null,
+  conversationHistory = null,
 }) {
   const resp = await authedFetch(`${API}/api/chat`, {
     method: 'POST',
@@ -18,6 +19,7 @@ export async function askChat({
       conversation_id: conversationId,
       asset_id: assetId,
       context,
+      conversation_history: conversationHistory,
     }),
   });
   if (!resp.ok) {

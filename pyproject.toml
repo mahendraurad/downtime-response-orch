@@ -14,6 +14,8 @@ dependencies = [
   "langsmith>=0.4.0,<1.0.0",
   "python-dotenv>=1.0.0,<2.0.0",
   "psycopg[binary]>=3.1.0,<4.0.0",
+  "python-jose[cryptography]>=3.3.0,<4.0.0",
+  "bcrypt>=4.0.0,<6.0.0",
   "fastapi>=0.100.0,<1.0.0",
   "uvicorn[standard]>=0.20.0,<1.0.0",
 ]
@@ -30,3 +32,6 @@ pythonpath = [".", "src"]
 # Keep pytest temporary files inside the repository. Some managed Windows
 # profiles deny access to %LOCALAPPDATA%\Temp\pytest-of-<user>.
 addopts = "--basetemp=.pytest-tmp -p no:cacheprovider"
+markers = [
+  "real_auth: exercise the real JWT dependency without the test identity override",
+]

@@ -50,6 +50,25 @@ def test_named_asset_without_evidence_never_runs_agents_or_returns_result(client
     assert data["clarification"]["missing_fields"]==["telemetry_or_scenario"]
 
 
+@pytest.mark.parametrize("classification",["conversational","pipeline"])
+def test_llm_cannot_bypass_asset_evidence_gate(client,monkeypatch,classification):
+    class TemptingLLM:
+        @staticmethod
+        def is_configured(): return True
+        @staticmethod
+        def complete_json(**kwargs):
+            if "intent_type" in kwargs.get("system_prompt",""):
+                return {"intent_type":classification}
+            return {"answer":"M-104 has 3 days RUL.","requires_telemetry":False}
+    monkeypatch.setattr(api,"_CHAT_LLM",TemptingLLM())
+    data=client.post("/api/chat",json={
+        "message":"What is the RUL risk for M-104?",
+        "conversation_history":[{"role":"user","content":"We discussed M-104."}],
+    }).json()
+    assert data["clarification_required"] and data["pipeline_log"]==[]
+    assert "3 days" not in data["response"]
+
+
 def test_fleet_ranking_is_not_fabricated_even_when_unaggregated_snapshot_is_named(client):
     data=client.post("/api/chat",json={
         "message":"Which bearing has the highest risk?",
