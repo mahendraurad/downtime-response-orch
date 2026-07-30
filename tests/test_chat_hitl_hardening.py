@@ -20,11 +20,11 @@ def client(tmp_path):
     api._HITL_REPOSITORY=previous_repository
 
 
-def test_known_single_asset_chat_uses_backend_pipeline(client):
+def test_known_single_asset_chat_requires_explicit_evidence(client):
     data=client.post("/api/chat",json={"message":"What is the RUL for M-104?","persona":"engineer"}).json()
-    assert data["intent"]=="risk" and not data["clarification_required"]
-    assert [row["node"] for row in data["pipeline_log"]]==[
-        "data_foundation","monitoring","failure_intelligence","predictive_risk"]
+    assert data["intent"]=="risk" and data["clarification_required"]
+    assert data["pipeline_log"]==[]
+    assert data["clarification"]["missing_fields"]==["telemetry_or_scenario"]
     assert data["persona"]=="engineer"
 
 
@@ -62,8 +62,8 @@ def test_conflicting_asset_replaces_stale_signal_context(client):
         "context":{"scenario":"outer_race_fault"}}).json()
     second=client.post("/api/chat",json={"message":"Now assess P-207",
         "conversation_id":first["conversation_id"]}).json()
-    assert second["context_status"]["retained_fields"]==["asset_id","scenario"]
-    assert any("AST_PMP_001" in str(value) for value in second.get("details",[])) or second["pipeline_log"]
+    assert second["context_status"]["retained_fields"]==["asset_id"]
+    assert second["clarification_required"] and second["pipeline_log"]==[]
 
 
 def test_expired_context_is_not_reused(client,monkeypatch):

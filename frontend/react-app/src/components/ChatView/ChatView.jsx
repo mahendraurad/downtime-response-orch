@@ -3,8 +3,7 @@ import { AppContext } from '../../context/AppContext';
 import { PD } from '../../data/personas';
 import { FLEET_TOTAL } from '../../data/assets';
 import { ts } from '../../utils/helpers';
-import { authedFetch } from '../../api/http';
-import { API } from '../../config/api';
+import { askChat } from '../../api/chat';
 import { resolveHITLRemediation, resolveHITLMonitoring, resolveHITLDiagnosis, resolveHITLKnowledge, resolveHITLAdvisory, runExecutor } from '../../api/pipeline';
 import ChatSidebar from './ChatSidebar';
 
@@ -194,18 +193,13 @@ export default function ChatView() {
 
     doThink(async () => {
       try {
-        const resp = await authedFetch(`${API}/api/chat`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            message: t,
-            persona,
-            conversation_id: conversationIdRef.current,
-            conversation_history: conversationHistory,
-          }),
+        const d = await askChat({
+          message: t,
+          persona: options.requestedPersona || persona,
+          conversationId: conversationIdRef.current,
+          context: options.scenario ? { scenario: options.scenario } : null,
+          conversationHistory,
         });
-        if (!resp.ok) throw new Error(`Chat request failed (HTTP ${resp.status}).`);
-        const d = await resp.json();
         conversationIdRef.current = d.conversation_id || conversationIdRef.current;
         const pl = withFallbackTimings(d.pipeline_log || []);
         const routes = pl.map(n => n.node ? n.node.replace(/_/g, ' ') : '');

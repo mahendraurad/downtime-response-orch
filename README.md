@@ -14,7 +14,7 @@ The repository is ready for frontend integration in deterministic local mode. Az
 | Human approval and HITL gates | Implemented |
 | Reflexion and graceful error envelopes | Implemented |
 | Local persistence and mock connectors | Implemented |
-| Automated backend tests | `717 passed` |
+| Automated backend tests | `739 passed` |
 | React frontend from `feature/8agents_frontend` | Integrated on `dev` |
 | Real CMMS/ERP/historian and Azure services | Next phase |
 
@@ -158,8 +158,11 @@ asset data; asset-specific and fleet questions wait for their required context.
 
 All React chat questions, including asset-detail questions, go exclusively to
 `/api/chat`. There is no frontend canned-answer or single-asset pipeline
-fallback. Known demo asset labels are resolved to validated scenarios by the
-backend orchestrator.
+fallback. An asset ID supplies identity, not evidence: asset analysis starts
+only when the request includes canonical telemetry or an explicitly selected
+scenario. Multi-asset planning requires an approved `fleet_snapshot` containing
+evidence for each asset, and fleet rankings remain blocked until a validated
+aggregation path is available.
 Conversation context has configurable expiry and turn limits, supports an
 explicit reset, rejects reserved internal context keys, and discards stale
 telemetry when the user changes assets.
@@ -267,7 +270,7 @@ python -m pytest tests/test_agent1_to_agent8_integration.py -q
 Current certification:
 
 ```text
-717 passed
+739 passed
 0 failed
 ```
 
