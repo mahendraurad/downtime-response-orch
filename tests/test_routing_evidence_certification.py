@@ -33,25 +33,27 @@ def test_chat_calls_exact_minimum_agents_for_evidenced_question(client,message,e
     assert data["sources"]==expected
 
 
-@pytest.mark.parametrize("message",[
-    "Show vibration status for M-104",
-    "Is M-104 anomalous?",
-    "Diagnose the fault on M-104",
-    "What is the RUL risk for M-104?",
-    "Show the SOP for M-104",
-    "Recommend maintenance for M-104",
-    "Execute maintenance for M-104",
+@pytest.mark.parametrize(("message","last_agent"),[
+    ("Show vibration status for M-104","data_foundation"),
+    ("Is M-104 anomalous?","monitoring"),
+    ("Diagnose the fault on M-104","failure_intelligence"),
+    ("What is the RUL risk for M-104?","predictive_risk"),
+    ("Show the SOP for M-104","knowledge"),
+    ("Recommend maintenance for M-104","prescriptive"),
+    ("Analyse the asset M-104 completely","prescriptive"),
+    ("Draft an operations risk briefing: M-104 situation, production exposure, "
+     "recommended action and decision needed from leadership","prescriptive"),
 ])
-def test_named_asset_without_evidence_never_runs_agents_or_returns_result(client,message):
+def test_registered_demo_asset_uses_mapped_evidence(client,message,last_agent):
     data=client.post("/api/chat",json={"message":message}).json()
-    assert data["clarification_required"] is True
-    assert data["pipeline_log"]==[] and data["sources"]==[]
-    assert data["agent_outputs"]=={"recommendation":None,"execution_result":None}
-    assert data["clarification"]["missing_fields"]==["telemetry_or_scenario"]
+    assert data["clarification_required"] is False
+    assert data["pipeline_log"]
+    assert data["pipeline_log"][-1]["node"]==last_agent
+    assert data["sources"]
 
 
 @pytest.mark.parametrize("classification",["conversational","pipeline"])
-def test_llm_cannot_bypass_asset_evidence_gate(client,monkeypatch,classification):
+def test_llm_cannot_replace_registered_asset_pipeline(client,monkeypatch,classification):
     class TemptingLLM:
         @staticmethod
         def is_configured(): return True
@@ -65,8 +67,10 @@ def test_llm_cannot_bypass_asset_evidence_gate(client,monkeypatch,classification
         "message":"What is the RUL risk for M-104?",
         "conversation_history":[{"role":"user","content":"We discussed M-104."}],
     }).json()
-    assert data["clarification_required"] and data["pipeline_log"]==[]
-    assert "3 days" not in data["response"]
+    assert not data["clarification_required"]
+    assert [row["node"] for row in data["pipeline_log"]]==[
+        "data_foundation","monitoring","failure_intelligence","predictive_risk",
+    ]
 
 
 def test_fleet_ranking_is_not_fabricated_even_when_unaggregated_snapshot_is_named(client):

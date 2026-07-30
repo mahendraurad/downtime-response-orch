@@ -39,3 +39,4 @@ class DROGraphState(TypedDict, total=False):
     context_lookup:     dict
     error:              str   # non-empty if any agent raised
     pipeline_log:       list  # list of {"node", "status", "latency_ms"} entries
+    persona_context:    Any

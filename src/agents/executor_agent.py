@@ -102,7 +102,7 @@ class ExecutorAgent:
     # ***********************
 
     def process(self, recommendation: MaintenanceRecommendation,
-                approved: bool = False) -> ExecutionResult:
+                approved: bool = False, persona_context=None) -> ExecutionResult:
         """
         Execute an approved recommendation. Never raises — all failures are
         captured in ExecutionResult.status and logged.

@@ -16,8 +16,8 @@ PERSONAS = (
 _INBOX: dict[str, list[dict]] = {persona: [] for persona in PERSONAS}
 
 _URGENCY_ROUTING = {
-    "immediate": PERSONAS,
-    "urgent": ("supervisor", "manager", "engineer", "maintenance", "safety"),
+    "immediate": ("supervisor", "engineer", "maintenance", "safety"),
+    "urgent": ("supervisor", "engineer", "maintenance"),
     "planned": ("supervisor", "engineer", "maintenance"),
     "monitor": ("engineer", "ot"),
 }

@@ -5,6 +5,77 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
+from src.schemas.persona import PersonaContext
+
+
+class Verdict(BaseModel):
+    headline: str = ""
+    reasoning: str = ""
+
+
+class ConditionSummary(BaseModel):
+    fault_type: str = ""
+    fault_stage: int = 0
+    rul_min_days: int = 0
+    rul_max_days: int = 0
+    failure_probability: float = 0.0
+    vibration_mms: Optional[float] = None
+    vibration_threshold: Optional[float] = None
+    temperature_c: Optional[float] = None
+    temperature_threshold: Optional[float] = None
+
+
+class Consequence(BaseModel):
+    type: str
+    description: str
+    value: Optional[str] = None
+    evidence_status: str = "available"
+
+
+class PrescriptiveAction(BaseModel):
+    rank: int
+    action: str
+    rationale: str
+    urgency: str
+    prescriptive_score: float
+
+
+class ConfidenceSummary(BaseModel):
+    fault_identification: float = 0.0
+    rul_prediction: float = 0.0
+    recommendation: float = 0.0
+    data_completeness: float = 0.0
+    training_sample_size: int = 0
+    warnings: List[str] = Field(default_factory=list)
+
+
+class HistoricalCaseCitation(BaseModel):
+    case_id: str
+    source: str
+    fault_mode: str = ""
+    action_taken: str = ""
+    outcome: str = ""
+    recorded_at: str = ""
+    relevance_score: float = 0.0
+
+
+class PartsRULComparison(BaseModel):
+    part_number: str = ""
+    eta_days: Optional[int] = None
+    rul_min_days: int = 0
+    rul_max_days: int = 0
+    status: str = "not_required"
+    explanation: str = ""
+
+
+class DecisionSupport(BaseModel):
+    cost_if_approved: Optional[float] = None
+    cost_if_deferred: Optional[float] = None
+    cost_data_status: str = "unavailable"
+    parts_vs_rul: PartsRULComparison = Field(default_factory=PartsRULComparison)
+    historical_cases: List[HistoricalCaseCitation] = Field(default_factory=list)
+    authority_check: str = "not_evaluated"
+    authority_reason: str = "persona authority and approved cost inputs are pending"
 
 
 class RecommendedAction(BaseModel):
@@ -58,6 +129,18 @@ class MaintenanceRecommendation(BaseModel):
     source_knowledge_index_version: str          = ""
     linked_risk_case_id:    str                  = ""
     rationale_source:       str                  = "rules"
+    # Group A response-quality contract.
+    verdict: Verdict = Field(default_factory=Verdict)
+    condition: ConditionSummary = Field(default_factory=ConditionSummary)
+    consequences: List[Consequence] = Field(default_factory=list)
+    prescriptive_actions: List[PrescriptiveAction] = Field(default_factory=list)
+    confidence: ConfidenceSummary = Field(default_factory=ConfidenceSummary)
+    persona_context: Optional[PersonaContext] = None
+    historical_cases: List[HistoricalCaseCitation] = Field(default_factory=list)
+    sop_citations: List[str] = Field(default_factory=list)
+    cost_data_status: str = "unavailable"
+    authority_check: str = "not_evaluated"
+    decision_support: DecisionSupport = Field(default_factory=DecisionSupport)
 
     def to_dict(self) -> Dict[str, Any]:
         return self.model_dump()

@@ -107,7 +107,7 @@ class MonitoringAgent:
     # ************** Added by Prateek Mittal on 17th July 2026 ******************
     # Detailed assessment API. It preserves every non-anomaly outcome instead
     # of collapsing healthy, suppressed, and unassessable inputs into `None`.
-    def assess(self, trusted: TrustedBearingSignal) -> MonitoringResult:
+    def assess(self, trusted: TrustedBearingSignal, persona_context=None) -> MonitoringResult:
         raw = trusted.raw
         now = self._now_fn().isoformat()
         base = dict(
@@ -177,9 +177,9 @@ class MonitoringAgent:
             result.suppression_reason = f"decision persistence failed: {exc}"
         return result
 
-    def process(self, trusted: TrustedBearingSignal) -> Optional[AnomalyEvent]:
+    def process(self, trusted: TrustedBearingSignal, persona_context=None) -> Optional[AnomalyEvent]:
         """Compatibility API: return only an emitted anomaly event."""
-        return self.assess(trusted).anomaly_event
+        return self.assess(trusted, persona_context=persona_context).anomaly_event
     # ***********************
 
     def _detect(self, trusted: TrustedBearingSignal) -> tuple[Optional[AnomalyEvent], bool, str]:

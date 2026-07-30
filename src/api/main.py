@@ -76,6 +76,7 @@ from src.agents.reflexion_agent import ReflexionAgent
 from src.tools.orchestrator_audit import write_audit
 from src.tools.llm_client import LLMClient
 from src.tools.hitl_repository import build_hitl_repository
+from src.tools.persona_formatter import build_persona_context
 
 app = FastAPI(title="DRO API", version="1.0.0")
 
@@ -285,7 +286,11 @@ def _asset_from_message(message: str) -> str:
     if known:
         return known
     match = re.search(r"\bAST_[A-Z0-9_]+\b", upper)
-    return match.group(0) if match else ""
+    if match:
+        return match.group(0)
+    # Capture short asset-ID patterns like G-115, E-501, L-701 that may not yet be registered
+    short_match = re.search(r"\b([A-Z]{1,3}-\d{3,4})\b", upper)
+    return short_match.group(1) if short_match else ""
 
 
 def _scenario_for_asset(asset_id: str) -> str:
@@ -342,8 +347,10 @@ def _multi_asset_plan(requested_assets, fleet_snapshot: dict, persona: str, run_
                 details.append(f"{display}: supplied evidence belongs to another asset; no agents were run.")
                 actions.append(f"{display}: correct fleet evidence before planning")
                 continue
-            state=run_pipeline(deepcopy(signal),run_id=f"{run_id}-{display}",intent="full",
-                approval_status="pending")
+            state=run_pipeline(
+                deepcopy(signal), run_id=f"{run_id}-{display}", intent="full",
+                approval_status="pending", persona=persona,
+            )
             log=[{**row,"asset":display} for row in state.get("pipeline_log",[])]
             combined_log.extend(log)
             recommendation=state.get("recommendation")
@@ -866,6 +873,18 @@ class HITLAdvisoryRequest(BaseModel):
     rationale: str = ""
 
 
+class RecommendationRejectionRequest(BaseModel):
+    case_id: str
+    asset_id: str
+    fault_mode: str
+    reason_code: Literal[
+        "diagnosis_wrong", "parts_concern", "second_opinion",
+        "wrong_window", "other",
+    ]
+    free_text: str = ""
+    persona: Persona = "supervisor"
+
+
 @app.get("/api/pipeline/hitl/pending")
 def hitl_pending(persona: Persona = "supervisor", gate: str = ""):
     """Return only HITL work the selected persona is authorized to resolve."""
@@ -980,10 +999,10 @@ def pipeline_run(req: PipelineRunRequest, user: Dict = Depends(get_current_user)
             idx = req.row_index if 0 <= req.row_index < len(rows) else len(rows) - 1
             signal = deepcopy(rows[idx])
             for i in range(idx):
-                run_pipeline(deepcopy(rows[i]))
-            state = run_pipeline(signal, intent=intent)
+                run_pipeline(deepcopy(rows[i]), persona=req.persona)
+            state = run_pipeline(signal, intent=intent, persona=req.persona)
         else:
-            state = run_pipeline(req.signal, intent=intent)
+            state = run_pipeline(req.signal, intent=intent, persona=req.persona)
     except HTTPException:
         raise
     except Exception as exc:
@@ -1236,7 +1255,9 @@ def hitl_remediation(req: HITLRemediationRequest, user: Dict = Depends(get_curre
 
     # KEEP or successfully IMPUTEd: resume pipeline from monitoring
     from src.orchestrator.graph import run_from_trusted_signal
-    state = run_from_trusted_signal(trusted, intent=intent, run_id=req.run_id)
+    state = run_from_trusted_signal(
+        trusted, intent=intent, run_id=req.run_id, persona=persona
+    )
     formatted = format_for_persona(state, persona)
 
     risk      = state.get("risk_assessment")
@@ -1349,7 +1370,9 @@ def hitl_monitoring_resolution(req: HITLMonitoringRequest, user: Dict = Depends(
 
     # CONFIRM — resume pipeline from FI → Risk → Knowledge
     from src.orchestrator.graph import run_from_anomaly_event
-    state     = run_from_anomaly_event(anomaly, trusted, intent=intent, run_id=req.run_id)
+    state = run_from_anomaly_event(
+        anomaly, trusted, intent=intent, run_id=req.run_id, persona=persona
+    )
     formatted = format_for_persona(state, persona)
 
     diagnosis = state.get("fault_diagnosis")
@@ -1488,7 +1511,10 @@ def hitl_diagnosis_resolution(req: HITLDiagnosisRequest, user: Dict = Depends(ge
         diagnosis = original_diagnosis
 
     from src.orchestrator.graph import run_from_diagnosis
-    state     = run_from_diagnosis(diagnosis, anomaly, trusted, intent=intent, run_id=req.run_id)
+    state = run_from_diagnosis(
+        diagnosis, anomaly, trusted, intent=intent,
+        run_id=req.run_id, persona=persona,
+    )
     formatted = format_for_persona(state, persona)
 
     risk      = state.get("risk_assessment")
@@ -1650,9 +1676,30 @@ def executor_run(req: ExecutorRunRequest, user: Dict = Depends(get_current_user)
     try:
         rec = MaintenanceRecommendation(**req.recommendation)
         result = ExecutorAgent().process(rec, approved=req.approved)
+        if req.approved and result.status in {"success", "partial"}:
+            _learning_agent().record_approval(
+                rec.case_id, rec.asset_id, rec.condition.fault_type
+            )
         return result.model_dump()
     except Exception as exc:
         raise HTTPException(400, f"Executor error: {exc}")
+
+
+@app.post("/api/recommendations/reject")
+def reject_recommendation(
+    req: RecommendationRejectionRequest,
+    user: Dict = Depends(get_current_user),
+):
+    """Persist structured rejection feedback through Agent 8 memory."""
+    require_persona(req.persona, user)
+    from src.schemas.feedback import RejectionFeedback
+    feedback = RejectionFeedback(
+        case_id=req.case_id, asset_id=req.asset_id,
+        fault_mode=req.fault_mode, reason_code=req.reason_code,
+        free_text=req.free_text, persona_id=build_persona_context(req.persona).id,
+        rejected_at=datetime.now(timezone.utc).isoformat(),
+    )
+    return _learning_agent().record_rejection(feedback).model_dump()
 
 
 @app.get("/api/notifications/counts")
@@ -1766,6 +1813,20 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
     if scenario and signal is None:
         try: signal=_get_demo_signal(str(scenario),int(context.get("row_index",-1)))
         except (KeyError,ValueError,TypeError) as exc: raise HTTPException(404,f"Scenario unavailable: {scenario}") from exc
+    # Registered UI demo assets have an explicit backend scenario mapping.
+    # Loading that mapped fixture is evidence-backed demo behavior, not an
+    # inference from the asset name. Deployments can disable it in config.
+    if (signal is None and not scenario and len(requested_assets) == 1
+            and _ORCH_CONFIG["chat"].get("auto_load_registered_demo_scenarios", False)):
+        _, mapped_asset, mapped_scenario = requested_assets[0]
+        if supplied_asset == mapped_asset:
+            signal = _get_demo_signal(mapped_scenario, -1)
+            scenario = mapped_scenario
+            context.update({
+                "scenario": mapped_scenario,
+                "row_index": -1,
+                "evidence_source": "registered_demo_scenario",
+            })
     effective_message=req.message
     if pending and (incoming or explicit_asset or scenario or context.get("timeframe")):
         effective_message=context["_pending_message"]
@@ -1854,8 +1915,12 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
                 "The telemetry payload is incomplete, so the agent pipeline has not been started.",
                 str(signal.get("asset_id",supplied_asset or "")) if isinstance(signal,dict) else supplied_asset or "")
         else:
-            state=run_pipeline(deepcopy(signal),run_id=run_id,intent=plan.pipeline_intent,
-                inventory_lookup=context.get("inventory_lookup"),context_lookup=context.get("operations_context"),approval_status="pending")
+            state=run_pipeline(
+                deepcopy(signal), run_id=run_id, intent=plan.pipeline_intent,
+                inventory_lookup=context.get("inventory_lookup"),
+                context_lookup=context.get("operations_context"),
+                approval_status="pending", persona=req.persona,
+            )
             formatted=format_for_persona(state,req.persona)
             _pipeline_headline=formatted.get("headline","Analysis complete.")
             draft={"persona":req.persona,"response":_pipeline_headline,"details":formatted.get("details",[]),"actions":formatted.get("actions",[]),"call_plan":list(plan.agents),"needs_context":False,"clarification_required":False,

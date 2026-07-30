@@ -7,21 +7,31 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from src.schemas.execution import ExecutionResult
-from src.schemas.feedback import FeedbackEvent, LearnedCaseDocument
+from src.schemas.feedback import (
+    FeedbackEvent, LearnedCaseDocument, RejectionFeedback,
+    RejectionLearningResult,
+)
 from src.tools.config_loader import LearningConfig, load_learning_config
-from src.tools.learned_case_repository import JSONLearnedCaseRepository
+from src.tools.learned_case_repository import (
+    JSONLearnedCaseRepository, JSONRejectionRepository,
+)
 
 
 # ************** Added by Prateek Mittal on 20th July 2026 ******************
 class LearningMemoryAgent:
-    def __init__(self, cfg: LearningConfig = None, repository=None, llm_client=None, now_fn=None):
+    def __init__(self, cfg: LearningConfig = None, repository=None,
+                 rejection_repository=None, llm_client=None, now_fn=None):
         self._cfg = cfg or load_learning_config(); self._cfg.validate()
         self._repo = repository or JSONLearnedCaseRepository(self._cfg.repository_path)
+        self._rejections = rejection_repository or JSONRejectionRepository(
+            "data/rejection_feedback.json"
+        )
         self._llm = llm_client
         self._now = now_fn or (lambda: datetime.now(timezone.utc))
         self._version = hashlib.sha256(json.dumps(asdict(self._cfg), sort_keys=True).encode()).hexdigest()[:16]
 
-    def process(self, execution: ExecutionResult, feedback: FeedbackEvent) -> LearnedCaseDocument:
+    def process(self, execution: ExecutionResult, feedback: FeedbackEvent,
+                persona_context=None) -> LearnedCaseDocument:
         reason = self._input_error(execution, feedback)
         if reason: return self._empty(execution, reason)
         if self._repo.exists(feedback.case_id):
@@ -61,6 +71,68 @@ class LearningMemoryAgent:
         if not hasattr(self._repo, "list_recent"):
             return []
         return self._repo.list_recent(limit)
+
+    def matching_cases(self, asset_id: str, fault_mode: str,
+                       limit: int = 3) -> list[dict]:
+        if not hasattr(self._repo, "search_cases"):
+            return []
+        return self._repo.search_cases(
+            asset_id=asset_id, fault_mode=fault_mode, top_k=limit
+        )
+
+    def record_rejection(self, feedback: RejectionFeedback) -> RejectionLearningResult:
+        if not isinstance(feedback, RejectionFeedback):
+            return RejectionLearningResult(
+                case_id="", status="invalid_input",
+                persistence_status="not_stored",
+            )
+        now = self._now()
+        try:
+            rejected_at = datetime.fromisoformat(
+                feedback.rejected_at.replace("Z", "+00:00")
+            )
+        except ValueError:
+            return RejectionLearningResult(
+                case_id=feedback.case_id, status="invalid_input",
+                persistence_status="not_stored",
+            )
+        if rejected_at.tzinfo is None or rejected_at > now:
+            return RejectionLearningResult(
+                case_id=feedback.case_id, status="invalid_input",
+                persistence_status="not_stored",
+            )
+        try:
+            self._rejections.append({
+                **feedback.model_dump(), "decision": "rejected",
+                "decided_at": rejected_at.isoformat(),
+            })
+            count = self._rejections.consecutive_rejections(
+                feedback.asset_id, feedback.fault_mode, now, days=30
+            )
+        except Exception as exc:
+            return RejectionLearningResult(
+                case_id=feedback.case_id, status="persistence_failed",
+                persistence_status="failed", review_reason=str(exc),
+            )
+        required = count >= 2
+        return RejectionLearningResult(
+            case_id=feedback.case_id,
+            reliability_review_required=required,
+            consecutive_rejections=count,
+            review_reason=(
+                "same asset and fault rejected consecutively within 30 days"
+                if required else ""
+            ),
+        )
+
+    def record_approval(self, case_id: str, asset_id: str,
+                        fault_mode: str) -> None:
+        now = self._now()
+        self._rejections.append({
+            "case_id": case_id, "asset_id": asset_id,
+            "fault_mode": fault_mode, "decision": "approved",
+            "decided_at": now.isoformat(),
+        })
 
     def _input_error(self, execution, feedback):
         if not isinstance(execution, ExecutionResult) or not isinstance(feedback, FeedbackEvent):

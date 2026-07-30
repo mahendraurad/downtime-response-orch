@@ -70,6 +70,11 @@ export function AppProvider({ children }) {
     _update(persona, () => []);
   }, [persona, _update]);
 
+  // Patch a field on one message in the current persona's history (e.g. resolved: true)
+  const patchMessage = useCallback((id, patch) => {
+    _update(persona, prev => prev.map(m => m.id === id ? { ...m, ...patch } : m));
+  }, [persona, _update]);
+
   // Push a message into a DIFFERENT persona's history (for cross-persona notifications)
   const pushNotification = useCallback((targetPersona, msg) => {
     _update(targetPersona, prev => [...prev, msg]);
@@ -93,7 +98,7 @@ export function AppProvider({ children }) {
       selectedWO, setSelectedWO,
       selectedNode, setSelectedNode,
       currentAgTab, setCurrentAgTab,
-      messages, setMessages, addMessage, clearMessages, pushNotification,
+      messages, setMessages, addMessage, clearMessages, patchMessage, pushNotification,
       pipelineRunning, setPipelineRunning,
       theme, setTheme,
       notifCounts, refreshNotifCounts,

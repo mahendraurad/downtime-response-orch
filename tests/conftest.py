@@ -5,7 +5,10 @@ import pytest
 
 # Unit and API tests must never depend on, mutate, or incur cost against Azure.
 os.environ.setdefault("HITL_REPOSITORY", "sqlite")
+os.environ["RAG_BACKEND"] = "local"
+os.environ["CHECKPOINT_BACKEND"] = "none"
 os.environ["LANGSMITH_TRACING"] = "false"
+os.environ["LANGFUSE_TRACING"] = "false"
 
 
 @pytest.fixture(autouse=True)

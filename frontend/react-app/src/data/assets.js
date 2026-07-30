@@ -99,3 +99,5 @@ export const ASSETS = [
     }
   }
 ];
+
+export const FLEET_TOTAL = ASSETS.length;
