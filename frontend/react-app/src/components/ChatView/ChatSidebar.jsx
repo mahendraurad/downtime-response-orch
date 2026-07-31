@@ -1,13 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 
 const PIPELINE_NODES = [
-  { key: 'data_foundation', nm: 'Data Foundation' },
-  { key: 'monitoring', nm: 'Monitoring' },
-  { key: 'failure_intelligence', nm: 'Failure Intel' },
-  { key: 'predictive_risk', nm: 'Predictive Risk' },
-  { key: 'knowledge', nm: 'Knowledge' },
-  { key: 'prescriptive', nm: 'Prescriptive Opt.' },
-  { key: 'executor', nm: 'Executor' },
+  { key: 'data_foundation',    nm: 'Data Foundation',   src: 'SCADA · Historian · OPC-UA' },
+  { key: 'monitoring',         nm: 'Monitoring',         src: 'Vibration · Temp · Current' },
+  { key: 'failure_intelligence',nm: 'Failure Intel',     src: 'FFT · Bearing DB · Case DB' },
+  { key: 'predictive_risk',    nm: 'Predictive Risk',    src: 'RUL Model · Cohort DB' },
+  { key: 'knowledge',          nm: 'Knowledge',          src: 'SOP Library · Expert KB' },
+  { key: 'prescriptive',       nm: 'Prescriptive Opt.',  src: 'Cost Model · Parts · Scheduler' },
+  { key: 'executor',           nm: 'Executor',           src: 'CMMS · Work Orders · Parts API' },
 ];
 
 export default function ChatSidebar({ thinking, pipelineLog, onToggle }) {
@@ -31,7 +31,7 @@ export default function ChatSidebar({ thinking, pipelineLog, onToggle }) {
   function getPipelineRows() {
     if (thinking) {
       return PIPELINE_NODES.map((n, i) => ({
-        nm: n.nm,
+        nm: n.nm, src: n.src,
         tag: i < animIdx ? 'DONE' : i === animIdx ? 'RUNNING' : 'WAITING',
         cls: i < animIdx ? 'don' : i === animIdx ? 'drn' : 'dof',
       }));
@@ -42,11 +42,11 @@ export default function ChatSidebar({ thinking, pipelineLog, onToggle }) {
       return PIPELINE_NODES.map(n => {
         const entry = logMap[n.key];
         return entry
-          ? { nm: n.nm, tag: `${entry.latency_ms}ms`, cls: 'don' }
-          : { nm: n.nm, tag: '—', cls: 'dsk' };
+          ? { nm: n.nm, src: entry.data_sources || n.src, tag: `${entry.latency_ms}ms`, cls: 'don' }
+          : { nm: n.nm, src: n.src, tag: '—', cls: 'dsk' };
       });
     }
-    return PIPELINE_NODES.map(n => ({ nm: n.nm, tag: 'READY', cls: 'don' }));
+    return PIPELINE_NODES.map(n => ({ nm: n.nm, src: n.src, tag: 'READY', cls: 'don' }));
   }
 
   const pipelineRows = getPipelineRows();
@@ -95,7 +95,10 @@ export default function ChatSidebar({ thinking, pipelineLog, onToggle }) {
             {pipelineRows.map((row, i) => (
               <div key={i} className={`agrow${row.cls === 'dsk' ? ' agrow-sk' : ''}`}>
                 <div className={`adc ${row.cls}`}></div>
-                <div className="anm">{row.nm}</div>
+                <div className="anm-wrap">
+                  <div className="anm">{row.nm}</div>
+                  {row.src && <div className="asrc">{row.src}</div>}
+                </div>
                 <div className="atg">{row.tag}</div>
               </div>
             ))}

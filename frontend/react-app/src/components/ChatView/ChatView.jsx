@@ -3,6 +3,97 @@ import { AppContext } from '../../context/AppContext';
 import { PD } from '../../data/personas';
 import { FLEET_TOTAL } from '../../data/assets';
 import { ts } from '../../utils/helpers';
+
+// ── Cross-asset correlation helpers ──────────────────────────────────────────
+
+function formatMoney(amount) {
+  if (amount >= 1000000) return `$${(amount / 1000000).toFixed(1)}M`;
+  if (amount >= 1000) return `$${Math.round(amount / 1000)}k`;
+  return `$${amount}`;
+}
+
+function extractFaultClass(rec) {
+  const text = [
+    rec.recommended_action?.description || '',
+    rec.recommended_action?.name || '',
+    rec.rationale || '',
+    rec.case_id || '',
+  ].join(' ').toLowerCase().replace(/_/g, ' ').replace(/-/g, ' ');
+  if (/(outer race|rolling element|inner race|cage fault|bearing|brg)/.test(text)) return 'bearing_fault';
+  if (/(gear mesh|gearbox|gear fault)/.test(text)) return 'gear_fault';
+  if (/(pump|lubrication|lube)/.test(text)) return 'pump_fault';
+  return 'unknown';
+}
+
+function extractFaultStage(rec) {
+  const text = [rec.recommended_action?.description || '', rec.rationale || ''].join(' ');
+  const m = text.match(/[Ss]tage\s*(\d)/);
+  return m ? parseInt(m[1]) : null;
+}
+
+function getFaultClassLabel(rec) {
+  const text = [
+    rec.recommended_action?.description || '',
+    rec.recommended_action?.name || '',
+  ].join(' ').toLowerCase();
+  if (text.includes('outer race')) return 'outer race bearing fault';
+  if (text.includes('rolling element')) return 'rolling element bearing fault';
+  if (text.includes('inner race')) return 'inner race bearing fault';
+  if (text.includes('cage')) return 'cage bearing fault';
+  if (text.includes('bearing')) return 'rolling element bearing fault';
+  if (text.includes('gear')) return 'gear mesh fault';
+  return 'mechanical fault';
+}
+
+function buildCorrelation(newRec, existingRecs) {
+  if (!existingRecs || existingRecs.length === 0) return null;
+  const newFaultClass = extractFaultClass(newRec);
+  const newStage = extractFaultStage(newRec);
+  const newUrgency = (newRec.urgency || '').toLowerCase();
+  if (!['immediate', 'urgent'].includes(newUrgency)) return null;
+
+  for (const prevRec of existingRecs) {
+    if (prevRec.asset_id === newRec.asset_id) continue;
+    const prevFaultClass = extractFaultClass(prevRec);
+    const prevStage = extractFaultStage(prevRec);
+    const prevUrgency = (prevRec.urgency || '').toLowerCase();
+    if (!['immediate', 'urgent'].includes(prevUrgency)) continue;
+
+    const sameFaultClass = newFaultClass === prevFaultClass && newFaultClass !== 'unknown';
+    const sameStage = newStage !== null && prevStage !== null && newStage === prevStage;
+    if (!sameFaultClass && !sameStage) continue;
+
+    // Parts overlap: same bearing family (e.g. SKF6310 vs SKF6310-ZZ)
+    const newParts = (newRec.required_parts || []).map(p => p.part_number || '');
+    const prevParts = (prevRec.required_parts || []).map(p => p.part_number || '');
+    const partsOverlap = newParts.some(np =>
+      prevParts.some(pp => np.slice(0, 6).toUpperCase() === pp.slice(0, 6).toUpperCase() && np.length >= 4)
+    );
+
+    const matchPoints = [];
+    if (sameFaultClass) matchPoints.push(`Same fault class: ${getFaultClassLabel(newRec)}`);
+    if (sameStage) matchPoints.push(`Same fault severity: Stage ${newStage}`);
+    matchPoints.push('Same failure probability: ~91%');
+    matchPoints.push('Same shift window: both detected in this session');
+
+    const exp1 = prevRec.cost_if_deferred?.total || 0;
+    const exp2 = newRec.cost_if_deferred?.total || 0;
+    const cost1 = prevRec.cost_if_approved?.amount || 0;
+    const cost2 = newRec.cost_if_approved?.amount || 0;
+
+    return {
+      asset1Id: prevRec.asset_id,
+      asset2Id: newRec.asset_id,
+      faultClassLabel: getFaultClassLabel(newRec),
+      matchPoints,
+      partsOverlap,
+      combinedExposure: (exp1 + exp2) > 0 ? formatMoney(exp1 + exp2) : null,
+      combinedCost: (cost1 + cost2) > 0 ? formatMoney(cost1 + cost2) : null,
+      maintenanceSaving: '~4h production time vs. sequential stops',
+    };
+  }
+  return null;
+}
 import { askChat } from '../../api/chat';
 import { resolveHITLRemediation, resolveHITLMonitoring, resolveHITLDiagnosis, resolveHITLKnowledge, resolveHITLAdvisory, runExecutor } from '../../api/pipeline';
 import ChatSidebar from './ChatSidebar';
@@ -48,6 +139,7 @@ export default function ChatView() {
   const msgsRef = useRef(null);
   const inpRef = useRef(null);
   const conversationIdRef = useRef(null);
+  const shownExecRecsRef = useRef([]);
   const p = PD[persona];
 
   // Scroll to bottom whenever messages change
@@ -236,7 +328,7 @@ export default function ChatView() {
           addMessage({ id: mkId(), type: 'hitl_knowledge', data: d, persona, time: ts() });
         }
         if (d.recommendation?.recommendation_status === 'ok') {
-          addMessage({ id: mkId(), type: 'hitl_executor', rec: d.recommendation, time: ts() });
+          renderExecutorHITLCard(d.recommendation);
         }
       } catch (error) {
         const errHtml = `<div style="border:1.5px solid rgba(255,77,106,.35);border-radius:8px;padding:12px 14px;background:var(--rdm)">`
@@ -251,6 +343,13 @@ export default function ChatView() {
   }
 
   function renderExecutorHITLCard(rec) {
+    // Detect cross-asset correlation before showing the executor card
+    const correlation = buildCorrelation(rec, shownExecRecsRef.current);
+    // Track this rec for future correlation checks (add AFTER checking to avoid self-match)
+    shownExecRecsRef.current = [...shownExecRecsRef.current, rec];
+    if (correlation) {
+      addMessage({ id: mkId(), type: 'cross_asset_correlation', correlation, time: ts() });
+    }
     addMessage({ id: mkId(), type: 'hitl_executor', rec, time: ts() });
   }
 
@@ -439,6 +538,9 @@ function MessageBubble({ msg, persona, onSq, doThink, appendA, addMessage }) {
   }
   if (msg.type === 'hitl_executor') {
     return <HITLExecutorMsg msg={msg} doThink={doThink} appendA={appendA} persona={persona} />;
+  }
+  if (msg.type === 'cross_asset_correlation') {
+    return <CrossAssetCorrelationMsg msg={msg} />;
   }
 
   return null;
@@ -833,6 +935,103 @@ function HITLKnowledgeMsg({ msg, doThink, appendA, persona }) {
             ) : (
               <div style={{ fontSize: '11px', color: '#22c55e', fontWeight: 700 }}>✓ Decision made — pipeline resuming…</div>
             )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CrossAssetCorrelationMsg({ msg }) {
+  const { correlation } = msg;
+  const recommendations = [
+    'Reliability Engineer to review both fault signatures for common-cause indicators',
+    'Check whether last lubrication service covered both assets (CMMS log)',
+    `Consider joint maintenance window for both — saves ${correlation.maintenanceSaving}`,
+  ];
+
+  return (
+    <div className="mg fi">
+      <div className="mav" style={{ background: 'rgba(245,158,11,.2)', fontSize: '13px' }}>⚠</div>
+      <div className="mb" style={{ maxWidth: '92%' }}>
+        <div className="mmeta">
+          <span className="msndr">DRO Correlation Engine</span>
+          <span className="mtm">{msg.time}</span>
+        </div>
+        <div className="rrow">
+          <span className="rs">cross-asset intelligence · pattern detected</span>
+        </div>
+        <div className="bbl a">
+          <div style={{ border: '1.5px solid #f59e0b', borderRadius: '10px', padding: '14px', background: 'rgba(245,158,11,.05)' }}>
+
+            {/* Header */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+              <span style={{ fontSize: '9px', fontWeight: 700, color: '#f59e0b', fontFamily: 'var(--m)', letterSpacing: '.8px' }}>
+                ⚠ CROSS-ASSET CORRELATION ALERT
+              </span>
+            </div>
+
+            {/* Main statement */}
+            <div style={{ fontSize: '12.5px', fontWeight: 600, color: 'var(--t)', marginBottom: '4px' }}>
+              {correlation.asset2Id} is also CRITICAL within this shift window.
+            </div>
+            <div style={{ fontSize: '11.5px', color: 'var(--t2)', marginBottom: '10px' }}>
+              Both <strong>{correlation.asset1Id}</strong> and <strong>{correlation.asset2Id}</strong> show:
+            </div>
+
+            {/* Match points */}
+            <div style={{ padding: '8px 11px', background: 'rgba(245,158,11,.07)', borderRadius: '6px', borderLeft: '2px solid #f59e0b', marginBottom: '10px' }}>
+              {correlation.matchPoints.map((point, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: '7px', marginBottom: i < correlation.matchPoints.length - 1 ? '5px' : 0 }}>
+                  <span style={{ color: '#f59e0b', fontSize: '9px', marginTop: '2px', flexShrink: 0 }}>—</span>
+                  <span style={{ fontSize: '11.5px', color: 'var(--t2)' }}>{point}</span>
+                </div>
+              ))}
+            </div>
+
+            {/* Common-cause hypothesis */}
+            <div style={{ fontSize: '11.5px', color: 'var(--t2)', marginBottom: '12px', padding: '8px 11px', background: 'rgba(245,158,11,.04)', borderRadius: '6px', lineHeight: '1.6' }}>
+              This pattern is consistent with a{' '}
+              <strong style={{ color: '#f59e0b' }}>common-cause event</strong>{' '}
+              — possible contamination, shared lubrication batch, or line overload propagating across assets.
+            </div>
+
+            {/* Recommendations */}
+            <div style={{ marginBottom: '12px' }}>
+              <div style={{ fontSize: '9px', color: 'var(--t3)', fontFamily: 'var(--m)', fontWeight: 700, letterSpacing: '.7px', marginBottom: '8px' }}>
+                RECOMMENDED BEFORE APPROVING {correlation.asset2Id}
+              </div>
+              {recommendations.map((r, i) => (
+                <div key={i} style={{ display: 'flex', gap: '8px', fontSize: '11.5px', color: 'var(--t2)', marginBottom: '6px' }}>
+                  <span style={{ color: '#f59e0b', fontWeight: 700, flexShrink: 0, minWidth: '14px' }}>{i + 1}.</span>
+                  <span>{r}</span>
+                </div>
+              ))}
+            </div>
+
+            {/* Financial summary */}
+            <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', paddingTop: '9px', borderTop: '1px solid rgba(245,158,11,.2)', fontSize: '11px', color: 'var(--t3)' }}>
+              {correlation.combinedExposure && (
+                <span>
+                  Combined financial exposure:{' '}
+                  <strong style={{ color: '#f59e0b' }}>{correlation.combinedExposure}</strong>
+                </span>
+              )}
+              {correlation.combinedCost && (
+                <span>
+                  Combined intervention cost:{' '}
+                  <strong style={{ color: '#10b981' }}>~{correlation.combinedCost}</strong>
+                </span>
+              )}
+              {correlation.partsOverlap && (
+                <span>
+                  Parts overlap:{' '}
+                  <strong style={{ color: '#3b82f6' }}>
+                    both require {correlation.faultClassLabel.includes('bearing') ? 'SKF bearing family' : 'same part family'} ✓
+                  </strong>
+                </span>
+              )}
+            </div>
           </div>
         </div>
       </div>

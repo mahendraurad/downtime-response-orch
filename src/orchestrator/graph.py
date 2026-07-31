@@ -119,6 +119,81 @@ def _timed(fn, *args, **kwargs):
     return result, round((time.monotonic() - t0) * 1000)
 
 
+def _sources_data_foundation(trusted) -> str:
+    parts = []
+    tag = None
+    try:
+        tag = trusted.bearing_ctx.historian_tag
+    except AttributeError:
+        pass
+    if tag:
+        parts.append(tag)
+    try:
+        sq = trusted.raw.signal_quality_score
+        if sq is not None:
+            parts.append(f"quality {sq:.0%}")
+    except AttributeError:
+        pass
+    return " · ".join(parts) or "historian signal"
+
+
+def _sources_monitoring(trusted) -> str:
+    channels = []
+    try:
+        raw = trusted.raw
+        if getattr(raw, "vib_rms_mm_s", None) is not None:
+            channels.append("vibration")
+        if getattr(raw, "temp_c", None) is not None:
+            channels.append("temperature")
+        if getattr(raw, "current_a", None) is not None:
+            channels.append("current")
+    except AttributeError:
+        pass
+    return " · ".join(channels) or "sensor channels"
+
+
+def _sources_failure_intelligence(diagnosis) -> str:
+    parts = ["FFT analysis", "bearing DB"]
+    try:
+        conf = diagnosis.confidence
+        if conf is not None:
+            parts.append(f"{conf:.0%} conf.")
+    except AttributeError:
+        pass
+    return " · ".join(parts)
+
+
+def _sources_predictive_risk(risk) -> str:
+    parts = []
+    try:
+        lo, hi = risk.rul_min_days, risk.rul_max_days
+        if lo is not None and hi is not None:
+            parts.append(f"RUL {lo}–{hi}d")
+        src = getattr(risk, "assessment_source", None)
+        if src:
+            parts.append(src)
+    except AttributeError:
+        pass
+    return " · ".join(parts) or "RUL model · cohort DB"
+
+
+def _sources_knowledge(guidance) -> str:
+    try:
+        details = getattr(guidance, "source_details", None) or []
+        titles = [d.title for d in details[:2] if getattr(d, "title", None)]
+        if titles:
+            return " · ".join(titles)
+        docs = getattr(guidance, "source_documents", None) or []
+        if docs:
+            return f"{len(docs)} SOP doc{'s' if len(docs) != 1 else ''}"
+        hit = getattr(guidance, "retrieval_hit_count", None)
+        if hit:
+            return f"{hit} sections matched"
+    except AttributeError:
+        pass
+    return "SOP library · expert KB"
+
+
 @traceable(name="Agent 1 - Data Foundation", run_type="chain", tags=["dro", "agent-1"])
 def node_data_foundation(state: DROGraphState) -> DROGraphState:
     dfa, *_ = _get_agents()
@@ -128,7 +203,8 @@ def node_data_foundation(state: DROGraphState) -> DROGraphState:
             dfa.process, deepcopy(state["raw_signal"]),
             persona_context=state.get("persona_context"),
         )
-        log.append({"node": "data_foundation", "status": "ok", "latency_ms": ms})
+        log.append({"node": "data_foundation", "status": "ok", "latency_ms": ms,
+                    "data_sources": _sources_data_foundation(trusted)})
         return {**state, "trusted_signal": trusted, "pipeline_log": log}
     except Exception as exc:
         logger.error("data_foundation failed: %s", exc)
@@ -146,7 +222,8 @@ def node_monitoring(state: DROGraphState) -> DROGraphState:
             persona_context=state.get("persona_context"),
         )
         log.append({"node": "monitoring", "status": "ok", "latency_ms": ms,
-                    "triggered": anomaly is not None})
+                    "triggered": anomaly is not None,
+                    "data_sources": _sources_monitoring(state["trusted_signal"])})
         return {**state, "anomaly_event": anomaly, "pipeline_log": log}
     except Exception as exc:
         logger.error("monitoring failed: %s", exc)
@@ -163,7 +240,8 @@ def node_failure_intelligence(state: DROGraphState) -> DROGraphState:
             fia.process, state["anomaly_event"], state["trusted_signal"],
             persona_context=state.get("persona_context"),
         )
-        log.append({"node": "failure_intelligence", "status": "ok", "latency_ms": ms})
+        log.append({"node": "failure_intelligence", "status": "ok", "latency_ms": ms,
+                    "data_sources": _sources_failure_intelligence(diagnosis)})
         return {**state, "fault_diagnosis": diagnosis, "pipeline_log": log}
     except Exception as exc:
         logger.error("failure_intelligence failed: %s", exc)
@@ -181,7 +259,8 @@ def node_predictive_risk(state: DROGraphState) -> DROGraphState:
             state["anomaly_event"], state["trusted_signal"],
             persona_context=state.get("persona_context"),
         )
-        log.append({"node": "predictive_risk", "status": "ok", "latency_ms": ms})
+        log.append({"node": "predictive_risk", "status": "ok", "latency_ms": ms,
+                    "data_sources": _sources_predictive_risk(risk)})
         return {**state, "risk_assessment": risk, "pipeline_log": log}
     except Exception as exc:
         logger.error("predictive_risk failed: %s", exc)
@@ -199,7 +278,8 @@ def node_knowledge(state: DROGraphState) -> DROGraphState:
             state.get("risk_assessment"),
             persona_context=state.get("persona_context"),
         )
-        log.append({"node": "knowledge", "status": "ok", "latency_ms": ms})
+        log.append({"node": "knowledge", "status": "ok", "latency_ms": ms,
+                    "data_sources": _sources_knowledge(guidance)})
         return {**state, "knowledge_guidance": guidance, "pipeline_log": log}
     except Exception as exc:
         logger.error("knowledge failed: %s", exc)
@@ -219,7 +299,8 @@ def node_prescriptive(state):
             persona_context=state.get("persona_context"),
             trusted_signal=state.get("trusted_signal"),
         )
-        log.append({"node":"prescriptive","status":"ok","latency_ms":ms})
+        log.append({"node":"prescriptive","status":"ok","latency_ms":ms,
+                    "data_sources":"cost model · parts inventory · scheduler"})
         return {**state,"recommendation":result,"pipeline_log":log}
     except Exception as exc:
         log.append({"node":"prescriptive","status":"error","latency_ms":0})
@@ -233,7 +314,8 @@ def node_executor(state):
         state.get("approval_status") == "approved",
         persona_context=state.get("persona_context"),
     )
-    log.append({"node":"executor","status":result.status,"latency_ms":ms})
+    log.append({"node":"executor","status":result.status,"latency_ms":ms,
+                "data_sources":"CMMS · work order system · parts API"})
     return {**state,"execution_result":result,"pipeline_log":log}
 
 @traceable(name="Agent 8 - Learning and Memory", run_type="chain", tags=["dro", "agent-8", "llm-optional"])
