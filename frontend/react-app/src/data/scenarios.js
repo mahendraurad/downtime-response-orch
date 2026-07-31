@@ -32,20 +32,36 @@ export const ASSET_SCENARIO = {
 export const URGENCY_COLOR = { immediate: '#ef4444', urgent: '#f97316', planned: '#3b82f6', monitor: '#6b7280' };
 
 export const SAMPLE_REC = {
-  case_id: 'DEMO-004',
-  asset_id: 'AST_PMP_001',
-  bearing_id: 'BRG_005',
-  recommended_action: { name: 'lubrication_service', description: 'lubrication_service (in_window) per SOP_003', estimated_duration_hours: 3.0 },
-  urgency: 'planned',
-  required_parts: [{ part_number: 'MOBIL-DTE-25', quantity: 1, lead_time_days: 0 }],
-  window_chosen: 'WIN_005',
-  rationale: "Lubrication Issue detected at severity 'stage_2' on bearing BRG_005 (asset AST_PMP_001). Remaining useful life estimate: ~14 days. Stage 2 indicates active degradation — action required soon.",
+  case_id: 'DEMO-M104-001',
+  asset_id: 'M-104',
+  bearing_id: 'BRG_M104_DRIVE',
+  recommended_action: { name: 'stop_and_replace', description: 'Bearing replacement — outer race fault Stage 3', estimated_duration_hours: 6.0 },
+  urgency: 'immediate',
+  required_parts: [{ part_number: 'SKF6310-ZZ', quantity: 1, lead_time_days: 2 }],
+  window_chosen: 'WIN_EMERGENCY',
+  rationale: 'Outer race fault at Stage 3 means the bearing has crossed the threshold where monitoring no longer reduces risk — degradation at this stage is non-linear and can accelerate without warning. 847 matching historical cases show median time-to-failure of 4.2 days from this signature. Monitor-only scores 0.31 vs. replacement 0.89 on the prescriptive model — the gap is not close.',
   recommendation_status: 'ok',
   approval_status: 'pending',
   responsible_person: 'Plant Supervisor – James Kowalski',
   responsible_person_id: 'PERSONA_SUP',
   responsible_approver: 'Plant Supervisor – James Kowalski',
   responsible_approver_id: 'PERSONA_SUP',
-  contributors: [{ role: 'Maintenance Planner', name: 'Tom Rodriguez', concern: 'confirms parts and crew readiness' }],
+  contributors: [
+    { role: 'Reliability Engineer', name: 'Sarah Chen', concern: 'confirms bearing fault classification' },
+    { role: 'Maintenance Planner', name: 'Tom Rodriguez', concern: 'confirms parts availability and crew' },
+  ],
   generated_at_utc: new Date().toISOString(),
+  // Decision Support fields (A3)
+  cost_if_approved: { amount: 48000, breakdown: 'parts ($8k) + labour ($12k) + 6h Line 4 stop ($28k)' },
+  cost_if_deferred: { per_hour: 7500, total: 2016000, basis: 'unplanned failure + secondary damage' },
+  parts_vs_rul: { eta: '36–48h via PO', rul_window: '0–7d', within_window: true },
+  historical_cases: [
+    { date: '2024-03-12', action_taken: 'stop_and_replace', outcome: 'success — bearing replaced, line back in 5h' },
+    { date: '2023-11-05', action_taken: 'stop_and_replace', outcome: 'success — no secondary damage' },
+    { date: '2023-08-19', action_taken: 'monitor', outcome: 'failure — 61h shutdown, secondary shaft damage' },
+  ],
+  approver_authority: { threshold_usd: 100000, within_authority: true, persona_role: 'Plant Supervisor' },
+  alternative_action: { label: 'Monitor and reassess in 48h', trade_off: 'Saves planned stop but accumulates $360k additional risk per day at current degradation rate' },
+  // Escalation timer (A4)
+  escalation_timer: { escalates_to: 'Plant Manager', escalates_at: '18:00 today' },
 };

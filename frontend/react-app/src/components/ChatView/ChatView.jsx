@@ -40,6 +40,7 @@ function generateChipsFromResponse(d, fallbackQp) {
 
 export default function ChatView() {
   const { persona, messages, setMessages, addMessage } = useContext(AppContext);
+  const [showRightPanel, setShowRightPanel] = useState(true);
   const [inputVal, setInputVal] = useState('');
   const [thinking, setThinking] = useState(false);
   const [livePipelineLog, setLivePipelineLog] = useState([]);
@@ -337,7 +338,21 @@ export default function ChatView() {
           </div>
         </div>
       </div>
-      <ChatSidebar onSq={sendMsg} thinking={thinking} pipelineLog={livePipelineLog} />
+      {showRightPanel ? (
+        <ChatSidebar thinking={thinking} pipelineLog={livePipelineLog} onToggle={() => setShowRightPanel(false)} />
+      ) : (
+        <div
+          onClick={() => setShowRightPanel(true)}
+          title="Show right panel: Running Agents"
+          style={{
+            width: '18px', flexShrink: 0, background: 'var(--bg2)',
+            borderLeft: '1px solid var(--b)', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+        >
+          <span style={{ color: 'var(--t3)', fontSize: '10px' }}>◀</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -825,6 +840,49 @@ function HITLKnowledgeMsg({ msg, doThink, appendA, persona }) {
   );
 }
 
+const REJECT_CODES = [
+  { id: 'diagnosis', label: 'Disagree with diagnosis — fault type or severity incorrect' },
+  { id: 'parts', label: 'Parts / timing concern — lead time or window does not work' },
+  { id: 'second_opinion', label: 'Need second opinion from Reliability Engineer' },
+  { id: 'window', label: 'Wrong maintenance window — cannot stop line at this time' },
+  { id: 'other', label: 'Other' },
+];
+
+function buildExecutionSteps(data, rec) {
+  const ps = data.parts_status || [];
+  const allReserved = ps.length > 0 && ps.every(p => p.status === 'reserved');
+  const hasShortage = ps.some(p => p.status === 'shortage');
+  const partDetail = ps.length > 0
+    ? ps.map(p => `${p.part_number} ×${p.quantity} — ${p.status === 'reserved' ? 'reserved ✓' : p.status === 'shortage' ? 'shortage ⚠' : p.status}`).join(', ')
+    : (rec.required_parts || []).map(p => `${p.part_number} ×${p.quantity}${p.lead_time_days > 0 ? ` · ETA ${p.lead_time_days}d` : ' · in stock'}`).join(', ') || 'parts pending';
+  return [
+    {
+      label: 'Work order created',
+      status: data.work_order_id ? 'done' : 'blocked',
+      detail: data.work_order_id ? `${data.work_order_id} · priority: ${rec.urgency}` : (data.blocked_reason || 'Creation blocked'),
+    },
+    {
+      label: 'Notifications dispatched',
+      status: data.notification_status === 'sent' ? 'done' : 'pending',
+      detail: data.notification_status === 'sent' ? 'Maint. Planner + Reliability Engr. + Shift Supervisor' : 'Pending — sends after work order creation',
+    },
+    {
+      label: 'Parts procurement',
+      status: allReserved ? 'done' : 'pending',
+      detail: partDetail,
+      owner: hasShortage ? 'Maint. Planner' : null,
+    },
+    {
+      label: 'Maintenance window',
+      status: 'blocked',
+      detail: 'No window scheduled — 6h production stop must be confirmed',
+      owner: 'Maint. Planner',
+      deadline: '18:00',
+      escalates_to: 'Plant Manager',
+    },
+  ];
+}
+
 function buildLearningHtml(lr) {
   const statusColors = { learned: '#10b981', duplicate: '#3b82f6', invalid_input: '#ef4444', persistence_failed: '#f59e0b' };
   const statusLabels = { learned: 'CASE LEARNED & STORED', duplicate: 'DUPLICATE — ALREADY KNOWN', invalid_input: 'INVALID INPUT — NOT STORED', persistence_failed: 'STORAGE ERROR' };
@@ -859,11 +917,13 @@ function buildLearningHtml(lr) {
 function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
   const [resolved, setResolved] = useState(() => msg.resolved || false);
   const [showRejectInput, setShowRejectInput] = useState(false);
+  const [rejectCodes, setRejectCodes] = useState(() => new Set());
   const [rejectReason, setRejectReason] = useState('');
   const { refreshNotifCounts, pushNotification, patchMessage } = useContext(AppContext);
   const rec = msg.rec;
   const action = rec.recommended_action;
   const urgencyColor = { immediate: '#ef4444', urgent: '#f97316', planned: '#3b82f6', monitor: '#6b7280' }[rec.urgency] || '#6b7280';
+  const canConfirmReject = rejectCodes.size > 0 && (!rejectCodes.has('other') || rejectReason.trim());
 
   async function resolve(approved, reason) {
     setResolved(true);
@@ -873,30 +933,36 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
         const data = await runExecutor(rec, approved, persona);
         refreshNotifCounts();
 
-        // Build result html first
-        const statusColor = { success: '#10b981', partial: '#f59e0b', blocked: '#6b7280', failed: '#ef4444' };
-        const color = statusColor[data.status] || '#6b7280';
-        const label = approved ? '✓ APPROVED & EXECUTED' : '✗ REJECTED';
-        let html = `<div style="border:1.5px solid ${color};border-radius:10px;padding:14px;background:rgba(16,185,129,0.04)">`
-          + `<div style="font-size:9px;font-weight:700;color:${color};font-family:var(--m);margin-bottom:10px">${label} · EXECUTOR RESULT</div>`
-          + `<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap">`
-          + `<span style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:4px;background:${color};color:#fff">${data.status.toUpperCase()}</span>`
-          + `<span style="font-size:11px;color:var(--t2)">action: <strong>${(data.action_taken || '—').replace(/_/g, ' ')}</strong></span></div>`;
-        if (data.status === 'blocked') {
-          html += `<div style="font-size:12px;color:#6b7280;margin-bottom:8px">⛔ ${data.blocked_reason || 'Execution blocked'}</div>`;
-        } else {
-          html += `<div style="font-size:12px;color:var(--t2);line-height:2;margin-bottom:8px">`
-            + `Work order: <strong style="color:#10b981">${data.work_order_id || '—'}</strong><br/>`
-            + `Notification: <strong>${data.notification_status || '—'}</strong><br/>`
-            + `Audit ref: <span style="font-family:var(--m);font-size:10px;color:var(--t3)">${data.audit_reference || '—'}</span></div>`;
-        }
-        if (!approved && reason) {
-          html += `<div style="font-size:11px;color:var(--t3);margin-top:4px;padding:6px 10px;background:rgba(239,68,68,.04);border-radius:5px;border-left:2px solid rgba(239,68,68,.3)">Rejection reason: ${reason}</div>`;
-        }
-        html += '</div>';
+        let html;
+        if (approved) {
+          const steps = buildExecutionSteps(data, rec);
+          const doneCount = steps.filter(s => s.status === 'done').length;
+          const STEP_ICON = { done: '✅', pending: '⏳', blocked: '🔴' };
+          const STEP_BG = { done: 'rgba(16,185,129,.04)', pending: 'rgba(245,158,11,.04)', blocked: 'rgba(239,68,68,.05)' };
 
-        // Notify all relevant personas based on urgency (mirrors backend _URGENCY_ROUTING)
-        if (approved && data.status !== 'blocked' && data.work_order_id) {
+          html = `<div style="border:1.5px solid #10b981;border-radius:10px;padding:14px;background:rgba(16,185,129,0.04)">`;
+          html += `<div style="font-size:9px;font-weight:700;color:#10b981;font-family:var(--m);margin-bottom:8px">✓ APPROVED & EXECUTED · EXECUTOR RESULT</div>`;
+          html += `<div style="font-size:13px;font-weight:600;color:var(--t);margin-bottom:2px">${doneCount} / ${steps.length} steps complete · action: ${(data.action_taken || '').replace(/_/g, ' ')}</div>`;
+          html += `<div style="font-size:10px;color:var(--t3);font-family:var(--m);margin-bottom:10px">`;
+          if (data.work_order_id) html += `Work order: <span style="color:#10b981">${data.work_order_id}</span>`;
+          if (data.audit_reference) html += ` · Audit: ${data.audit_reference}`;
+          html += `</div>`;
+          html += `<div style="display:flex;flex-direction:column;gap:4px">`;
+          steps.forEach(step => {
+            html += `<div style="display:flex;gap:8px;padding:7px 9px;border-radius:6px;background:${STEP_BG[step.status]};border:1px solid rgba(255,255,255,.05)">`;
+            html += `<span style="font-size:11px;flex-shrink:0;margin-top:1px">${STEP_ICON[step.status]}</span>`;
+            html += `<div style="flex:1"><div style="font-size:11.5px;font-weight:600;color:var(--t)">${step.label}</div>`;
+            html += `<div style="font-size:10.5px;color:var(--t2);margin-top:2px">${step.detail}</div>`;
+            if (step.status === 'blocked' && step.owner) {
+              html += `<div style="font-size:10px;color:#f97316;margin-top:3px">↳ ${step.owner} must confirm`;
+              if (step.escalates_to && step.deadline) html += ` · escalates to <strong>${step.escalates_to}</strong> at ${step.deadline} if not confirmed`;
+              html += `</div>`;
+            }
+            html += `</div></div>`;
+          });
+          html += `</div></div>`;
+
+          // Notify relevant personas (mirrors backend _URGENCY_ROUTING)
           const URGENCY_RECIPIENTS = {
             immediate: ['supervisor', 'engineer', 'maintenance', 'safety'],
             urgent:    ['supervisor', 'engineer', 'maintenance'],
@@ -910,6 +976,17 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
               pushNotification(p, { id: mkId(), type: 'agent', html, routes: ['executor · notification'], chips: [], time: ts() });
             }
           });
+        } else {
+          const selectedLabels = REJECT_CODES
+            .filter(c => rejectCodes.has(c.id))
+            .map(c => c.id === 'other' && reason ? `Other — ${reason}` : c.label);
+          if (selectedLabels.length === 0) selectedLabels.push('No reason given');
+          html = `<div style="border:1.5px solid #ef4444;border-radius:10px;padding:14px;background:rgba(239,68,68,0.04)">`;
+          html += `<div style="font-size:9px;font-weight:700;color:#ef4444;font-family:var(--m);margin-bottom:8px">✗ REJECTED · EXECUTOR RESULT</div>`;
+          html += `<div style="font-size:12px;color:var(--t2);margin-bottom:8px">Recommendation rejected — no action taken.</div>`;
+          html += `<div style="font-size:11px;color:var(--t3);padding:6px 10px;background:rgba(239,68,68,.04);border-radius:5px;border-left:2px solid rgba(239,68,68,.3)">`;
+          html += selectedLabels.map((l, i) => `${selectedLabels.length > 1 ? `${i + 1}. ` : ''}<strong style="color:var(--t2)">${l}</strong>`).join('<br/>');
+          html += `</div></div>`;
         }
 
         appendA(html, ['executor · result']);
@@ -920,22 +997,25 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
   return (
     <div className="mg fi">
       <div className="mav" style={{ background: 'var(--ag)' }}>🤖</div>
-      <div className="mb" style={{ maxWidth: '90%' }}>
+      <div className="mb" style={{ maxWidth: '92%' }}>
         <div className="mmeta"><span className="msndr">DRO Agent</span><span className="mtm">{msg.time}</span></div>
         <div className="rrow"><span className="rs">executor · approval gate</span></div>
         <div className="bbl a">
           <div style={{ border: '1.5px solid #10b981', borderRadius: '10px', padding: '14px', background: 'rgba(16,185,129,0.06)' }}>
+            {/* Header */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
               <span style={{ fontSize: '9px', fontWeight: 700, color: '#10b981', fontFamily: 'var(--m)' }}>HITL · EXECUTOR AGENT · Execution Approval</span>
               <span style={{ fontSize: '9px', fontWeight: 600, color: '#64748b', marginLeft: 'auto' }}>FOR: Plant Supervisor</span>
             </div>
             <strong style={{ color: 'var(--t)' }}>Maintenance recommendation awaiting approval before execution</strong>
+
+            {/* Core details */}
             <div style={{ margin: '10px 0', fontSize: '12px', color: 'var(--t2)', lineHeight: '2' }}>
               Case: <strong>{rec.case_id}</strong> &nbsp;|&nbsp; Asset: <strong>{rec.asset_id}</strong><br />
               Action: <strong>{action.name.replace(/_/g, ' ')}</strong> &nbsp;<span style={{ fontSize: '10px', color: 'var(--t3)' }}>({action.description})</span><br />
               Urgency: <strong style={{ color: urgencyColor }}>{rec.urgency.toUpperCase()}</strong>
               &nbsp;|&nbsp; Est. duration: <strong>{action.estimated_duration_hours}h</strong>
-              &nbsp;|&nbsp; Window: <strong>{rec.window_chosen}</strong><br />
+              &nbsp;|&nbsp; Window: <strong>{rec.window_chosen || '—'}</strong><br />
               Parts: {rec.required_parts.map(p => (
                 <span key={p.part_number} style={{ background: 'rgba(16,185,129,.1)', border: '1px solid #10b981', borderRadius: '4px', padding: '2px 8px', fontSize: '11px', color: '#10b981', marginRight: '4px' }}>
                   {p.part_number} ×{p.quantity}
@@ -943,9 +1023,98 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
               ))}<br />
               Approver: <strong>{rec.responsible_approver}</strong>
             </div>
+
+            {/* Rationale */}
             <div style={{ fontSize: '11px', color: 'var(--t2)', background: 'rgba(16,185,129,0.06)', padding: '9px 11px', borderRadius: '6px', borderLeft: '2px solid #10b981', marginBottom: '12px', lineHeight: '1.6' }}>
               {rec.rationale}
             </div>
+
+            {/* A3 — Decision Support block (only when enriched fields are actually present) */}
+            {!!(rec.cost_if_approved?.amount || rec.cost_if_deferred?.total || rec.historical_cases?.length > 0 || rec.approver_authority?.threshold_usd) && (
+              <div style={{ marginBottom: '10px', border: '1px solid rgba(16,185,129,.22)', borderRadius: '8px', overflow: 'hidden', fontSize: '11px' }}>
+                <div style={{ padding: '5px 11px', background: 'rgba(16,185,129,.1)', fontSize: '9px', fontWeight: 700, color: '#10b981', fontFamily: 'var(--m)', letterSpacing: '.8px' }}>
+                  DECISION SUPPORT
+                </div>
+
+                {/* Cost comparison */}
+                {rec.cost_if_approved && rec.cost_if_deferred && (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', borderBottom: '1px solid rgba(16,185,129,.15)' }}>
+                    <div style={{ padding: '8px 11px', borderRight: '1px solid rgba(16,185,129,.15)' }}>
+                      <div style={{ fontSize: '9px', color: 'var(--t3)', fontFamily: 'var(--m)', marginBottom: '3px' }}>COST IF APPROVED</div>
+                      <div style={{ fontSize: '15px', fontWeight: 700, color: '#10b981' }}>${rec.cost_if_approved.amount.toLocaleString()}</div>
+                      <div style={{ fontSize: '9.5px', color: 'var(--t3)', marginTop: '2px' }}>{rec.cost_if_approved.breakdown}</div>
+                    </div>
+                    <div style={{ padding: '8px 11px' }}>
+                      <div style={{ fontSize: '9px', color: 'var(--t3)', fontFamily: 'var(--m)', marginBottom: '3px' }}>COST IF DEFERRED</div>
+                      <div style={{ fontSize: '15px', fontWeight: 700, color: '#ef4444' }}>${rec.cost_if_deferred.total.toLocaleString()}</div>
+                      <div style={{ fontSize: '9.5px', color: 'var(--t3)', marginTop: '2px' }}>${rec.cost_if_deferred.per_hour.toLocaleString()}/hr · {rec.cost_if_deferred.basis}</div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Parts vs RUL window */}
+                {rec.parts_vs_rul && (
+                  <div style={{ padding: '7px 11px', borderBottom: '1px solid rgba(16,185,129,.15)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span style={{ color: 'var(--t3)', fontSize: '10.5px' }}>Parts ETA vs RUL window</span>
+                    <span style={{ color: rec.parts_vs_rul.within_window ? '#10b981' : '#ef4444', fontWeight: 600, fontFamily: 'var(--m)', fontSize: '10px' }}>
+                      {rec.parts_vs_rul.eta} — within {rec.parts_vs_rul.rul_window} {rec.parts_vs_rul.within_window ? '✓' : '✗'}
+                    </span>
+                  </div>
+                )}
+
+                {/* Historical cases */}
+                {rec.historical_cases && rec.historical_cases.length > 0 && (
+                  <div style={{ padding: '7px 11px', borderBottom: '1px solid rgba(16,185,129,.15)' }}>
+                    <div style={{ fontSize: '9px', color: 'var(--t3)', fontFamily: 'var(--m)', marginBottom: '5px', letterSpacing: '.5px' }}>HISTORICAL PRECEDENT</div>
+                    {rec.historical_cases.map((c, i) => {
+                      const ok = !c.outcome.toLowerCase().includes('fail') && !c.outcome.toLowerCase().includes('shutdown');
+                      return (
+                        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: i < rec.historical_cases.length - 1 ? '4px' : 0 }}>
+                          <span style={{ color: ok ? '#10b981' : '#ef4444', fontSize: '10px', flexShrink: 0 }}>{ok ? '✓' : '✗'}</span>
+                          <span style={{ color: 'var(--t3)', fontSize: '9px', fontFamily: 'var(--m)', flexShrink: 0, width: '60px' }}>{c.date}</span>
+                          <span style={{ color: 'var(--t2)', fontSize: '10.5px', flex: 1 }}>{c.action_taken.replace(/_/g, ' ')} → <span style={{ color: ok ? '#10b981' : '#ef4444' }}>{c.outcome}</span></span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Authority check */}
+                {rec.approver_authority && (
+                  <div style={{ padding: '7px 11px', borderBottom: rec.alternative_action ? '1px solid rgba(16,185,129,.15)' : 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span style={{ color: 'var(--t3)', fontSize: '10.5px' }}>Approver authority</span>
+                    <span style={{ color: rec.approver_authority.within_authority ? '#10b981' : '#f97316', fontWeight: 600, fontSize: '10px' }}>
+                      {rec.cost_if_approved
+                        ? `$${rec.cost_if_approved.amount.toLocaleString()} of $${rec.approver_authority.threshold_usd.toLocaleString()} threshold`
+                        : `$${rec.approver_authority.threshold_usd.toLocaleString()} threshold`
+                      } {rec.approver_authority.within_authority ? '✓' : '— escalation required'}
+                    </span>
+                  </div>
+                )}
+
+                {/* Alternative action */}
+                {rec.alternative_action && (
+                  <div style={{ padding: '7px 11px' }}>
+                    <div style={{ fontSize: '9px', color: 'var(--t3)', fontFamily: 'var(--m)', marginBottom: '3px', letterSpacing: '.5px' }}>ALTERNATIVE</div>
+                    <div style={{ color: 'var(--t2)', fontSize: '10.5px' }}>
+                      <strong style={{ color: 'var(--t)' }}>{rec.alternative_action.label}</strong> — {rec.alternative_action.trade_off}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* A4 — Escalation timer */}
+            {rec.escalation_timer && (
+              <div style={{ padding: '7px 10px', background: 'rgba(249,115,22,.06)', border: '1px solid rgba(249,115,22,.22)', borderRadius: '6px', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '7px' }}>
+                <span style={{ fontSize: '12px' }}>⏳</span>
+                <span style={{ fontSize: '11px', color: 'var(--t2)' }}>
+                  Auto-escalates to <strong style={{ color: '#f97316' }}>{rec.escalation_timer.escalates_to}</strong> if no decision by <strong style={{ color: '#f97316' }}>{rec.escalation_timer.escalates_at}</strong>
+                </span>
+              </div>
+            )}
+
+            {/* Action buttons + A5 rejection form */}
             {!resolved ? (
               <>
                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
@@ -953,30 +1122,50 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
                     style={{ padding: '7px 18px', borderRadius: '6px', border: 'none', background: '#10b981', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: '12px' }}>
                     Approve &amp; Execute
                   </button>
-                  <button onClick={() => setShowRejectInput(s => !s)}
+                  <button onClick={() => { setShowRejectInput(s => !s); setRejectCodes(new Set()); setRejectReason(''); }}
                     style={{ padding: '7px 18px', borderRadius: '6px', border: '1px solid #ef4444', background: 'transparent', color: '#ef4444', fontWeight: 700, cursor: 'pointer', fontSize: '12px' }}>
                     {showRejectInput ? 'Cancel' : 'Reject'}
                   </button>
                 </div>
+
                 {showRejectInput && (
-                  <div style={{ marginTop: '10px' }}>
-                    <div style={{ fontSize: '10px', color: 'var(--t3)', fontFamily: 'var(--m)', marginBottom: '5px' }}>REJECTION REASON (required)</div>
-                    <textarea
-                      value={rejectReason}
-                      onChange={e => setRejectReason(e.target.value)}
-                      placeholder="Enter reason for rejection…"
-                      rows={2}
-                      autoFocus
-                      style={{ width: '100%', padding: '7px 10px', borderRadius: '6px', border: '1px solid rgba(239,68,68,.4)', background: 'rgba(239,68,68,.04)', color: 'var(--t)', fontSize: '11px', resize: 'none', fontFamily: 'var(--f)', outline: 'none', lineHeight: 1.5 }}
-                    />
-                    <div style={{ marginTop: '6px' }}>
-                      <button
-                        disabled={!rejectReason.trim()}
-                        onClick={() => resolve(false, rejectReason.trim())}
-                        style={{ padding: '6px 14px', borderRadius: '6px', border: 'none', background: rejectReason.trim() ? '#ef4444' : '#374151', color: '#fff', fontWeight: 700, cursor: rejectReason.trim() ? 'pointer' : 'not-allowed', fontSize: '11px', opacity: rejectReason.trim() ? 1 : 0.5 }}>
-                        Confirm rejection
-                      </button>
-                    </div>
+                  <div style={{ marginTop: '12px', padding: '10px 12px', background: 'rgba(239,68,68,.04)', border: '1px solid rgba(239,68,68,.2)', borderRadius: '7px' }}>
+                    <div style={{ fontSize: '9px', color: '#ef4444', fontFamily: 'var(--m)', fontWeight: 700, marginBottom: '9px', letterSpacing: '.6px' }}>SELECT REJECTION REASON</div>
+                    {REJECT_CODES.map(code => (
+                      <label key={code.id} style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', marginBottom: '8px', cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          value={code.id}
+                          checked={rejectCodes.has(code.id)}
+                          onChange={() => {
+                            setRejectCodes(prev => {
+                              const next = new Set(prev);
+                              next.has(code.id) ? next.delete(code.id) : next.add(code.id);
+                              if (!next.has('other')) setRejectReason('');
+                              return next;
+                            });
+                          }}
+                          style={{ marginTop: '2px', accentColor: '#ef4444', flexShrink: 0 }}
+                        />
+                        <span style={{ fontSize: '11.5px', color: 'var(--t2)', lineHeight: 1.5 }}>{code.label}</span>
+                      </label>
+                    ))}
+                    {rejectCodes.has('other') && (
+                      <textarea
+                        value={rejectReason}
+                        onChange={e => setRejectReason(e.target.value)}
+                        placeholder="Describe the reason…"
+                        rows={2}
+                        autoFocus
+                        style={{ width: '100%', padding: '7px 10px', borderRadius: '6px', border: '1px solid rgba(239,68,68,.35)', background: 'rgba(239,68,68,.03)', color: 'var(--t)', fontSize: '11px', resize: 'none', fontFamily: 'var(--f)', outline: 'none', lineHeight: 1.5, marginBottom: '6px' }}
+                      />
+                    )}
+                    <button
+                      disabled={!canConfirmReject}
+                      onClick={() => resolve(false, rejectReason.trim())}
+                      style={{ marginTop: rejectCodes.has('other') ? '2px' : '6px', padding: '6px 14px', borderRadius: '6px', border: 'none', background: canConfirmReject ? '#ef4444' : '#374151', color: '#fff', fontWeight: 700, cursor: canConfirmReject ? 'pointer' : 'not-allowed', fontSize: '11px', opacity: canConfirmReject ? 1 : 0.5 }}>
+                      Confirm rejection
+                    </button>
                   </div>
                 )}
               </>

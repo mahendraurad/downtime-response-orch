@@ -39,6 +39,7 @@ export function AppProvider({ children }) {
   const [pipelineRunning, setPipelineRunning] = useState(false);
   const [theme, setThemeState] = useState(() => localStorage.getItem('dro-theme') || 'light');
   const [notifCounts, setNotifCounts] = useState({});
+  const [showLeftPanel, setShowLeftPanel] = useState(true);
 
   // Per-persona message store, backed by sessionStorage so history survives persona switches
   const [messagesMap, setMessagesMap] = useState(loadSession);
@@ -102,6 +103,7 @@ export function AppProvider({ children }) {
       pipelineRunning, setPipelineRunning,
       theme, setTheme,
       notifCounts, refreshNotifCounts,
+      showLeftPanel, setShowLeftPanel,
     }}>
       {children}
     </AppContext.Provider>

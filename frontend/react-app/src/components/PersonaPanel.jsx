@@ -29,8 +29,14 @@ const PERSONA_SECTIONS = [
   },
 ];
 
+const panelToggleBtn = {
+  width: '18px', height: '18px', borderRadius: '4px', border: '1px solid var(--b)',
+  background: 'none', color: 'var(--t3)', cursor: 'pointer',
+  display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '9px', flexShrink: 0,
+};
+
 export default function PersonaPanel() {
-  const { persona, setPersona, notifCounts, refreshNotifCounts } = useContext(AppContext);
+  const { persona, setPersona, notifCounts, refreshNotifCounts, setShowLeftPanel } = useContext(AppContext);
   const { user, logout } = useAuth();
   const allowedPersonas = user?.allowed_personas || [];
 
@@ -69,7 +75,10 @@ export default function PersonaPanel() {
           </div>
         </div>
       )}
-      <div className="lphdr">Active Persona</div>
+      <div className="lphdr" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingRight: '10px' }}>
+        <span>Active Persona</span>
+        <button onClick={() => setShowLeftPanel(false)} title="Hide left panel" style={panelToggleBtn}>◀</button>
+      </div>
       <div className="plist">
         {PERSONA_SECTIONS.map((section, si) => {
           const visibleItems = section.items.filter(item => allowedPersonas.includes(item.id));
@@ -103,16 +112,6 @@ export default function PersonaPanel() {
           </React.Fragment>
           );
         })}
-      </div>
-      <div className="fbox">
-        <div className="fttl">Fleet Snapshot</div>
-        <div className="fs"><span className="fsl">Critical</span><span className="fsv" style={{ color: 'var(--rd)' }}>2 assets</span></div>
-        <div className="fs"><span className="fsl">Warning</span><span className="fsv" style={{ color: 'var(--am)' }}>5 assets</span></div>
-        <div className="fs"><span className="fsl">Healthy</span><span className="fsv" style={{ color: 'var(--gn)' }}>40 assets</span></div>
-        <div className="fs" style={{ marginTop: '3px', paddingTop: '3px', borderTop: '1px solid var(--b)' }}>
-          <span className="fsl">Avg RUL</span>
-          <span className="fsv" style={{ color: 'var(--am)', fontFamily: 'var(--m)' }}>14.2 days</span>
-        </div>
       </div>
     </div>
   );

@@ -1,10 +1,11 @@
-import React, { useContext, useState } from 'react';
+import React, { useContext } from 'react';
 import { AppContext } from '../context/AppContext';
-import { SAMPLE_REC } from '../data/scenarios';
 
 export default function Topbar() {
-  const { currentView, setCurrentView, agentAsset, setPipelineRunning, pipelineRunning, theme, setTheme } = useContext(AppContext);
-  const [execRunning, setExecRunning] = useState(false);
+  const {
+    currentView, setCurrentView, agentAsset, setPipelineRunning, pipelineRunning,
+    theme, setTheme,
+  } = useContext(AppContext);
 
   const navItems = [
     { id: 'chat', label: 'Agent Chat' },
@@ -13,14 +14,6 @@ export default function Topbar() {
     { id: 'workorders', label: 'Work Orders' },
   ];
 
-  function handleAlertsClick() {
-    setCurrentView('chat');
-    // Fire a custom event to send a query to chat
-    window.dispatchEvent(new CustomEvent('dro-sq', {
-      detail: 'List all 3 active alerts with severity, RUL and recommended action for each'
-    }));
-  }
-
   async function handleLivePipeline() {
     if (pipelineRunning) return;
     setPipelineRunning(true);
@@ -28,13 +21,7 @@ export default function Topbar() {
     window.dispatchEvent(new CustomEvent('dro-sq', {
       detail: `Run the complete orchestrated analysis for ${agentAsset}`,
     }));
-    // Reset after a delay
     setTimeout(() => setPipelineRunning(false), 5000);
-  }
-
-  function handleTestExecutor() {
-    setCurrentView('chat');
-    window.dispatchEvent(new CustomEvent('dro-executor-hitl', { detail: SAMPLE_REC }));
   }
 
   return (
@@ -72,14 +59,6 @@ export default function Topbar() {
         </button>
         <button
           className="chip"
-          onClick={handleTestExecutor}
-          style={{ background: 'rgba(16,185,129,.12)', borderColor: '#10b981', color: '#10b981', fontSize: '10px' }}
-          title="Phase 9 — simulate executor approval HITL with sample recommendation"
-        >
-          ⚙ Test Executor
-        </button>
-        <button
-          className="chip"
           onClick={handleLivePipeline}
           disabled={pipelineRunning}
           style={{ background: 'rgba(79,142,255,.15)', borderColor: 'var(--ac)', color: 'var(--ac2)', fontSize: '10px' }}
@@ -89,7 +68,7 @@ export default function Topbar() {
         </button>
         <div className="ldot"></div>
         <div className="ltx">LIVE</div>
-        <div className="abdg" onClick={handleAlertsClick}>⚠ 3 ALERTS</div>
+        <div className="abdg">⚠ 3 ALERTS</div>
       </div>
     </div>
   );

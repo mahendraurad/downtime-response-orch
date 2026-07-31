@@ -10,7 +10,7 @@ import AssetRegistryView from './components/AssetRegistryView/AssetRegistryView'
 import WorkOrdersView from './components/WorkOrdersView/WorkOrdersView';
 
 function AppInner() {
-  const { currentView, theme } = React.useContext(AppContext);
+  const { currentView, theme, showLeftPanel, setShowLeftPanel } = React.useContext(AppContext);
 
   React.useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -20,7 +20,21 @@ function AppInner() {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
       <Topbar />
       <div className="main">
-        <PersonaPanel />
+        {showLeftPanel ? (
+          <PersonaPanel />
+        ) : (
+          <div
+            onClick={() => setShowLeftPanel(true)}
+            title="Show left panel: Different personas"
+            style={{
+              width: '18px', flexShrink: 0, background: 'var(--bg2)',
+              borderRight: '1px solid var(--b)', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}
+          >
+            <span style={{ color: 'var(--t3)', fontSize: '10px' }}>▶</span>
+          </div>
+        )}
         <div className="cnt">
           <div className={`view${currentView === 'chat' ? ' on' : ''}`} id="view-chat">
             <ChatView />
