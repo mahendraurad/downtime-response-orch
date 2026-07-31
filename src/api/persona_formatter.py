@@ -16,6 +16,7 @@ of formatted fields tailored to that persona's concerns and vocabulary.
 from __future__ import annotations
 
 from typing import Any, Dict, Optional
+from src.tools.persona_formatter import build_persona_context
 
 # Internal asset IDs → frontend display labels
 _ASSET_DISPLAY = {
@@ -44,7 +45,7 @@ def format_for_persona(state: Dict[str, Any], persona: str) -> Dict[str, Any]:
     Return a persona-tailored summary dict from the pipeline state.
     Keys: greeting, headline, details (list), actions (list), tags (list)
     """
-    persona = "executive" if persona == "md" else persona
+    persona = build_persona_context(persona).id
     trusted   = state.get("trusted_signal")
     anomaly   = state.get("anomaly_event")
     diagnosis = state.get("fault_diagnosis")
@@ -279,12 +280,9 @@ def _fmt_maintenance(*, asset_id, fault_mode, iso_stage, risk_level, rul_min,
 
 def _fmt_manager(*, asset_id, fault_mode, iso_stage, risk_level, rul_min,
                  rul_max, fp, exposure, total_ms, **_) -> Dict:
-    planned_cost = 18_000 if iso_stage >= 3 else 2_000
-    net_avoidance = max(0.0, exposure - planned_cost)
     headline = (
         f"Line asset {asset_id} — {risk_level.upper()} risk. "
-        f"Financial exposure ${exposure:,.0f}. "
-        f"Planned action ${planned_cost:,} → net avoidance ${net_avoidance:,.0f}."
+        "Cost-benefit evaluation is pending approved cost inputs."
     ) if fault_mode != "—" else f"{asset_id} — No production risk. Asset operating normally."
     return {
         "persona": "manager",
@@ -292,45 +290,42 @@ def _fmt_manager(*, asset_id, fault_mode, iso_stage, risk_level, rul_min,
         "details": [
             f"Risk level: {risk_level.upper()} · Failure probability: {fp:.0%}",
             f"RUL window: {rul_min}–{rul_max} days",
-            f"Unplanned failure cost: ${exposure:,.0f}",
-            f"Planned intervention cost: ${planned_cost:,}",
-            f"Net avoidance: ${net_avoidance:,.0f} · ROI: {net_avoidance/max(planned_cost,1):.0f}×",
+            "Cost if deferred: unavailable — authoritative cost input pending",
+            "Planned intervention cost: unavailable — authoritative cost input pending",
+            "ROI and authority check: not evaluated",
         ],
         "actions": [
             f"Approve WO for {asset_id} today (before RUL window expires)",
             "Confirm production plan adjustment for maintenance window",
             "Review contingency if repair overruns",
         ],
-        "tags": [f"${net_avoidance/1000:.0f}K avoidance", f"ROI {net_avoidance/max(planned_cost,1):.0f}×",
-                 f"RUL {rul_min}–{rul_max}d"],
+        "tags": ["Cost data pending", f"RUL {rul_min}–{rul_max}d"],
         "pipeline_ms": total_ms,
     }
 
 
 def _fmt_executive(*, asset_id, fault_mode, risk_level, fp, exposure,
                    health_idx, total_ms, **_) -> Dict:
-    planned_cost = 18_000
-    roi = round((exposure - planned_cost) / max(planned_cost, 1))
     headline = (
-        f"Portfolio alert: {asset_id} contributing ${exposure:,.0f} risk exposure. "
-        f"Planned action ROI {roi}×. Approve to capture avoidance."
+        f"Portfolio alert: {asset_id} requires review. "
+        "Financial return is pending approved cost inputs."
     ) if fault_mode != "—" else f"{asset_id} — Healthy. No leadership action required."
     return {
         "persona": "executive",
         "headline": headline,
         "details": [
             f"Risk level: {risk_level.upper()} · Failure probability: {fp:.0%}",
-            f"Financial exposure: ${exposure:,.0f}",
-            f"Planned action cost: ${planned_cost:,}",
-            f"Net avoidance: ${max(0, exposure-planned_cost):,.0f} · ROI: {roi}×",
+            "Financial exposure: unavailable — authoritative cost input pending",
+            "Planned action cost: unavailable — authoritative cost input pending",
+            "ROI and authority check: not evaluated",
             f"Asset health index: {health_idx:.2f}",
         ],
         "actions": [
-            f"Approve WO for {asset_id} — {roi}× ROI",
+            f"Review operational recommendation for {asset_id}",
             "Review DRO YTD avoidance dashboard",
             "Add to board briefing if exposure > $500K",
         ],
-        "tags": [f"ROI {roi}×", f"${exposure/1000:.0f}K exposure", f"Health {health_idx:.2f}"],
+        "tags": ["Cost data pending", f"Health {health_idx:.2f}"],
         "pipeline_ms": total_ms,
     }
 

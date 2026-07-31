@@ -71,7 +71,8 @@ class FailureIntelligenceAgent:
     # ------------------------------------------------------------------
 
     def process(self, anomaly: AnomalyEvent,
-                trusted: TrustedBearingSignal) -> FaultDiagnosis:
+                trusted: TrustedBearingSignal,
+                persona_context=None) -> FaultDiagnosis:
         """Classify one anomaly into a FaultDiagnosis. Never raises."""
         # ************** Added by Prateek Mittal on 20th July 2026 ******************
         # Direct callers receive the same protection as the orchestrator. Invalid

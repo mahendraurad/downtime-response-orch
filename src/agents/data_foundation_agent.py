@@ -109,7 +109,7 @@ class DataFoundationAgent:
     # Public interface
     # ------------------------------------------------------------------
 
-    def process(self, raw: Dict[str, Any]) -> TrustedBearingSignal:
+    def process(self, raw: Dict[str, Any], persona_context=None) -> TrustedBearingSignal:
         """
         Process one raw telemetry record. Never raises — all errors are
         captured in the returned TrustedBearingSignal.
