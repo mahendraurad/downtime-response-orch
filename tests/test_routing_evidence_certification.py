@@ -120,10 +120,11 @@ def test_mismatched_asset_evidence_is_rejected_at_foundation(client):
     assert "identity does not match" in m104["reason"]
 
 
-def test_concept_definition_uses_controlled_non_asset_evidence_only(client):
+def test_concept_definition_uses_cited_non_asset_evidence_only(client):
     data=client.post("/api/chat",json={"message":"What is RUL?"}).json()
-    assert data["intent"]=="concept" and data["source_type"]=="controlled_glossary"
-    assert data["pipeline_log"]==[] and data["sources"]==[]
+    assert data["intent"]=="concept" and data["source_type"]=="approved_rag"
+    assert data["pipeline_log"][0]["node"]=="knowledge_rag"
+    assert data["sources"]==["knowledge_rag"] and data["citations"]
 
 
 def test_monitoring_source_uses_canonical_motor_current_field():

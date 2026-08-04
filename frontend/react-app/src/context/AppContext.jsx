@@ -5,6 +5,7 @@ import { getNotifCounts } from '../api/pipeline';
 import { fetchDashboardAssets } from '../api/dashboard';
 import { fetchWorkOrders } from '../api/workOrders';
 import { useAuth } from './AuthContext';
+import { activeEscalationStep, remainingSeconds } from '../utils/escalationTimer';
 
 export const AppContext = createContext(null);
 
@@ -99,6 +100,64 @@ export function AppProvider({ children }) {
 
   // Per-persona message store, backed by sessionStorage so history survives persona switches
   const [messagesMap, setMessagesMap] = useState(loadSession);
+
+  // A4 escalation worker scans every persona inbox, not only the card currently
+  // visible on screen. Expired approvals therefore transfer after persona
+  // switches and immediately after a session is restored.
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      setMessagesMap(previous => {
+        const nowMs = Date.now();
+        let changed = false;
+        const transfers = [];
+        const updated = {};
+
+        Object.entries(previous).forEach(([personaId, rows]) => {
+          updated[personaId] = rows.map(message => {
+            if (message.type !== 'hitl_executor' || message.resolved || message.escalationTriggered) {
+              return message;
+            }
+            const stageIndex = Number(message.escalationStageIndex || 0);
+            const escalation = message.rec?.decision_support?.approval_escalation;
+            const step = activeEscalationStep(escalation, stageIndex);
+            if (!step || remainingSeconds(step.escalates_at_utc, nowMs) !== 0) {
+              return message;
+            }
+            changed = true;
+            const transferId = `${message.id}-escalation-${stageIndex + 1}`;
+            transfers.push({
+              target: step.to_persona_id,
+              message: {
+                id: transferId,
+                type: 'hitl_executor',
+                rec: message.rec,
+                escalationStageIndex: stageIndex + 1,
+                escalatedFrom: step.from_persona_name,
+                time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              },
+            });
+            return {
+              ...message,
+              resolved: true,
+              escalationTriggered: true,
+              escalatedTo: step.to_persona_name,
+            };
+          });
+        });
+
+        transfers.forEach(({ target, message }) => {
+          const rows = updated[target] || [];
+          if (!rows.some(existing => existing.id === message.id)) {
+            updated[target] = [...rows, message].slice(-MAX_MSGS_PER_PERSONA);
+          }
+        });
+        if (!changed) return previous;
+        saveSession(updated);
+        return updated;
+      });
+    }, 1000);
+    return () => window.clearInterval(interval);
+  }, []);
 
   const messages = messagesMap[persona] || [];
 

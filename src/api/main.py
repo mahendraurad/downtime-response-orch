@@ -77,6 +77,7 @@ from src.tools.orchestrator_audit import write_audit
 from src.tools.llm_client import LLMClient
 from src.tools.hitl_repository import build_hitl_repository
 from src.tools.persona_formatter import build_persona_context
+from src.tools.governed_rag import GovernedKnowledgeRAG
 
 app = FastAPI(title="DRO API", version="1.0.0")
 
@@ -89,16 +90,6 @@ _REFLEXION = ReflexionAgent(
     max_iterations=_ORCH_CONFIG["reflection"].get("max_refinement_iterations", 3),
 )
 _CHAT_LLM = LLMClient()   # reads AZURE_AI_* env vars; silently skipped if not configured
-
-_CHAT_LLM_SYSTEM = (
-    "You are a rotating-equipment reliability engineer assisting a plant maintenance team. "
-    "Answer general reliability and maintenance questions concisely using ISO/IEE standards and best practices. "
-    "If the question requires specific asset telemetry, real-time sensor readings, or on-site measurements "
-    "that you do not have, set requires_telemetry to true so the user can be prompted to provide them. "
-    "Never fabricate specific RUL values, vibration readings, temperatures, or asset-specific recommendations. "
-    "Return JSON with exactly these two keys: "
-    "{\"answer\": \"<your answer as plain text>\", \"requires_telemetry\": true|false}"
-)
 
 _INTENT_CLASSIFIER_SYSTEM = (
     "You are an intent classifier for an industrial reliability maintenance chat. "
@@ -230,16 +221,6 @@ def _learning_history_draft(persona: str, limit: int = 3):
         "agent_outputs": {"learned_cases": cases}}, cases)
 
 
-_CONCEPTS = {
-    "rul": "Remaining Useful Life (RUL) is the estimated time or operating usage before an asset reaches a defined failure or maintenance threshold. An asset-specific RUL requires current telemetry, operating context, and a validated model.",
-    "signals": "Vibration helps reveal mechanical impacts, imbalance, looseness, and bearing-frequency patterns; temperature helps reveal friction, lubrication, and load-related heating. Their trends must be compared with an asset-specific baseline before a decision is made.",
-    "anomaly": "An anomaly is a statistically meaningful departure from an asset's expected behavior under a comparable operating regime. It is evidence for investigation, not by itself a confirmed fault.",
-    "bpfo": "BPFO is the ball-pass frequency of the outer race. Elevated energy around BPFO and its harmonics can support an outer-race fault diagnosis when operating speed, bearing geometry, and other evidence agree.",
-    "bpfi": "BPFI is the ball-pass frequency of the inner race. Elevated energy around BPFI and its sidebands can support an inner-race fault diagnosis when corroborated by other evidence.",
-    "bpfi_bpfo": "BPFO relates to rolling elements passing a defect on the stationary outer race; BPFI relates to a defect on the rotating inner race. Their frequencies and sideband patterns differ, and either diagnosis still requires corroborating vibration evidence and bearing geometry.",
-    "condition_monitoring": "Condition monitoring compares machine signals and trends with expected behavior so deterioration can be detected and acted on before functional failure.",
-}
-
 _MULTI_ASSET_SCENARIOS = {
     "M-104": ("AST_MTR_001", "outer_race_fault"),
     "P-207": ("AST_PMP_001", "lubrication_issue"),
@@ -254,19 +235,71 @@ _PERSONAS = {"supervisor", "engineer", "maintenance", "manager",
              "executive", "md", "ot", "safety"}
 
 
-def _concept_draft(message: str, persona: str):
-    text = message.lower()
-    if "rul" in text or "remaining useful life" in text: key="rul"
-    elif "bpfo" in text and "bpfi" in text: key="bpfi_bpfo"
-    elif "bpfo" in text: key="bpfo"
-    elif "bpfi" in text: key="bpfi"
-    elif "anomaly" in text: key="anomaly"
-    elif "condition monitoring" in text: key="condition_monitoring"
-    else: key="signals"
-    answer = _CONCEPTS[key]
-    return {"persona": persona, "response": answer, "details": [], "actions": [],
-        "call_plan": [], "needs_context": False, "clarification_required": False,
-        "source_type": "controlled_glossary"}
+_GENERAL_RAG = None
+
+
+def _general_rag_service():
+    """Lazy and patchable so startup and tests do not require cloud retrieval."""
+    global _GENERAL_RAG
+    if _GENERAL_RAG is None:
+        _GENERAL_RAG = GovernedKnowledgeRAG()
+    return _GENERAL_RAG
+
+
+def _general_knowledge_draft(message: str, persona: str):
+    started = time.perf_counter()
+    result = _general_rag_service().answer(message, llm_client=_CHAT_LLM)
+    elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
+    source_type = {
+        "grounded": "approved_rag",
+        "no_match": "rag_no_match",
+        "retrieval_failed": "rag_error",
+        "blocked": "rag_blocked",
+    }.get(result.status, "rag_error")
+    result_dict = result.to_dict()
+    draft = {
+        "persona": persona,
+        "response": result.answer,
+        "details": [],
+        "actions": [],
+        "call_plan": ["knowledge_rag"],
+        "needs_context": False,
+        "clarification_required": False,
+        "source_type": source_type,
+        "citations": [item.model_dump() for item in result.citations],
+        "rag": {
+            "status": result.status,
+            "status_reason": result.status_reason,
+            "retrieval_query": result.retrieval_query,
+            "retrieval_hit_count": result.retrieval_hit_count,
+            "index_version": result.index_version,
+            "llm_used": result.llm_used,
+        },
+        "agent_outputs": {"knowledge_rag": result_dict},
+    }
+    state = {"pipeline_log": [{
+        "node": "knowledge_rag",
+        "status": result.status,
+        "latency_ms": elapsed_ms,
+        "retrieval_hit_count": result.retrieval_hit_count,
+    }]}
+    return draft, state
+
+
+def _is_general_knowledge_request(message: str, plan, classified: str,
+                                  signal, supplied_asset: str,
+                                  requested_assets: list) -> bool:
+    if signal is not None or supplied_asset or requested_assets:
+        return False
+    if plan.intent in {"concept", "general"}:
+        return True
+    if classified != "general" or plan.intent in {"fleet", "learning_history"}:
+        return False
+    text = str(message).lower()
+    return any(marker in text for marker in (
+        "what is", "what does", "define", "explain", "how does",
+        "meaning of", "common causes", "best practices",
+    ))
 
 
 def _clarification_draft(persona: str, intent: str, missing: list[str],
@@ -1891,8 +1924,10 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
         draft,state=_multi_asset_plan(requested_assets,context["fleet_snapshot"],
                                       req.persona,run_id)
         plan_intent="multi_asset_plan"
-    elif plan.intent == "concept":
-        draft=_concept_draft(effective_message,req.persona)
+    elif _is_general_knowledge_request(
+            effective_message, plan, _classified, signal,
+            supplied_asset or "", requested_assets):
+        draft,state=_general_knowledge_draft(effective_message,req.persona)
         plan_intent=plan.intent
     elif plan.intent == "fleet":
         missing=[]
@@ -1979,48 +2014,9 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
                 _hitl_fields = _build_hitl_gates(state, run_id, req.persona, plan.pipeline_intent)
         plan_intent=plan.intent
     else:
-        llm_draft = None
-        if _CHAT_LLM.is_configured():
-            try:
-                # Asset named in message but not registered — tell the LLM so it
-                # can explain the situation without needing telemetry.
-                _unregistered = bool(supplied_asset and supplied_asset not in load_asset_master())
-                if _unregistered:
-                    user_prompt_for_llm = (
-                        f"{req.message}\n\n"
-                        f"System note: {supplied_asset} is not found in the registered asset database. "
-                        "Acknowledge this clearly and advise the user to verify the asset ID or register "
-                        "the asset with its bearing and channel mappings before any analysis can be run. "
-                        "Do not fabricate sensor readings or maintenance history for this asset."
-                    )
-                else:
-                    user_prompt_for_llm = req.message
-                llm_resp = _CHAT_LLM.complete_json(
-                    system_prompt=_CHAT_LLM_SYSTEM,
-                    user_prompt=user_prompt_for_llm,
-                    temperature=0.3,
-                    max_tokens=400,
-                )
-                # For unregistered assets skip the requires_telemetry gate —
-                # the answer is about system state, not field measurements.
-                if (llm_resp
-                        and isinstance(llm_resp.get("answer"), str)
-                        and llm_resp["answer"].strip()
-                        and (_unregistered or not llm_resp.get("requires_telemetry"))):
-                    llm_draft = {"persona": req.persona,
-                                 "response": llm_resp["answer"].strip(),
-                                 "call_plan": list(plan.agents),
-                                 "needs_context": False,
-                                 "clarification_required": False,
-                                 "source_type": "llm_asset_lookup" if _unregistered else "llm_general_knowledge"}
-            except Exception:
-                pass
-        if llm_draft:
-            draft = llm_draft
-        else:
-            draft=_clarification_draft(req.persona,"general",["objective","timeframe"],
-                ["What decision or explanation do you need?","What timeframe or operational scope applies?"],
-                "This question is broad. Please clarify the objective and scope before I answer.")
+        draft=_clarification_draft(req.persona,"general",["objective","timeframe"],
+            ["What decision or explanation do you need?","What timeframe or operational scope applies?"],
+            "This question is broad or requires operational evidence. Please clarify the objective and scope before I answer.")
         plan_intent=plan.intent
     reflected=_REFLEXION.process(draft,state,plan)
     if draft.get("clarification_required"):
@@ -2036,7 +2032,7 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
                           "pending":bool(context.get("_pending_message"))}}
     if _hitl_fields:
         result.update(_hitl_fields)
-    try: result["audit"]=write_audit(_AUDIT_PATH,event="chat",run_id=run_id,status="ok",intent=plan.intent,agents=plan.agents)
+    try: result["audit"]=write_audit(_AUDIT_PATH,event="chat",run_id=run_id,status="ok",intent=plan.intent,agents=draft.get("call_plan",plan.agents))
     except Exception: result["audit"]={"status":"audit_write_failed"}
     return result
 

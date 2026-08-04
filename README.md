@@ -13,8 +13,9 @@ The repository is ready for frontend integration in deterministic local mode. Az
 | Persona-aware pipeline and chat APIs | Implemented |
 | Human approval and HITL gates | Implemented |
 | Reflexion and graceful error envelopes | Implemented |
+| Governed cited open-ended RAG | Implemented locally; Azure adapter ready |
 | Local persistence and mock connectors | Implemented |
-| Automated backend tests | `739 passed` |
+| Automated backend tests | `818 passed` |
 | React frontend from `feature/8agents_frontend` | Integrated on `dev` |
 | Real CMMS/ERP/historian and Azure services | Next phase |
 
@@ -253,6 +254,8 @@ Expected controlled values include:
 - Learning requires completed execution and matching technician feedback.
 - Defined validation/not-found errors return HTTP 4xx responses.
 - Unexpected errors return a sanitized `INTERNAL_ERROR` envelope with a correlation `error_id`; raw exception details are not returned.
+- Approved conceptual questions return `source_type=approved_rag`, inline citation markers, a structured `citations` list, and a `knowledge_rag` pipeline-log entry.
+- General RAG never supplies asset-specific diagnosis, RUL, risk, cost, or action claims without validated telemetry. Missing, denied, timed-out, or irrelevant retrieval returns an explicit uncited-answer refusal.
 
 ## Testing
 
@@ -270,7 +273,7 @@ python -m pytest tests/test_agent1_to_agent8_integration.py -q
 Current certification:
 
 ```text
-782 passed
+818 passed
 0 failed
 ```
 
@@ -333,13 +336,14 @@ Cloud credentials are never required for deterministic local execution. LLM outp
 1. Configure and validate Azure PostgreSQL for HITL and LangGraph checkpoints.
 2. Replace demo economics and mock historian/CMMS/inventory/notification APIs
    with governed production adapters.
-3. Add A4's frontend escalation countdown after the backend escalation event
-   contract is approved.
+3. Move approval escalation from the completed session-level UI worker to a
+   durable backend scheduler when production multi-user delivery is required.
 4. Add frontend component/E2E tests and CI; backend/API certification already
    runs under pytest.
 5. Bind calibrated LangSmith LLM-as-judge and online evaluators to the uploaded
    `DRO Chat QC 50` dataset and production chat traces.
-6. Complete governed cited general-knowledge RAG and production audit retention.
+6. Validate the governed open-ended RAG against the deployed Azure AI Search
+   index and finalize production audit retention.
 7. Run a shadow pilot against at least three historical or live bearing events.
 
 Detailed historical implementation notes are indexed in [`Reference/README.md`](Reference/README.md).

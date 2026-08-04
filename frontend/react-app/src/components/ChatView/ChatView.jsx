@@ -3,6 +3,10 @@ import { AppContext } from '../../context/AppContext';
 import { PD } from '../../data/personas';
 import { FLEET_TOTAL } from '../../data/assets';
 import { ts } from '../../utils/helpers';
+import {
+  activeEscalationStep, formatCountdown, formatEscalationTime,
+  remainingSeconds,
+} from '../../utils/escalationTimer';
 
 // ── Cross-asset correlation helpers ──────────────────────────────────────────
 
@@ -1086,10 +1090,32 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
   const { refreshNotifCounts, pushNotification, patchMessage } = useContext(AppContext);
   const rec = msg.rec;
   const decisionSupport = rec.decision_support || {};
+  const escalation = decisionSupport.approval_escalation || {};
+  const escalationStageIndex = Number(msg.escalationStageIndex || 0);
+  const escalationStep = activeEscalationStep(escalation, escalationStageIndex);
+  const [escalationRemaining, setEscalationRemaining] = useState(() =>
+    escalationStep ? remainingSeconds(escalationStep.escalates_at_utc) : null
+  );
   const alternative = (rec.ranked_alternatives || [])[1];
   const action = rec.recommended_action;
   const urgencyColor = { immediate: '#ef4444', urgent: '#f97316', planned: '#3b82f6', monitor: '#6b7280' }[rec.urgency] || '#6b7280';
   const canConfirmReject = Boolean(rejectCode) && (rejectCode !== 'other' || Boolean(rejectReason.trim()));
+  const currentApproverName = escalationStep?.from_persona_name
+    || escalation.current_persona_name
+    || rec.responsible_approver
+    || 'Configured approver';
+  const isFinalAuthority = escalation.status === 'final_authority'
+    || (escalation.status === 'active' && !escalationStep && escalation.steps?.length > 0);
+
+  useEffect(() => {
+    if (!escalationStep || resolved || msg.escalationTriggered) return undefined;
+    const updateCountdown = () => {
+      setEscalationRemaining(remainingSeconds(escalationStep.escalates_at_utc));
+    };
+    updateCountdown();
+    const interval = window.setInterval(updateCountdown, 1000);
+    return () => window.clearInterval(interval);
+  }, [escalationStep?.escalates_at_utc, resolved, msg.escalationTriggered]);
 
   async function resolve(approved, reason) {
     setResolved(true);
@@ -1174,7 +1200,7 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
             {/* Header */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
               <span style={{ fontSize: '9px', fontWeight: 700, color: '#10b981', fontFamily: 'var(--m)' }}>HITL · EXECUTOR AGENT · Execution Approval</span>
-              <span style={{ fontSize: '9px', fontWeight: 600, color: '#64748b', marginLeft: 'auto' }}>FOR: Plant Supervisor</span>
+              <span style={{ fontSize: '9px', fontWeight: 600, color: '#64748b', marginLeft: 'auto' }}>FOR: {currentApproverName}</span>
             </div>
             <strong style={{ color: 'var(--t)' }}>Maintenance recommendation awaiting approval before execution</strong>
 
@@ -1197,6 +1223,29 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
             <div style={{ fontSize: '11px', color: 'var(--t2)', background: 'rgba(16,185,129,0.06)', padding: '9px 11px', borderRadius: '6px', borderLeft: '2px solid #10b981', marginBottom: '12px', lineHeight: '1.6' }}>
               {rec.rationale}
             </div>
+
+            {/* A4 — backend-scheduled approval escalation */}
+            {escalationStep && (
+              <div style={{ marginBottom: '10px', padding: '9px 11px', borderRadius: '7px', border: '1px solid rgba(249,115,22,.32)', background: 'rgba(249,115,22,.06)', display: 'flex', gap: '12px', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div>
+                  <div style={{ fontSize: '9px', color: '#f97316', fontFamily: 'var(--m)', fontWeight: 700, letterSpacing: '.7px', marginBottom: '3px' }}>AUTO-ESCALATION</div>
+                  <div style={{ fontSize: '10.5px', color: 'var(--t2)' }}>
+                    If unanswered, escalates to <strong>{escalationStep.to_persona_name}</strong>
+                  </div>
+                  <div style={{ fontSize: '9.5px', color: 'var(--t3)', marginTop: '2px' }}>
+                    Exact time: {formatEscalationTime(escalationStep.escalates_at_utc)}
+                  </div>
+                </div>
+                <div aria-label="approval escalation countdown" style={{ color: '#f97316', fontFamily: 'var(--m)', fontSize: '16px', fontWeight: 700, flexShrink: 0 }}>
+                  {formatCountdown(escalationRemaining)}
+                </div>
+              </div>
+            )}
+            {isFinalAuthority && !resolved && (
+              <div style={{ marginBottom: '10px', padding: '8px 11px', borderRadius: '7px', border: '1px solid rgba(100,116,139,.25)', color: 'var(--t3)', fontSize: '10.5px' }}>
+                Final approval authority — no further automatic escalation.
+              </div>
+            )}
 
             {/* A3 — Decision Support block (only when enriched fields are actually present) */}
             {!!(decisionSupport.cost_data_status !== 'unavailable' || decisionSupport.historical_cases?.length > 0 || (decisionSupport.parts_vs_rul && decisionSupport.parts_vs_rul.status !== 'not_required') || decisionSupport.authority_check !== 'not_evaluated') && (
@@ -1319,6 +1368,10 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
                   </div>
                 )}
               </>
+            ) : msg.escalationTriggered ? (
+              <div style={{ fontSize: '11px', color: '#f97316', fontWeight: 700 }}>
+                Escalated automatically to {msg.escalatedTo || escalationStep?.to_persona_name}
+              </div>
             ) : (
               <div style={{ fontSize: '11px', color: '#22c55e', fontWeight: 700 }}>✓ Processing…</div>
             )}

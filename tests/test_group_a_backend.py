@@ -41,14 +41,14 @@ def upstream(tmp_path):
     return trusted, diagnosis, risk, guidance
 
 
-def _recommend(upstream, **kwargs):
+def _recommend(upstream, persona="supervisor", **kwargs):
     trusted, diagnosis, risk, guidance = upstream
     inventory = {
         guidance.bearing_type: {"qty_on_hand": 0, "lead_time_days": 2}
     }
     return PrescriptiveOptimizationAgent(**kwargs).process(
         risk, diagnosis, guidance, inventory, {},
-        persona_context="supervisor", trusted_signal=trusted,
+        persona_context=persona, trusted_signal=trusted,
     )
 
 
@@ -107,6 +107,62 @@ def test_demo_cost_and_supervisor_authority_are_configured(upstream):
     financial = next(x for x in result.consequences if x.type == "financial")
     assert financial.evidence_status == "configured_demo"
     assert "48,000" in financial.value
+
+
+def test_immediate_approval_has_named_exact_escalation_schedule(upstream):
+    now = datetime(2026, 8, 4, 10, 0, tzinfo=timezone.utc)
+    result = _recommend(upstream, now_fn=lambda: now)
+    escalation = result.decision_support.approval_escalation
+    assert result.generated_at_utc == now.isoformat()
+    assert result.urgency == "immediate"
+    assert escalation.status == "active"
+    assert escalation.current_persona_name == "Plant Supervisor — James Kowalski"
+    assert [step.to_persona_id for step in escalation.steps] == [
+        "manager", "executive",
+    ]
+    assert escalation.steps[0].to_persona_name == "Plant Manager — Sarah Chen"
+    assert escalation.steps[0].timeout_seconds == 900
+    assert escalation.steps[0].escalates_at_utc == (
+        now + timedelta(minutes=15)
+    ).isoformat()
+    assert escalation.steps[1].to_persona_name == "VP Operations — Michael Osei"
+    assert escalation.steps[1].escalates_at_utc == (
+        now + timedelta(minutes=30)
+    ).isoformat()
+
+
+def test_manager_approval_starts_at_manager_and_escalates_only_to_vp(upstream):
+    result = _recommend(upstream, persona="manager")
+    escalation = result.decision_support.approval_escalation
+    assert escalation.current_persona_id == "manager"
+    assert len(escalation.steps) == 1
+    assert escalation.steps[0].from_persona_id == "manager"
+    assert escalation.steps[0].to_persona_id == "executive"
+
+
+def test_executive_is_final_approval_authority(upstream):
+    result = _recommend(upstream, persona="executive")
+    escalation = result.decision_support.approval_escalation
+    assert escalation.status == "final_authority"
+    assert escalation.current_persona_name == "VP Operations — Michael Osei"
+    assert escalation.steps == []
+
+
+def test_non_approver_enters_approval_chain_at_supervisor(upstream):
+    result = _recommend(upstream, persona="engineer")
+    escalation = result.decision_support.approval_escalation
+    assert escalation.current_persona_id == "supervisor"
+    assert escalation.steps[0].from_persona_id == "supervisor"
+
+
+def test_disabled_escalation_policy_emits_no_schedule(upstream):
+    from src.tools.decision_support_config import load_decision_support_config
+
+    config = load_decision_support_config()
+    config["approval_escalation"]["enabled"] = False
+    result = _recommend(upstream, decision_support_config=config)
+    assert result.decision_support.approval_escalation.status == "not_required"
+    assert result.decision_support.approval_escalation.steps == []
 
 
 @pytest.mark.parametrize("persona,limit", [

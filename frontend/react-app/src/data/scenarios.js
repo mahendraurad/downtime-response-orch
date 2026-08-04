@@ -62,6 +62,4 @@ export const SAMPLE_REC = {
   ],
   approver_authority: { threshold_usd: 100000, within_authority: true, persona_role: 'Plant Supervisor' },
   alternative_action: { label: 'Monitor and reassess in 48h', trade_off: 'Saves planned stop but accumulates $360k additional risk per day at current degradation rate' },
-  // Escalation timer (A4)
-  escalation_timer: { escalates_to: 'Plant Manager', escalates_at: '18:00 today' },
 };

@@ -85,8 +85,13 @@ def _chunk_text(text: str, source: str, chunk_size: int = 600,
         end = start + chunk_size
         snippet = text[start:end].strip()
         if snippet:
+            chunk_id = hashlib.sha256(
+                f"{source}:{start}:{snippet}".encode("utf-8")
+            ).hexdigest()[:16]
             chunks.append({
                 "source":     source,
+                "chunk_id":   chunk_id,
+                "source_uri": f"data/sops/{source}",
                 "fault_mode": meta.get("fault_mode", ""),
                 "asset_type": meta.get("asset_type", ""),
                 "iso_stage":  meta.get("iso_stage", 0),
@@ -98,7 +103,16 @@ def _chunk_text(text: str, source: str, chunk_size: int = 600,
 
 def _load_txt(path: str, source: str, meta: Dict) -> List[Dict]:
     with open(path, encoding="utf-8", errors="replace") as fh:
-        return _chunk_text(fh.read(), source, meta=meta)
+        text = fh.read()
+    # Text knowledge articles are normally authored as short, self-contained
+    # paragraphs. Preserve those semantic boundaries so citations never begin
+    # or end in the middle of a definition.
+    paragraphs = [part.strip() for part in re.split(r"\n\s*\n", text)
+                  if part.strip()]
+    chunks: List[Dict] = []
+    for paragraph in paragraphs:
+        chunks.extend(_chunk_text(paragraph, source, meta=meta))
+    return chunks
 
 
 def _load_pdf(path: str, source: str, meta: Dict) -> List[Dict]:
@@ -268,8 +282,15 @@ def retrieve(query: str, top_k: int = 3,
         if float(scores[idx]) < minimum_score:
             break
         chunk = _chunks[int(idx)]
+        chunk_id = str(chunk.get("chunk_id", "") or "")
+        if not chunk_id:
+            chunk_id = hashlib.sha256(
+                f"{chunk.get('source', '')}:{chunk.get('text', '')}".encode("utf-8")
+            ).hexdigest()[:16]
         results.append({
             "source": chunk["source"],
+            "chunk_id": chunk_id,
+            "source_uri": str(chunk.get("source_uri", "") or ""),
             "text":   chunk["text"],
             "score":  round(float(scores[idx]), 4),
             "fault_mode": chunk.get("fault_mode", ""),

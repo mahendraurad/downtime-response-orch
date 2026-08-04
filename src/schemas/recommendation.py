@@ -68,6 +68,23 @@ class PartsRULComparison(BaseModel):
     explanation: str = ""
 
 
+class ApprovalEscalationStep(BaseModel):
+    sequence: int
+    from_persona_id: str
+    from_persona_name: str
+    to_persona_id: str
+    to_persona_name: str
+    timeout_seconds: int
+    escalates_at_utc: str
+
+
+class ApprovalEscalation(BaseModel):
+    status: str = "not_required"  # active | final_authority | not_required
+    current_persona_id: str = ""
+    current_persona_name: str = ""
+    steps: List[ApprovalEscalationStep] = Field(default_factory=list)
+
+
 class DecisionSupport(BaseModel):
     cost_if_approved: Optional[float] = None
     cost_if_deferred: Optional[float] = None
@@ -82,6 +99,9 @@ class DecisionSupport(BaseModel):
     authority_reason: str = "persona authority and approved cost inputs are pending"
     authority_limit: Optional[float] = None
     decision_support_config_version: str = ""
+    approval_escalation: ApprovalEscalation = Field(
+        default_factory=ApprovalEscalation
+    )
 
 
 class RecommendedAction(BaseModel):
