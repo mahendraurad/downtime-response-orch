@@ -145,7 +145,7 @@ def _sources_monitoring(trusted) -> str:
             channels.append("vibration")
         if getattr(raw, "temp_c", None) is not None:
             channels.append("temperature")
-        if getattr(raw, "current_a", None) is not None:
+        if getattr(raw, "motor_current_a", None) is not None:
             channels.append("current")
     except AttributeError:
         pass
@@ -191,7 +191,28 @@ def _sources_knowledge(guidance) -> str:
             return f"{hit} sections matched"
     except AttributeError:
         pass
-    return "SOP library · expert KB"
+    return "retrieval returned no cited source"
+
+
+def _sources_prescriptive(state, recommendation) -> str:
+    sources = []
+    support = getattr(recommendation, "decision_support", None)
+    if support and support.cost_data_status == "configured_demo":
+        sources.append("configured demo cost model")
+    if state.get("inventory_lookup"):
+        sources.append("supplied inventory lookup")
+    if (state.get("context_lookup") or {}).get("planned_stop_windows"):
+        sources.append("supplied maintenance windows")
+    return " · ".join(sources) or "configured prescriptive rules"
+
+
+def _sources_executor(result) -> str:
+    sources = ["mock CMMS"] if result.work_order_id else []
+    if result.parts_status:
+        sources.append("mock parts inventory")
+    if result.notification_status == "sent":
+        sources.append("mock notification service")
+    return " · ".join(sources) or "execution guard only"
 
 
 @traceable(name="Agent 1 - Data Foundation", run_type="chain", tags=["dro", "agent-1"])
@@ -300,7 +321,7 @@ def node_prescriptive(state):
             trusted_signal=state.get("trusted_signal"),
         )
         log.append({"node":"prescriptive","status":"ok","latency_ms":ms,
-                    "data_sources":"cost model · parts inventory · scheduler"})
+                    "data_sources":_sources_prescriptive(state, result)})
         return {**state,"recommendation":result,"pipeline_log":log}
     except Exception as exc:
         log.append({"node":"prescriptive","status":"error","latency_ms":0})
@@ -315,7 +336,7 @@ def node_executor(state):
         persona_context=state.get("persona_context"),
     )
     log.append({"node":"executor","status":result.status,"latency_ms":ms,
-                "data_sources":"CMMS · work order system · parts API"})
+                "data_sources":_sources_executor(result)})
     return {**state,"execution_result":result,"pipeline_log":log}
 
 @traceable(name="Agent 8 - Learning and Memory", run_type="chain", tags=["dro", "agent-8", "llm-optional"])

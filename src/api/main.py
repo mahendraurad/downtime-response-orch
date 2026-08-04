@@ -236,6 +236,7 @@ _CONCEPTS = {
     "anomaly": "An anomaly is a statistically meaningful departure from an asset's expected behavior under a comparable operating regime. It is evidence for investigation, not by itself a confirmed fault.",
     "bpfo": "BPFO is the ball-pass frequency of the outer race. Elevated energy around BPFO and its harmonics can support an outer-race fault diagnosis when operating speed, bearing geometry, and other evidence agree.",
     "bpfi": "BPFI is the ball-pass frequency of the inner race. Elevated energy around BPFI and its sidebands can support an inner-race fault diagnosis when corroborated by other evidence.",
+    "bpfi_bpfo": "BPFO relates to rolling elements passing a defect on the stationary outer race; BPFI relates to a defect on the rotating inner race. Their frequencies and sideband patterns differ, and either diagnosis still requires corroborating vibration evidence and bearing geometry.",
     "condition_monitoring": "Condition monitoring compares machine signals and trends with expected behavior so deterioration can be detected and acted on before functional failure.",
 }
 
@@ -256,6 +257,7 @@ _PERSONAS = {"supervisor", "engineer", "maintenance", "manager",
 def _concept_draft(message: str, persona: str):
     text = message.lower()
     if "rul" in text or "remaining useful life" in text: key="rul"
+    elif "bpfo" in text and "bpfi" in text: key="bpfi_bpfo"
     elif "bpfo" in text: key="bpfo"
     elif "bpfi" in text: key="bpfi"
     elif "anomaly" in text: key="anomaly"
@@ -1750,7 +1752,8 @@ def get_assets():
     """Return all assets from asset_master.json."""
     try:
         assets = load_asset_master()
-        return {"assets": [a.model_dump() if hasattr(a, "model_dump") else a for a in assets]}
+        rows = assets.values() if isinstance(assets, dict) else assets
+        return {"assets": [a.model_dump() if hasattr(a, "model_dump") else a for a in rows]}
     except Exception as exc:
         raise HTTPException(500, str(exc))
 
@@ -1760,7 +1763,8 @@ def get_asset(asset_id: str):
     """Return a single asset by ID."""
     try:
         assets = load_asset_master()
-        for a in assets:
+        rows = assets.values() if isinstance(assets, dict) else assets
+        for a in rows:
             aid = a.asset_id if hasattr(a, "asset_id") else a.get("asset_id", "")
             if aid == asset_id:
                 return a.model_dump() if hasattr(a, "model_dump") else a
@@ -1769,6 +1773,18 @@ def get_asset(asset_id: str):
         raise
     except Exception as exc:
         raise HTTPException(500, str(exc))
+
+
+@app.get("/api/dashboard/assets")
+def dashboard_assets(user: Dict = Depends(get_current_user)):
+    """Return frontend-ready fleet health derived from backend agent evidence."""
+    from src.tools.dashboard_service import build_asset_dashboard
+    return build_asset_dashboard(
+        load_asset_master(), _MULTI_ASSET_SCENARIOS, load_telemetry_rows,
+        lambda signal, intent: run_pipeline(
+            signal, intent=intent, persona="supervisor"
+        ),
+    )
 
 
 # ── Chat endpoint ─────────────────────────────────────────────────────────────

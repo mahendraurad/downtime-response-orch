@@ -71,11 +71,17 @@ class PartsRULComparison(BaseModel):
 class DecisionSupport(BaseModel):
     cost_if_approved: Optional[float] = None
     cost_if_deferred: Optional[float] = None
+    deferred_cost_per_hour: Optional[float] = None
+    cost_breakdown: str = ""
+    cost_basis: str = ""
+    currency: str = "USD"
     cost_data_status: str = "unavailable"
     parts_vs_rul: PartsRULComparison = Field(default_factory=PartsRULComparison)
     historical_cases: List[HistoricalCaseCitation] = Field(default_factory=list)
     authority_check: str = "not_evaluated"
     authority_reason: str = "persona authority and approved cost inputs are pending"
+    authority_limit: Optional[float] = None
+    decision_support_config_version: str = ""
 
 
 class RecommendedAction(BaseModel):

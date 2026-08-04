@@ -180,5 +180,6 @@ def test_frontend_advisory_and_execution_calls_send_persona():
     pipeline=Path("frontend/react-app/src/api/pipeline.js").read_text(encoding="utf-8")
     chat=Path("frontend/react-app/src/components/ChatView/ChatView.jsx").read_text(encoding="utf-8")
     assert "/api/pipeline/hitl/advisory" in pipeline
-    assert "runExecutor(rec, approved, persona)" in chat
+    assert "runExecutor(rec, true, persona)" in chat
+    assert "rejectRecommendation(rec, rejectCode, reason || '', persona)" in chat
     assert "resolveHITLAdvisory(h.run_id, action, persona)" in chat

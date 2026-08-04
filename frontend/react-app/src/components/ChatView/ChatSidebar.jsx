@@ -1,13 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 
 const PIPELINE_NODES = [
-  { key: 'data_foundation',    nm: 'Data Foundation',   src: 'SCADA · Historian · OPC-UA' },
-  { key: 'monitoring',         nm: 'Monitoring',         src: 'Vibration · Temp · Current' },
-  { key: 'failure_intelligence',nm: 'Failure Intel',     src: 'FFT · Bearing DB · Case DB' },
-  { key: 'predictive_risk',    nm: 'Predictive Risk',    src: 'RUL Model · Cohort DB' },
-  { key: 'knowledge',          nm: 'Knowledge',          src: 'SOP Library · Expert KB' },
-  { key: 'prescriptive',       nm: 'Prescriptive Opt.',  src: 'Cost Model · Parts · Scheduler' },
-  { key: 'executor',           nm: 'Executor',           src: 'CMMS · Work Orders · Parts API' },
+  { key: 'data_foundation',    nm: 'Data Foundation',   src: 'Telemetry contract' },
+  { key: 'monitoring',         nm: 'Monitoring',         src: 'Validated sensor channels' },
+  { key: 'failure_intelligence',nm: 'Failure Intel',     src: 'Diagnostic evidence' },
+  { key: 'predictive_risk',    nm: 'Predictive Risk',    src: 'Configured RUL model' },
+  { key: 'knowledge',          nm: 'Knowledge',          src: 'Configured retriever' },
+  { key: 'prescriptive',       nm: 'Prescriptive Opt.',  src: 'Configured decision rules' },
+  { key: 'executor',           nm: 'Executor',           src: 'Configured execution adapters' },
 ];
 
 export default function ChatSidebar({ thinking, pipelineLog, onToggle }) {

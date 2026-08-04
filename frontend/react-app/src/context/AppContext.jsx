@@ -1,7 +1,9 @@
-import React, { createContext, useState, useCallback } from 'react';
+import React, { createContext, useState, useCallback, useEffect } from 'react';
 import { ASSETS } from '../data/assets';
 import { WOS } from '../data/workOrders';
 import { getNotifCounts } from '../api/pipeline';
+import { fetchDashboardAssets } from '../api/dashboard';
+import { fetchWorkOrders } from '../api/workOrders';
 import { useAuth } from './AuthContext';
 
 export const AppContext = createContext(null);
@@ -32,14 +34,68 @@ export function AppProvider({ children }) {
   const [persona, setPersona] = useState(defaultPersona);
   const [currentView, setCurrentView] = useState('chat');
   const [agentAsset, setAgentAsset] = useState('M-104');
+  const [assets, setAssets] = useState(ASSETS);
+  const [workOrders, setWorkOrders] = useState(WOS);
   const [selectedAsset, setSelectedAsset] = useState(ASSETS[0]);
   const [selectedWO, setSelectedWO] = useState(WOS[0]);
+  const [dataStatus, setDataStatus] = useState({ assets: 'fallback', workOrders: 'fallback' });
   const [selectedNode, setSelectedNode] = useState(0);
   const [currentAgTab, setCurrentAgTab] = useState('overview');
   const [pipelineRunning, setPipelineRunning] = useState(false);
   const [theme, setThemeState] = useState(() => localStorage.getItem('dro-theme') || 'light');
   const [notifCounts, setNotifCounts] = useState({});
   const [showLeftPanel, setShowLeftPanel] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    const fallbackByAsset = Object.fromEntries(ASSETS.map(a => [a.id, a]));
+    fetchDashboardAssets().then(payload => {
+      if (!active) return;
+      const rows = (payload.assets || []).map(a => {
+        const fallback = fallbackByAsset[a.id] || {};
+        return {
+          ...fallback,
+          id: a.id, asset_id: a.asset_id, nm: a.name, tp: a.type,
+          br: a.bearing_model, kw: a.power_kw, rpm: a.rpm, ln: a.line,
+          st: a.status, rul: a.rul, vib: a.vibration, tmp: a.temperature,
+          bpfo: a.bpfo, iso: `Zone ${a.iso_zone}`, trend: a.trend || [],
+          faults: (a.faults || []).map(f => ({
+            dt: f.date, ty: f.type, st: `${f.stage} ${f.status}`,
+            sc: a.status === 'critical' ? 'var(--rd)' : 'var(--am)',
+          })),
+          backend_source: a.source,
+        };
+      });
+      if (rows.length) {
+        setAssets(rows);
+        setSelectedAsset(current => rows.find(a => a.id === current?.id) || rows[0]);
+        setDataStatus(current => ({ ...current, assets: payload.source || 'backend' }));
+      }
+    }).catch(() => setDataStatus(current => ({ ...current, assets: 'fallback' })));
+
+    const fallbackByWO = Object.fromEntries(WOS.map(wo => [wo.id, wo]));
+    fetchWorkOrders().then(payload => {
+      if (!active) return;
+      const rows = (payload.workorders || []).map(wo => ({
+        ...(fallbackByWO[wo.id] || {}),
+        id: wo.id, pr: wo.priority || 'MEDIUM', st: wo.status || 'Pending',
+        ti: wo.title || wo.description || wo.id, as: wo.asset_id || '',
+        asgn: wo.assigned_to || 'Pending', due: wo.due || 'Not scheduled',
+        by: wo.created_by || 'DRO Agent', tp: wo.type || 'Maintenance',
+        est: wo.est_hours ? `${wo.est_hours}h` : '', parts: wo.parts || '',
+        cl: (wo.checklist || []).map(item => ({
+          ck: Boolean(item.done), tx: item.text, tg: item.tag || 'Task',
+        })),
+        backend_source: 'api/workorders',
+      }));
+      if (rows.length) {
+        setWorkOrders(rows);
+        setSelectedWO(current => rows.find(wo => wo.id === current?.id) || rows[0]);
+        setDataStatus(current => ({ ...current, workOrders: 'backend' }));
+      }
+    }).catch(() => setDataStatus(current => ({ ...current, workOrders: 'fallback' })));
+    return () => { active = false; };
+  }, []);
 
   // Per-persona message store, backed by sessionStorage so history survives persona switches
   const [messagesMap, setMessagesMap] = useState(loadSession);
@@ -95,6 +151,7 @@ export function AppProvider({ children }) {
       persona, setPersona,
       currentView, setCurrentView,
       agentAsset, setAgentAsset,
+      assets, workOrders, dataStatus,
       selectedAsset, setSelectedAsset,
       selectedWO, setSelectedWO,
       selectedNode, setSelectedNode,

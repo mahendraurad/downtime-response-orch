@@ -28,6 +28,8 @@ env/
 # Test / coverage artifacts
 .pytest_cache/
 .pytest-tmp/
+.pytest-*/
+data/rejection_feedback.json
 .coverage
 htmlcov/
 

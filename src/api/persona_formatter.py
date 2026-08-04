@@ -51,6 +51,7 @@ def format_for_persona(state: Dict[str, Any], persona: str) -> Dict[str, Any]:
     diagnosis = state.get("fault_diagnosis")
     risk      = state.get("risk_assessment")
     knowledge = state.get("knowledge_guidance")
+    recommendation = state.get("recommendation")
     log       = state.get("pipeline_log", [])
 
     # Common fields — fall back to raw signal ID for REJECTED signals (no asset_ctx)
@@ -130,6 +131,7 @@ def format_for_persona(state: Dict[str, Any], persona: str) -> Dict[str, Any]:
         sop_docs=sop_docs, steps=steps,
         safety_notes=safety_nts, loto_ref=loto_ref,
         evidence=evidence, total_ms=total_ms, state=state,
+        recommendation=recommendation,
     )
 
 
@@ -279,10 +281,16 @@ def _fmt_maintenance(*, asset_id, fault_mode, iso_stage, risk_level, rul_min,
 
 
 def _fmt_manager(*, asset_id, fault_mode, iso_stage, risk_level, rul_min,
-                 rul_max, fp, exposure, total_ms, **_) -> Dict:
+                 rul_max, fp, exposure, total_ms, recommendation=None, **_) -> Dict:
+    support = getattr(recommendation, "decision_support", None)
+    has_costs = bool(support and support.cost_if_approved is not None
+                     and support.cost_if_deferred is not None)
+    currency = getattr(support, "currency", "USD") if support else "USD"
     headline = (
         f"Line asset {asset_id} — {risk_level.upper()} risk. "
-        "Cost-benefit evaluation is pending approved cost inputs."
+        + (f"Approve {currency} {support.cost_if_approved:,.0f} planned work "
+           f"to avoid {currency} {support.cost_if_deferred:,.0f} deferred exposure."
+           if has_costs else "Cost-benefit evaluation is pending approved cost inputs.")
     ) if fault_mode != "—" else f"{asset_id} — No production risk. Asset operating normally."
     return {
         "persona": "manager",
@@ -290,34 +298,47 @@ def _fmt_manager(*, asset_id, fault_mode, iso_stage, risk_level, rul_min,
         "details": [
             f"Risk level: {risk_level.upper()} · Failure probability: {fp:.0%}",
             f"RUL window: {rul_min}–{rul_max} days",
-            "Cost if deferred: unavailable — authoritative cost input pending",
-            "Planned intervention cost: unavailable — authoritative cost input pending",
-            "ROI and authority check: not evaluated",
+            (f"Cost if deferred: {currency} {support.cost_if_deferred:,.0f}"
+             if has_costs else "Cost if deferred: unavailable — authoritative cost input pending"),
+            (f"Planned intervention cost: {currency} {support.cost_if_approved:,.0f}"
+             if has_costs else "Planned intervention cost: unavailable — authoritative cost input pending"),
+            (f"Authority: {support.authority_reason}"
+             if has_costs else "ROI and authority check: not evaluated"),
         ],
         "actions": [
             f"Approve WO for {asset_id} today (before RUL window expires)",
             "Confirm production plan adjustment for maintenance window",
             "Review contingency if repair overruns",
         ],
-        "tags": ["Cost data pending", f"RUL {rul_min}–{rul_max}d"],
+        "tags": ["Configured demo cost" if has_costs else "Cost data pending",
+                 f"RUL {rul_min}–{rul_max}d"],
         "pipeline_ms": total_ms,
     }
 
 
 def _fmt_executive(*, asset_id, fault_mode, risk_level, fp, exposure,
-                   health_idx, total_ms, **_) -> Dict:
+                   health_idx, total_ms, recommendation=None, **_) -> Dict:
+    support = getattr(recommendation, "decision_support", None)
+    has_costs = bool(support and support.cost_if_approved is not None
+                     and support.cost_if_deferred is not None)
+    currency = getattr(support, "currency", "USD") if support else "USD"
     headline = (
         f"Portfolio alert: {asset_id} requires review. "
-        "Financial return is pending approved cost inputs."
+        + (f"Configured exposure is {currency} {support.cost_if_deferred:,.0f} "
+           f"versus {currency} {support.cost_if_approved:,.0f} planned action."
+           if has_costs else "Financial return is pending approved cost inputs.")
     ) if fault_mode != "—" else f"{asset_id} — Healthy. No leadership action required."
     return {
         "persona": "executive",
         "headline": headline,
         "details": [
             f"Risk level: {risk_level.upper()} · Failure probability: {fp:.0%}",
-            "Financial exposure: unavailable — authoritative cost input pending",
-            "Planned action cost: unavailable — authoritative cost input pending",
-            "ROI and authority check: not evaluated",
+            (f"Financial exposure: {currency} {support.cost_if_deferred:,.0f}"
+             if has_costs else "Financial exposure: unavailable — authoritative cost input pending"),
+            (f"Planned action cost: {currency} {support.cost_if_approved:,.0f}"
+             if has_costs else "Planned action cost: unavailable — authoritative cost input pending"),
+            (f"Authority: {support.authority_reason}"
+             if has_costs else "ROI and authority check: not evaluated"),
             f"Asset health index: {health_idx:.2f}",
         ],
         "actions": [
@@ -325,7 +346,8 @@ def _fmt_executive(*, asset_id, fault_mode, risk_level, fp, exposure,
             "Review DRO YTD avoidance dashboard",
             "Add to board briefing if exposure > $500K",
         ],
-        "tags": ["Cost data pending", f"Health {health_idx:.2f}"],
+        "tags": ["Configured demo cost" if has_costs else "Cost data pending",
+                 f"Health {health_idx:.2f}"],
         "pipeline_ms": total_ms,
     }
 

@@ -76,10 +76,10 @@ function buildCorrelation(newRec, existingRecs) {
     matchPoints.push('Same failure probability: ~91%');
     matchPoints.push('Same shift window: both detected in this session');
 
-    const exp1 = prevRec.cost_if_deferred?.total || 0;
-    const exp2 = newRec.cost_if_deferred?.total || 0;
-    const cost1 = prevRec.cost_if_approved?.amount || 0;
-    const cost2 = newRec.cost_if_approved?.amount || 0;
+    const exp1 = prevRec.decision_support?.cost_if_deferred || 0;
+    const exp2 = newRec.decision_support?.cost_if_deferred || 0;
+    const cost1 = prevRec.decision_support?.cost_if_approved || 0;
+    const cost2 = newRec.decision_support?.cost_if_approved || 0;
 
     return {
       asset1Id: prevRec.asset_id,
@@ -95,7 +95,7 @@ function buildCorrelation(newRec, existingRecs) {
   return null;
 }
 import { askChat } from '../../api/chat';
-import { resolveHITLRemediation, resolveHITLMonitoring, resolveHITLDiagnosis, resolveHITLKnowledge, resolveHITLAdvisory, runExecutor } from '../../api/pipeline';
+import { resolveHITLRemediation, resolveHITLMonitoring, resolveHITLDiagnosis, resolveHITLKnowledge, resolveHITLAdvisory, runExecutor, rejectRecommendation } from '../../api/pipeline';
 import ChatSidebar from './ChatSidebar';
 
 function mkId() { return `m-${Date.now()}-${Math.floor(Math.random() * 1000)}`; }
@@ -1040,47 +1040,12 @@ function CrossAssetCorrelationMsg({ msg }) {
 }
 
 const REJECT_CODES = [
-  { id: 'diagnosis', label: 'Disagree with diagnosis — fault type or severity incorrect' },
-  { id: 'parts', label: 'Parts / timing concern — lead time or window does not work' },
+  { id: 'diagnosis_wrong', label: 'Diagnosis is wrong — fault type or severity is incorrect' },
+  { id: 'parts_concern', label: 'Parts concern — availability or lead time does not work' },
   { id: 'second_opinion', label: 'Need second opinion from Reliability Engineer' },
-  { id: 'window', label: 'Wrong maintenance window — cannot stop line at this time' },
+  { id: 'wrong_window', label: 'Wrong maintenance window — cannot stop the line then' },
   { id: 'other', label: 'Other' },
 ];
-
-function buildExecutionSteps(data, rec) {
-  const ps = data.parts_status || [];
-  const allReserved = ps.length > 0 && ps.every(p => p.status === 'reserved');
-  const hasShortage = ps.some(p => p.status === 'shortage');
-  const partDetail = ps.length > 0
-    ? ps.map(p => `${p.part_number} ×${p.quantity} — ${p.status === 'reserved' ? 'reserved ✓' : p.status === 'shortage' ? 'shortage ⚠' : p.status}`).join(', ')
-    : (rec.required_parts || []).map(p => `${p.part_number} ×${p.quantity}${p.lead_time_days > 0 ? ` · ETA ${p.lead_time_days}d` : ' · in stock'}`).join(', ') || 'parts pending';
-  return [
-    {
-      label: 'Work order created',
-      status: data.work_order_id ? 'done' : 'blocked',
-      detail: data.work_order_id ? `${data.work_order_id} · priority: ${rec.urgency}` : (data.blocked_reason || 'Creation blocked'),
-    },
-    {
-      label: 'Notifications dispatched',
-      status: data.notification_status === 'sent' ? 'done' : 'pending',
-      detail: data.notification_status === 'sent' ? 'Maint. Planner + Reliability Engr. + Shift Supervisor' : 'Pending — sends after work order creation',
-    },
-    {
-      label: 'Parts procurement',
-      status: allReserved ? 'done' : 'pending',
-      detail: partDetail,
-      owner: hasShortage ? 'Maint. Planner' : null,
-    },
-    {
-      label: 'Maintenance window',
-      status: 'blocked',
-      detail: 'No window scheduled — 6h production stop must be confirmed',
-      owner: 'Maint. Planner',
-      deadline: '18:00',
-      escalates_to: 'Plant Manager',
-    },
-  ];
-}
 
 function buildLearningHtml(lr) {
   const statusColors = { learned: '#10b981', duplicate: '#3b82f6', invalid_input: '#ef4444', persistence_failed: '#f59e0b' };
@@ -1116,26 +1081,30 @@ function buildLearningHtml(lr) {
 function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
   const [resolved, setResolved] = useState(() => msg.resolved || false);
   const [showRejectInput, setShowRejectInput] = useState(false);
-  const [rejectCodes, setRejectCodes] = useState(() => new Set());
+  const [rejectCode, setRejectCode] = useState('');
   const [rejectReason, setRejectReason] = useState('');
   const { refreshNotifCounts, pushNotification, patchMessage } = useContext(AppContext);
   const rec = msg.rec;
+  const decisionSupport = rec.decision_support || {};
+  const alternative = (rec.ranked_alternatives || [])[1];
   const action = rec.recommended_action;
   const urgencyColor = { immediate: '#ef4444', urgent: '#f97316', planned: '#3b82f6', monitor: '#6b7280' }[rec.urgency] || '#6b7280';
-  const canConfirmReject = rejectCodes.size > 0 && (!rejectCodes.has('other') || rejectReason.trim());
+  const canConfirmReject = Boolean(rejectCode) && (rejectCode !== 'other' || Boolean(rejectReason.trim()));
 
   async function resolve(approved, reason) {
     setResolved(true);
     patchMessage(msg.id, { resolved: true });
     doThink(async () => {
       try {
-        const data = await runExecutor(rec, approved, persona);
+        const data = approved
+          ? await runExecutor(rec, true, persona)
+          : await rejectRecommendation(rec, rejectCode, reason || '', persona);
         refreshNotifCounts();
 
         let html;
         if (approved) {
-          const steps = buildExecutionSteps(data, rec);
-          const doneCount = steps.filter(s => s.status === 'done').length;
+          const steps = data.execution_steps || [];
+          const doneCount = data.completed_steps ?? steps.filter(s => s.status === 'done').length;
           const STEP_ICON = { done: '✅', pending: '⏳', blocked: '🔴' };
           const STEP_BG = { done: 'rgba(16,185,129,.04)', pending: 'rgba(245,158,11,.04)', blocked: 'rgba(239,68,68,.05)' };
 
@@ -1150,11 +1119,13 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
           steps.forEach(step => {
             html += `<div style="display:flex;gap:8px;padding:7px 9px;border-radius:6px;background:${STEP_BG[step.status]};border:1px solid rgba(255,255,255,.05)">`;
             html += `<span style="font-size:11px;flex-shrink:0;margin-top:1px">${STEP_ICON[step.status]}</span>`;
-            html += `<div style="flex:1"><div style="font-size:11.5px;font-weight:600;color:var(--t)">${step.label}</div>`;
+            html += `<div style="flex:1"><div style="font-size:11.5px;font-weight:600;color:var(--t)">${step.step_name}</div>`;
             html += `<div style="font-size:10.5px;color:var(--t2);margin-top:2px">${step.detail}</div>`;
-            if (step.status === 'blocked' && step.owner) {
-              html += `<div style="font-size:10px;color:#f97316;margin-top:3px">↳ ${step.owner} must confirm`;
-              if (step.escalates_to && step.deadline) html += ` · escalates to <strong>${step.escalates_to}</strong> at ${step.deadline} if not confirmed`;
+            if (step.owner) {
+              html += `<div style="font-size:10px;color:#f97316;margin-top:3px">↳ Owner: ${step.owner}`;
+              if (step.deadline) html += ` · deadline: ${step.deadline}`;
+              if (step.escalates_to) html += ` · escalates to <strong>${step.escalates_to}</strong>`;
+              if (step.escalation_rule) html += ` · ${step.escalation_rule}`;
               html += `</div>`;
             }
             html += `</div></div>`;
@@ -1176,19 +1147,18 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
             }
           });
         } else {
-          const selectedLabels = REJECT_CODES
-            .filter(c => rejectCodes.has(c.id))
-            .map(c => c.id === 'other' && reason ? `Other — ${reason}` : c.label);
-          if (selectedLabels.length === 0) selectedLabels.push('No reason given');
+          const selected = REJECT_CODES.find(code => code.id === rejectCode);
+          const selectedLabel = rejectCode === 'other' && reason ? `Other — ${reason}` : selected?.label;
           html = `<div style="border:1.5px solid #ef4444;border-radius:10px;padding:14px;background:rgba(239,68,68,0.04)">`;
           html += `<div style="font-size:9px;font-weight:700;color:#ef4444;font-family:var(--m);margin-bottom:8px">✗ REJECTED · EXECUTOR RESULT</div>`;
           html += `<div style="font-size:12px;color:var(--t2);margin-bottom:8px">Recommendation rejected — no action taken.</div>`;
-          html += `<div style="font-size:11px;color:var(--t3);padding:6px 10px;background:rgba(239,68,68,.04);border-radius:5px;border-left:2px solid rgba(239,68,68,.3)">`;
-          html += selectedLabels.map((l, i) => `${selectedLabels.length > 1 ? `${i + 1}. ` : ''}<strong style="color:var(--t2)">${l}</strong>`).join('<br/>');
-          html += `</div></div>`;
+          html += `<div style="font-size:11px;color:var(--t3);padding:6px 10px;background:rgba(239,68,68,.04);border-radius:5px;border-left:2px solid rgba(239,68,68,.3)"><strong style="color:var(--t2)">${selectedLabel}</strong></div>`;
+          html += `<div style="font-size:10.5px;color:var(--t2);margin-top:8px">Agent 8 feedback: <strong>${data.status}</strong> · stored: ${data.persistence_status} · consecutive rejections: ${data.consecutive_rejections}</div>`;
+          if (data.reliability_review_required) html += `<div style="font-size:11px;color:#f97316;margin-top:6px;font-weight:700">Reliability Engineer review required — ${data.review_reason}</div>`;
+          html += `</div>`;
         }
 
-        appendA(html, ['executor · result']);
+        appendA(html, approved ? ['executor · result'] : ['agent 8 · rejection learning']);
       } catch (err) { appendA('Executor call failed: ' + err.message, []); }
     });
   }
@@ -1229,49 +1199,49 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
             </div>
 
             {/* A3 — Decision Support block (only when enriched fields are actually present) */}
-            {!!(rec.cost_if_approved?.amount || rec.cost_if_deferred?.total || rec.historical_cases?.length > 0 || rec.approver_authority?.threshold_usd) && (
+            {!!(decisionSupport.cost_data_status !== 'unavailable' || decisionSupport.historical_cases?.length > 0 || (decisionSupport.parts_vs_rul && decisionSupport.parts_vs_rul.status !== 'not_required') || decisionSupport.authority_check !== 'not_evaluated') && (
               <div style={{ marginBottom: '10px', border: '1px solid rgba(16,185,129,.22)', borderRadius: '8px', overflow: 'hidden', fontSize: '11px' }}>
                 <div style={{ padding: '5px 11px', background: 'rgba(16,185,129,.1)', fontSize: '9px', fontWeight: 700, color: '#10b981', fontFamily: 'var(--m)', letterSpacing: '.8px' }}>
                   DECISION SUPPORT
                 </div>
 
                 {/* Cost comparison */}
-                {rec.cost_if_approved && rec.cost_if_deferred && (
+                {decisionSupport.cost_if_approved != null && decisionSupport.cost_if_deferred != null && (
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', borderBottom: '1px solid rgba(16,185,129,.15)' }}>
                     <div style={{ padding: '8px 11px', borderRight: '1px solid rgba(16,185,129,.15)' }}>
                       <div style={{ fontSize: '9px', color: 'var(--t3)', fontFamily: 'var(--m)', marginBottom: '3px' }}>COST IF APPROVED</div>
-                      <div style={{ fontSize: '15px', fontWeight: 700, color: '#10b981' }}>${rec.cost_if_approved.amount.toLocaleString()}</div>
-                      <div style={{ fontSize: '9.5px', color: 'var(--t3)', marginTop: '2px' }}>{rec.cost_if_approved.breakdown}</div>
+                      <div style={{ fontSize: '15px', fontWeight: 700, color: '#10b981' }}>{decisionSupport.currency} {decisionSupport.cost_if_approved.toLocaleString()}</div>
+                      <div style={{ fontSize: '9.5px', color: 'var(--t3)', marginTop: '2px' }}>{decisionSupport.cost_breakdown}</div>
                     </div>
                     <div style={{ padding: '8px 11px' }}>
                       <div style={{ fontSize: '9px', color: 'var(--t3)', fontFamily: 'var(--m)', marginBottom: '3px' }}>COST IF DEFERRED</div>
-                      <div style={{ fontSize: '15px', fontWeight: 700, color: '#ef4444' }}>${rec.cost_if_deferred.total.toLocaleString()}</div>
-                      <div style={{ fontSize: '9.5px', color: 'var(--t3)', marginTop: '2px' }}>${rec.cost_if_deferred.per_hour.toLocaleString()}/hr · {rec.cost_if_deferred.basis}</div>
+                      <div style={{ fontSize: '15px', fontWeight: 700, color: '#ef4444' }}>{decisionSupport.currency} {decisionSupport.cost_if_deferred.toLocaleString()}</div>
+                      <div style={{ fontSize: '9.5px', color: 'var(--t3)', marginTop: '2px' }}>{decisionSupport.currency} {(decisionSupport.deferred_cost_per_hour || 0).toLocaleString()}/hr · {decisionSupport.cost_basis}</div>
                     </div>
                   </div>
                 )}
 
                 {/* Parts vs RUL window */}
-                {rec.parts_vs_rul && (
+                {decisionSupport.parts_vs_rul && decisionSupport.parts_vs_rul.status !== 'not_required' && (
                   <div style={{ padding: '7px 11px', borderBottom: '1px solid rgba(16,185,129,.15)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <span style={{ color: 'var(--t3)', fontSize: '10.5px' }}>Parts ETA vs RUL window</span>
-                    <span style={{ color: rec.parts_vs_rul.within_window ? '#10b981' : '#ef4444', fontWeight: 600, fontFamily: 'var(--m)', fontSize: '10px' }}>
-                      {rec.parts_vs_rul.eta} — within {rec.parts_vs_rul.rul_window} {rec.parts_vs_rul.within_window ? '✓' : '✗'}
+                    <span style={{ color: decisionSupport.parts_vs_rul.status === 'within_rul_window' ? '#10b981' : '#ef4444', fontWeight: 600, fontFamily: 'var(--m)', fontSize: '10px' }}>
+                      {decisionSupport.parts_vs_rul.part_number} · ETA {decisionSupport.parts_vs_rul.eta_days ?? 'unknown'}d · RUL {decisionSupport.parts_vs_rul.rul_min_days}-{decisionSupport.parts_vs_rul.rul_max_days}d · {decisionSupport.parts_vs_rul.status.replace(/_/g, ' ')}
                     </span>
                   </div>
                 )}
 
                 {/* Historical cases */}
-                {rec.historical_cases && rec.historical_cases.length > 0 && (
+                {decisionSupport.historical_cases && decisionSupport.historical_cases.length > 0 && (
                   <div style={{ padding: '7px 11px', borderBottom: '1px solid rgba(16,185,129,.15)' }}>
                     <div style={{ fontSize: '9px', color: 'var(--t3)', fontFamily: 'var(--m)', marginBottom: '5px', letterSpacing: '.5px' }}>HISTORICAL PRECEDENT</div>
-                    {rec.historical_cases.map((c, i) => {
+                    {decisionSupport.historical_cases.map((c, i) => {
                       const ok = !c.outcome.toLowerCase().includes('fail') && !c.outcome.toLowerCase().includes('shutdown');
                       return (
-                        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: i < rec.historical_cases.length - 1 ? '4px' : 0 }}>
+                        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: i < decisionSupport.historical_cases.length - 1 ? '4px' : 0 }}>
                           <span style={{ color: ok ? '#10b981' : '#ef4444', fontSize: '10px', flexShrink: 0 }}>{ok ? '✓' : '✗'}</span>
-                          <span style={{ color: 'var(--t3)', fontSize: '9px', fontFamily: 'var(--m)', flexShrink: 0, width: '60px' }}>{c.date}</span>
-                          <span style={{ color: 'var(--t2)', fontSize: '10.5px', flex: 1 }}>{c.action_taken.replace(/_/g, ' ')} → <span style={{ color: ok ? '#10b981' : '#ef4444' }}>{c.outcome}</span></span>
+                          <span style={{ color: 'var(--t3)', fontSize: '9px', fontFamily: 'var(--m)', flexShrink: 0, width: '92px' }}>{c.recorded_at || c.case_id}</span>
+                          <span style={{ color: 'var(--t2)', fontSize: '10.5px', flex: 1 }}>{c.action_taken.replace(/_/g, ' ')} → <span style={{ color: ok ? '#10b981' : '#ef4444' }}>{c.outcome}</span> · {c.source}</span>
                         </div>
                       );
                     })}
@@ -1279,37 +1249,24 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
                 )}
 
                 {/* Authority check */}
-                {rec.approver_authority && (
-                  <div style={{ padding: '7px 11px', borderBottom: rec.alternative_action ? '1px solid rgba(16,185,129,.15)' : 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                {decisionSupport.authority_check !== 'not_evaluated' && (
+                  <div style={{ padding: '7px 11px', borderBottom: alternative ? '1px solid rgba(16,185,129,.15)' : 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <span style={{ color: 'var(--t3)', fontSize: '10.5px' }}>Approver authority</span>
-                    <span style={{ color: rec.approver_authority.within_authority ? '#10b981' : '#f97316', fontWeight: 600, fontSize: '10px' }}>
-                      {rec.cost_if_approved
-                        ? `$${rec.cost_if_approved.amount.toLocaleString()} of $${rec.approver_authority.threshold_usd.toLocaleString()} threshold`
-                        : `$${rec.approver_authority.threshold_usd.toLocaleString()} threshold`
-                      } {rec.approver_authority.within_authority ? '✓' : '— escalation required'}
+                    <span style={{ color: decisionSupport.authority_check === 'within_authority' ? '#10b981' : '#f97316', fontWeight: 600, fontSize: '10px' }}>
+                      {decisionSupport.authority_reason}
                     </span>
                   </div>
                 )}
 
                 {/* Alternative action */}
-                {rec.alternative_action && (
+                {alternative && (
                   <div style={{ padding: '7px 11px' }}>
                     <div style={{ fontSize: '9px', color: 'var(--t3)', fontFamily: 'var(--m)', marginBottom: '3px', letterSpacing: '.5px' }}>ALTERNATIVE</div>
                     <div style={{ color: 'var(--t2)', fontSize: '10.5px' }}>
-                      <strong style={{ color: 'var(--t)' }}>{rec.alternative_action.label}</strong> — {rec.alternative_action.trade_off}
+                      <strong style={{ color: 'var(--t)' }}>{alternative.action.replace(/_/g, ' ')}</strong> — {alternative.rationale}
                     </div>
                   </div>
                 )}
-              </div>
-            )}
-
-            {/* A4 — Escalation timer */}
-            {rec.escalation_timer && (
-              <div style={{ padding: '7px 10px', background: 'rgba(249,115,22,.06)', border: '1px solid rgba(249,115,22,.22)', borderRadius: '6px', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '7px' }}>
-                <span style={{ fontSize: '12px' }}>⏳</span>
-                <span style={{ fontSize: '11px', color: 'var(--t2)' }}>
-                  Auto-escalates to <strong style={{ color: '#f97316' }}>{rec.escalation_timer.escalates_to}</strong> if no decision by <strong style={{ color: '#f97316' }}>{rec.escalation_timer.escalates_at}</strong>
-                </span>
               </div>
             )}
 
@@ -1321,7 +1278,7 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
                     style={{ padding: '7px 18px', borderRadius: '6px', border: 'none', background: '#10b981', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: '12px' }}>
                     Approve &amp; Execute
                   </button>
-                  <button onClick={() => { setShowRejectInput(s => !s); setRejectCodes(new Set()); setRejectReason(''); }}
+                  <button onClick={() => { setShowRejectInput(s => !s); setRejectCode(''); setRejectReason(''); }}
                     style={{ padding: '7px 18px', borderRadius: '6px', border: '1px solid #ef4444', background: 'transparent', color: '#ef4444', fontWeight: 700, cursor: 'pointer', fontSize: '12px' }}>
                     {showRejectInput ? 'Cancel' : 'Reject'}
                   </button>
@@ -1333,23 +1290,17 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
                     {REJECT_CODES.map(code => (
                       <label key={code.id} style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', marginBottom: '8px', cursor: 'pointer' }}>
                         <input
-                          type="checkbox"
+                          type="radio"
+                          name={`reject-reason-${msg.id}`}
                           value={code.id}
-                          checked={rejectCodes.has(code.id)}
-                          onChange={() => {
-                            setRejectCodes(prev => {
-                              const next = new Set(prev);
-                              next.has(code.id) ? next.delete(code.id) : next.add(code.id);
-                              if (!next.has('other')) setRejectReason('');
-                              return next;
-                            });
-                          }}
+                          checked={rejectCode === code.id}
+                          onChange={() => { setRejectCode(code.id); if (code.id !== 'other') setRejectReason(''); }}
                           style={{ marginTop: '2px', accentColor: '#ef4444', flexShrink: 0 }}
                         />
                         <span style={{ fontSize: '11.5px', color: 'var(--t2)', lineHeight: 1.5 }}>{code.label}</span>
                       </label>
                     ))}
-                    {rejectCodes.has('other') && (
+                    {rejectCode === 'other' && (
                       <textarea
                         value={rejectReason}
                         onChange={e => setRejectReason(e.target.value)}
@@ -1362,7 +1313,7 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
                     <button
                       disabled={!canConfirmReject}
                       onClick={() => resolve(false, rejectReason.trim())}
-                      style={{ marginTop: rejectCodes.has('other') ? '2px' : '6px', padding: '6px 14px', borderRadius: '6px', border: 'none', background: canConfirmReject ? '#ef4444' : '#374151', color: '#fff', fontWeight: 700, cursor: canConfirmReject ? 'pointer' : 'not-allowed', fontSize: '11px', opacity: canConfirmReject ? 1 : 0.5 }}>
+                      style={{ marginTop: rejectCode === 'other' ? '2px' : '6px', padding: '6px 14px', borderRadius: '6px', border: 'none', background: canConfirmReject ? '#ef4444' : '#374151', color: '#fff', fontWeight: 700, cursor: canConfirmReject ? 'pointer' : 'not-allowed', fontSize: '11px', opacity: canConfirmReject ? 1 : 0.5 }}>
                       Confirm rejection
                     </button>
                   </div>

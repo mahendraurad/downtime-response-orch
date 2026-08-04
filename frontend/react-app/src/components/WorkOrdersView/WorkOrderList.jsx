@@ -1,13 +1,12 @@
 import React, { useState } from 'react';
-import { WOS } from '../../data/workOrders';
 
 const PR_COLOR = { URGENT: 'var(--rd)', MEDIUM: 'var(--am)', LOW: 'var(--gn)' };
 const PR_BG = { URGENT: 'var(--rdm)', MEDIUM: 'var(--adm)', LOW: 'var(--gd)' };
 
-export default function WorkOrderList({ selectedWO, onSelect }) {
+export default function WorkOrderList({ workOrders = [], selectedWO, onSelect }) {
   const [filter, setFilter] = useState('all');
 
-  const filtered = WOS.filter(wo => {
+  const filtered = workOrders.filter(wo => {
     if (filter === 'all') return true;
     return wo.st.toLowerCase() === filter;
   });
@@ -20,10 +19,10 @@ export default function WorkOrderList({ selectedWO, onSelect }) {
       </div>
       <div className="woflt">
         {[
-          { id: 'all', lbl: 'All (12)' },
-          { id: 'pending', lbl: 'Pending (3)' },
-          { id: 'scheduled', lbl: 'Scheduled (5)' },
-          { id: 'closed', lbl: 'Closed (4)' },
+          { id: 'all', lbl: `All (${workOrders.length})` },
+          { id: 'pending', lbl: `Pending (${workOrders.filter(x => x.st === 'Pending').length})` },
+          { id: 'scheduled', lbl: `Scheduled (${workOrders.filter(x => x.st === 'Scheduled').length})` },
+          { id: 'closed', lbl: `Closed (${workOrders.filter(x => x.st === 'Closed').length})` },
         ].map(f => (
           <button
             key={f.id}

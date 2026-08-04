@@ -41,6 +41,23 @@ def test_connector_injection_creates_auditable_work_order():
     assert result.status=="success" and result.work_order_id=="WO-INJECTED"
     assert result.reservation_ids==["RES-I"] and result.executor_config_version
 
+def test_execution_trace_is_backend_owned_and_complete():
+    cmms=lambda **x: {**x,"work_order_id":"WO-TRACE","status":"open"}
+    inv=lambda **x: {**x,"reservation_id":"RES-TRACE","status":"reserved"}
+    result=ExecutorAgent(cmms_fn=cmms, inventory_fn=inv).process(_rec(), True)
+    assert [step.step_name for step in result.execution_steps] == [
+        "Work order created", "Notifications dispatched",
+        "Parts procurement", "Maintenance window",
+    ]
+    assert result.total_steps == 4
+    assert result.completed_steps == 3
+    assert result.execution_steps[0].owner == "Maintenance Planner"
+    assert result.execution_steps[1].deadline == "within 15 minutes"
+    assert result.execution_steps[2].deadline == "before RUL minimum"
+    assert result.execution_steps[3].escalates_to == "Plant Manager"
+    assert "VP Operations" in result.execution_steps[3].escalation_rule
+    assert result.execution_policy_version
+
 def test_inventory_exception_is_partial_not_pipeline_exception():
     cmms=lambda **x: {**x,"work_order_id":"WO-I","status":"open"}
     result=ExecutorAgent(cmms_fn=cmms, inventory_fn=lambda **_: (_ for _ in ()).throw(TimeoutError())).process(_rec(), True)

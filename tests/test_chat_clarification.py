@@ -27,6 +27,12 @@ def test_conceptual_signal_question_needs_no_asset(client):
     assert data["intent"]=="concept" and "asset-specific baseline" in data["response"]
 
 
+def test_bpfi_bpfo_comparison_explains_both_without_asset(client):
+    data=client.post("/api/chat",json={"message":"How is BPFI different from BPFO?"}).json()
+    assert data["intent"]=="concept" and not data["clarification_required"]
+    assert "inner race" in data["response"] and "outer race" in data["response"]
+
+
 def test_asset_specific_rul_requests_asset_and_telemetry(client):
     data=client.post("/api/chat",json={"message":"What is the RUL for this bearing?"}).json()
     assert data["intent"]=="risk" and data["clarification_required"]

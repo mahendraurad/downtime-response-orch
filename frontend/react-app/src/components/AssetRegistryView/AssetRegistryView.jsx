@@ -5,11 +5,11 @@ import AssetDetail from './AssetDetail';
 import AssetChat from './AssetChat';
 
 export default function AssetRegistryView() {
-  const { selectedAsset, setSelectedAsset } = useContext(AppContext);
+  const { assets, selectedAsset, setSelectedAsset } = useContext(AppContext);
 
   return (
     <>
-      <AssetList selectedAsset={selectedAsset} onSelect={setSelectedAsset} />
+      <AssetList assets={assets} selectedAsset={selectedAsset} onSelect={setSelectedAsset} />
       <AssetDetail asset={selectedAsset} />
       <AssetChat asset={selectedAsset} />
     </>
