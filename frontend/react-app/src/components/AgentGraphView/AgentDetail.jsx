@@ -9,9 +9,7 @@ import { AppContext } from '../../context/AppContext';
 
 const TABS = [
   { id: 'overview', lbl: 'Overview' },
-  { id: 'node', lbl: 'Node Detail' },
   { id: 'tasks', lbl: 'Persona Tasks' },
-  { id: 'actions', lbl: 'Actions' },
 ];
 
 // Maps pipeline_log node names to AG_NODES indices
@@ -152,7 +150,6 @@ export default function AgentDetail({ asset, persona, selectedNode, currentTab, 
   const node = AG_NODES[selectedNode] || AG_NODES[0];
   const fallbackStates = ASSET_AG_STATE[asset] || ASSET_AG_STATE['M-104'];
 
-  // Build live states from pipeline_log if available
   let liveStates = null;
   if (pipelineResult?.pipeline_log) {
     liveStates = NODE_KEYS.map(key => {
@@ -167,6 +164,8 @@ export default function AgentDetail({ asset, persona, selectedNode, currentTab, 
 
   const states = liveStates || fallbackStates;
   const state = states[selectedNode] || { s: 'ni' };
+  // Normalize any stale 'node' tab value to 'overview' after tab removal
+  const activeTab = currentTab === 'node' ? 'overview' : currentTab;
 
   return (
     <div className="ag-right">
@@ -174,7 +173,7 @@ export default function AgentDetail({ asset, persona, selectedNode, currentTab, 
         {TABS.map(t => (
           <div
             key={t.id}
-            className={`agtab${currentTab === t.id ? ' on' : ''}`}
+            className={`agtab${activeTab === t.id ? ' on' : ''}`}
             onClick={() => onTabChange(t.id)}
           >
             {t.lbl}
@@ -182,54 +181,44 @@ export default function AgentDetail({ asset, persona, selectedNode, currentTab, 
         ))}
       </div>
       <div className="ag-tab-body">
-        {currentTab === 'overview' && (
+        {activeTab === 'overview' && (
           <OverviewPanel
             asset={asset}
             persona={persona}
             states={states}
             selectedNode={selectedNode}
+            node={node}
+            state={state}
             pipelineResult={pipelineResult}
             pipelineRunning={pipelineRunning}
             sensorData={sensorData}
           />
         )}
-        {currentTab === 'node' && (
-          <NodeDetailPanel
-            node={node}
-            state={state}
-            asset={asset}
-            persona={persona}
-            nodeIdx={selectedNode}
-            pipelineResult={pipelineResult}
-            pipelineRunning={pipelineRunning}
-          />
-        )}
-        {currentTab === 'tasks' && (
+        {activeTab === 'tasks' && (
           <PersonaTasksPanel persona={persona} asset={asset} selectedNode={selectedNode} />
-        )}
-        {currentTab === 'actions' && (
-          <ActionsPanel
-            asset={asset}
-            persona={persona}
-            selectedNode={selectedNode}
-            pipelineResult={pipelineResult}
-            pipelineRunning={pipelineRunning}
-          />
         )}
       </div>
     </div>
   );
 }
 
-// ─── Overview Panel ──────────────────────────────────────────────────────────
+// ─── Overview Panel (merged with Node Detail) ────────────────────────────────
 
-function OverviewPanel({ asset, persona, states, selectedNode, pipelineResult, pipelineRunning, sensorData }) {
+function OverviewPanel({ asset, persona, states, selectedNode, node, state, pipelineResult, pipelineRunning, sensorData }) {
   const stateLabel = { nd: 'Complete', nr: 'Running', ni: 'Standby' };
   const stateColor = { nd: 'var(--gn)', nr: 'var(--am)', ni: 'var(--t3)' };
 
   const fd = pipelineResult?.fault_diagnosis;
   const ra = pipelineResult?.risk_assessment;
   const rec = pipelineResult?.recommendation;
+
+  const liveOut = buildLiveOutput(selectedNode, pipelineResult, asset, persona);
+  const staticOut = node.assetOut?.[asset]?.[persona] || null;
+  const nodeOut = liveOut || staticOut;
+
+  const liveKPIs = buildLiveKPIs(selectedNode, pipelineResult);
+  const kpis = liveKPIs || node.kpis;
+  const nodeEntry = getLogEntry(pipelineResult, selectedNode);
 
   return (
     <div className="ag-tab-panel on" style={{ padding: '16px', overflow: 'auto' }}>
@@ -256,17 +245,12 @@ function OverviewPanel({ asset, persona, states, selectedNode, pipelineResult, p
         </div>
       )}
 
-      {/* Key metrics from pipeline result */}
+      {/* Pipeline-level summary metrics */}
       {pipelineResult && (fd || ra || rec) && (
         <div style={{ marginBottom: '14px' }}>
           <div className="sttl" style={{ marginBottom: '6px' }}>Pipeline Summary</div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
-            {fd && (
-              <div className="dc">
-                <div className="dcl">Fault Type</div>
-                <div className="dcv" style={{ fontSize: '11px' }}>{fd.fault_type || '—'}</div>
-              </div>
-            )}
+            {fd && <div className="dc"><div className="dcl">Fault Type</div><div className="dcv" style={{ fontSize: '11px' }}>{fd.fault_type || '—'}</div></div>}
             {fd?.confidence != null && (
               <div className="dc">
                 <div className="dcl">FI Confidence</div>
@@ -283,12 +267,7 @@ function OverviewPanel({ asset, persona, states, selectedNode, pipelineResult, p
                 </div>
               </div>
             )}
-            {ra?.rul_days_estimated != null && (
-              <div className="dc">
-                <div className="dcl">RUL Estimate</div>
-                <div className="dcv" style={{ fontSize: '12px' }}>{ra.rul_days_estimated} days</div>
-              </div>
-            )}
+            {ra?.rul_days_estimated != null && <div className="dc"><div className="dcl">RUL Estimate</div><div className="dcv" style={{ fontSize: '12px' }}>{ra.rul_days_estimated} days</div></div>}
             {rec?.urgency && (
               <div className="dc">
                 <div className="dcl">Urgency</div>
@@ -297,14 +276,7 @@ function OverviewPanel({ asset, persona, states, selectedNode, pipelineResult, p
                 </div>
               </div>
             )}
-            {rec?.recommended_action && (
-              <div className="dc">
-                <div className="dcl">Recommendation</div>
-                <div className="dcv" style={{ fontSize: '11px' }}>
-                  {rec.recommended_action.name || rec.recommended_action.description || '—'}
-                </div>
-              </div>
-            )}
+            {rec?.recommended_action && <div className="dc"><div className="dcl">Recommendation</div><div className="dcv" style={{ fontSize: '11px' }}>{rec.recommended_action.name || rec.recommended_action.description || '—'}</div></div>}
           </div>
         </div>
       )}
@@ -315,130 +287,69 @@ function OverviewPanel({ asset, persona, states, selectedNode, pipelineResult, p
         </div>
       )}
 
-      {/* Per-node status list */}
-      <div className="sttl" style={{ marginBottom: '8px' }}>Pipeline Overview · {asset}</div>
-      {AG_NODES.map((n, i) => {
-        const s = states[i] || { s: 'ni' };
-        const liveOut = buildLiveOutput(i, pipelineResult, asset, persona);
-        const staticOut = n.assetOut?.[asset]?.[persona] || null;
-        const out = liveOut || staticOut;
-        return (
-          <div
-            key={i}
-            style={{
-              padding: '10px 12px',
-              marginBottom: '8px',
-              borderRadius: '8px',
-              border: `1px solid ${selectedNode === i ? 'var(--ac)' : 'var(--b)'}`,
-              background: selectedNode === i ? 'rgba(79,142,255,0.07)' : 'var(--sf)',
-              transition: 'all 0.2s',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: out ? '6px' : 0 }}>
-              <span style={{ fontSize: '16px' }}>{n.ico}</span>
-              <span style={{ fontWeight: 600, fontSize: '12px', color: 'var(--t)', flex: 1 }}>{n.nm}</span>
-              {pipelineResult && getLogEntry(pipelineResult, i) && (
+      {/* ── Selected node detail (merged from Node Detail tab) ── */}
+      <div style={{
+        marginBottom: '14px', borderRadius: '8px',
+        border: '1px solid var(--ac)', background: 'rgba(79,142,255,0.05)',
+        padding: '12px 14px',
+      }}>
+        {/* Node header */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
+          <span style={{ fontSize: '20px' }}>{node.ico}</span>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 700, fontSize: '13px', color: 'var(--t)' }}>{node.nm}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px' }}>
+              <span style={{
+                fontSize: '9px', fontWeight: 700, color: stateColor[state.s],
+                fontFamily: 'var(--m)', padding: '2px 6px', borderRadius: '4px',
+                background: `${stateColor[state.s]}20`,
+              }}>
+                {stateLabel[state.s]}
+              </span>
+              {nodeEntry?.latency_ms != null && (
                 <span style={{ fontSize: '9px', fontFamily: 'var(--m)', color: 'var(--t3)' }}>
-                  {((getLogEntry(pipelineResult, i).latency_ms || 0) / 1000).toFixed(2)}s
+                  {(nodeEntry.latency_ms / 1000).toFixed(2)}s
                 </span>
               )}
-              <span style={{
-                fontSize: '9px', fontWeight: 700, color: stateColor[s.s],
-                fontFamily: 'var(--m)', padding: '2px 6px', borderRadius: '4px',
-                background: `${stateColor[s.s]}20`,
-              }}>
-                {stateLabel[s.s]}
-              </span>
+              {pipelineResult && <span style={{ fontSize: '9px', fontFamily: 'var(--m)', color: 'var(--gn)' }}>LIVE</span>}
             </div>
-            {out && (
-              <div style={{ fontSize: '11px', color: 'var(--t2)', lineHeight: '1.5', paddingLeft: '24px' }}>
-                {out}
-              </div>
-            )}
           </div>
-        );
-      })}
-    </div>
-  );
-}
+        </div>
 
-// ─── Node Detail Panel ───────────────────────────────────────────────────────
+        {/* Role */}
+        <div style={{ fontSize: '11px', color: 'var(--t2)', lineHeight: '1.6', marginBottom: '10px', padding: '8px 10px', background: 'var(--sf)', borderRadius: '6px' }}>
+          {node.role}
+        </div>
 
-function NodeDetailPanel({ node, state, asset, persona, nodeIdx, pipelineResult, pipelineRunning }) {
-  const stateColor = { nd: 'var(--gn)', nr: 'var(--am)', ni: 'var(--t3)' };
-  const stateLabel = { nd: 'Complete', nr: 'Running', ni: 'Standby' };
+        {/* KPIs */}
+        <div style={{ fontSize: '10px', fontWeight: 600, color: 'var(--t3)', fontFamily: 'var(--m)', marginBottom: '6px' }}>
+          KPIs {pipelineResult && liveKPIs ? '· LIVE' : '· STATIC'}
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px', marginBottom: nodeOut ? '10px' : 0 }}>
+          {Object.entries(kpis).map(([k, v]) => (
+            <div key={k} className="dc">
+              <div className="dcl">{k}</div>
+              <div className="dcv" style={{ fontSize: '11px' }}>{v}</div>
+            </div>
+          ))}
+        </div>
 
-  const liveOut = buildLiveOutput(nodeIdx, pipelineResult, asset, persona);
-  const staticOut = node.assetOut?.[asset]?.[persona] || null;
-  const out = liveOut || staticOut;
-
-  const liveKPIs = buildLiveKPIs(nodeIdx, pipelineResult);
-  const kpis = liveKPIs || node.kpis;
-
-  const entry = getLogEntry(pipelineResult, nodeIdx);
-
-  return (
-    <div className="ag-tab-panel on" style={{ padding: '16px', overflow: 'auto' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px' }}>
-        <span style={{ fontSize: '22px' }}>{node.ico}</span>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontWeight: 700, fontSize: '14px', color: 'var(--t)' }}>{node.nm}</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px' }}>
-            <span style={{
-              fontSize: '9px', fontWeight: 700, color: stateColor[state.s],
-              fontFamily: 'var(--m)', padding: '2px 7px', borderRadius: '4px',
-              background: `${stateColor[state.s]}20`,
+        {/* Node output */}
+        {nodeOut && (
+          <>
+            <div style={{ fontSize: '10px', fontWeight: 600, color: 'var(--t3)', fontFamily: 'var(--m)', marginBottom: '5px' }}>
+              OUTPUT · {asset} · {persona} {liveOut ? '· LIVE' : ''}
+            </div>
+            <div style={{
+              fontSize: '11px', color: 'var(--t2)', lineHeight: '1.6',
+              padding: '8px 10px', background: 'var(--sf)', borderRadius: '6px',
+              borderLeft: `3px solid ${liveOut ? 'var(--gn)' : 'var(--ac)'}`,
             }}>
-              {stateLabel[state.s]}
-            </span>
-            {entry?.latency_ms != null && (
-              <span style={{ fontSize: '9px', fontFamily: 'var(--m)', color: 'var(--t3)' }}>
-                {(entry.latency_ms / 1000).toFixed(2)}s
-              </span>
-            )}
-            {pipelineResult && (
-              <span style={{ fontSize: '9px', fontFamily: 'var(--m)', color: 'var(--gn)' }}>LIVE</span>
-            )}
-          </div>
-        </div>
+              {nodeOut}
+            </div>
+          </>
+        )}
       </div>
-
-      <div style={{ fontSize: '12px', color: 'var(--t2)', lineHeight: '1.6', marginBottom: '16px', padding: '10px', background: 'var(--sf)', borderRadius: '6px' }}>
-        {node.role}
-      </div>
-
-      <div className="sttl" style={{ marginBottom: '8px' }}>
-        KPIs {pipelineResult && liveKPIs ? '· Live' : '· Static'}
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', marginBottom: '16px' }}>
-        {Object.entries(kpis).map(([k, v]) => (
-          <div key={k} className="dc">
-            <div className="dcl">{k}</div>
-            <div className="dcv" style={{ fontSize: '12px' }}>{v}</div>
-          </div>
-        ))}
-      </div>
-
-      {pipelineRunning && !pipelineResult && (
-        <div style={{ fontSize: '12px', color: 'var(--t3)', fontStyle: 'italic', marginBottom: '12px' }}>
-          Fetching live data…
-        </div>
-      )}
-
-      {out && (
-        <>
-          <div className="sttl" style={{ marginBottom: '8px' }}>
-            Output · {asset} · {persona} {liveOut ? '· Live' : ''}
-          </div>
-          <div style={{
-            fontSize: '12px', color: 'var(--t2)', lineHeight: '1.6',
-            padding: '10px 12px', background: 'var(--sf)', borderRadius: '6px',
-            border: `1px solid var(--b)`, borderLeft: `3px solid ${liveOut ? 'var(--gn)' : 'var(--ac)'}`,
-          }}>
-            {out}
-          </div>
-        </>
-      )}
     </div>
   );
 }
@@ -610,67 +521,7 @@ function ActionsPanel({ asset, persona, selectedNode, pipelineResult, pipelineRu
       )}
 
       {/* Persona insight questions */}
-      {insights.length > 0 && (
-        <div>
-          <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--t3)', fontFamily: 'var(--m)', marginBottom: '8px' }}>
-            ASK THE AGENT · {persona.toUpperCase()}
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            {insights.map((insight, i) => {
-              const colorMap = { r: 'var(--rd)', g: 'var(--gn)', b: '#3b82f6', '': 'var(--ac2)' };
-              const accentColor = colorMap[insight.c] || 'var(--ac2)';
-              return (
-                <button
-                  key={i}
-                  onClick={() => handleInsightClick(insight.l, i)}
-                  style={{
-                    textAlign: 'left', padding: '9px 12px', borderRadius: '8px',
-                    border: `1px solid ${activeQ === i ? accentColor : 'var(--b)'}`,
-                    background: activeQ === i ? `${accentColor}15` : 'var(--sf)',
-                    cursor: 'pointer', fontSize: '12px', color: 'var(--t)',
-                    fontFamily: 'inherit', transition: 'all 0.15s',
-                    display: 'flex', alignItems: 'center', gap: '8px',
-                  }}
-                >
-                  <span style={{ fontSize: '10px', color: accentColor, flexShrink: 0 }}>▶</span>
-                  {insight.l}
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Inline answer */}
-          {activeQ !== null && (
-            <div style={{
-              marginTop: '10px', padding: '12px', borderRadius: '8px',
-              background: 'var(--sf)', border: '1px solid var(--b)',
-            }}>
-              {chatLoading && (
-                <div style={{ fontSize: '12px', color: 'var(--t3)', fontStyle: 'italic' }}>Asking agent…</div>
-              )}
-              {chatError && (
-                <div style={{ fontSize: '12px', color: 'var(--am)' }}>{chatError}</div>
-              )}
-              {chatResp && (
-                <div
-                  style={{ fontSize: '12px', color: 'var(--t2)', lineHeight: '1.6' }}
-                  dangerouslySetInnerHTML={{ __html: chatResp }}
-                />
-              )}
-              <button
-                onClick={() => setCurrentView('chat')}
-                style={{
-                  marginTop: '10px', fontSize: '11px', color: 'var(--ac2)',
-                  background: 'none', border: 'none', cursor: 'pointer',
-                  fontFamily: 'inherit', padding: 0, textDecoration: 'underline',
-                }}
-              >
-                Continue in Agent Chat to see the complete response →
-              </button>
-            </div>
-          )}
-        </div>
-      )}
+      
 
       {insights.length === 0 && !out && !pipelineRunning && (
         <div style={{ fontSize: '12px', color: 'var(--t3)', fontStyle: 'italic' }}>
