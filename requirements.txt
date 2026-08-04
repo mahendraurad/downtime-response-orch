@@ -26,6 +26,7 @@ bcrypt>=4.0.0,<6.0.0
 # Tests and FastAPI TestClient transport
 pytest>=7.0.0,<10.0.0
 httpx>=0.24.0,<1.0.0
+openpyxl>=3.1.0,<4.0.0
 
 # Production adapters intentionally remain optional until their integrations
 # are configured and approved:

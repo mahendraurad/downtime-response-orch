@@ -94,15 +94,35 @@ def test_prescriptive_contract_is_verdict_first_and_grounded(upstream):
     } for item in result.prescriptive_actions)
 
 
-def test_cost_and_authority_are_explicitly_deferred(upstream):
+def test_demo_cost_and_supervisor_authority_are_configured(upstream):
     result = _recommend(upstream)
     support = result.decision_support
-    assert support.cost_if_approved is None
-    assert support.cost_if_deferred is None
-    assert support.cost_data_status == "unavailable"
-    assert support.authority_check == "not_evaluated"
+    assert support.cost_if_approved == 48_000
+    assert support.cost_if_deferred == 2_016_000
+    assert support.deferred_cost_per_hour == 7_500
+    assert support.cost_data_status == "configured_demo"
+    assert support.authority_check == "within_authority"
+    assert support.authority_limit == 100_000
+    assert support.decision_support_config_version
     financial = next(x for x in result.consequences if x.type == "financial")
-    assert financial.evidence_status == "unavailable"
+    assert financial.evidence_status == "configured_demo"
+    assert "48,000" in financial.value
+
+
+@pytest.mark.parametrize("persona,limit", [
+    ("supervisor", 100_000),
+    ("manager", 1_000_000),
+    ("executive", 5_000_000),
+])
+def test_authority_limits_are_persona_specific(upstream, persona, limit):
+    trusted, diagnosis, risk, guidance = upstream
+    result = PrescriptiveOptimizationAgent().process(
+        risk, diagnosis, guidance,
+        {guidance.bearing_type: {"qty_on_hand": 1, "lead_time_days": 1}},
+        {}, persona_context=persona, trusted_signal=trusted,
+    )
+    assert result.decision_support.authority_limit == limit
+    assert result.decision_support.authority_check == "within_authority"
 
 
 def test_parts_eta_is_compared_to_rul_without_cost_assumption(upstream):

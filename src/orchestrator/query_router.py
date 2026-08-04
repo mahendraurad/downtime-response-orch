@@ -13,7 +13,9 @@ class QueryPlan:
 _RULES = [
     # ── Conceptual / educational ──────────────────────────────────────────────
     ("concept", ("why vibration", "why temperature", "explain why vibration",
-                 "what is anomaly", "what is bpfo", "what is bpfi",
+                 "vibration and temperature matter", "explain bpfo", "explain bpfi",
+                 "bpfo in plain english", "bpfi different from bpfo",
+                 "difference between bpfi", "what is anomaly", "what is bpfo", "what is bpfi",
                  "what is condition monitoring", "define anomaly"),
      "concept", (), False),
 
@@ -23,17 +25,20 @@ _RULES = [
 
     # ── Learning history ──────────────────────────────────────────────────────
     ("learning_history", ("last 3 failures", "last three failures", "recent failures",
-                          "failure history", "what did we learn", "learnings from"),
+                          "failure history", "what did we learn", "learnings from",
+                          "learned bearing cases", "learned cases"),
      "history", (8,), False),
 
     # ── Full pipeline — explicit analysis or work-order requests ─────────────
-    ("execution", ("execute", "create work order", "reserve part", "approve work"),
+    ("execution", ("execute", "create work order", "create a work order",
+                   "reserve part", "approve work"),
      "full", (1,2,3,4,5,6,7), True),
 
     # "Analyse M-104", "run full analysis", "full check" → all 8 agents + HITL
     ("analysis", ("analyse", "analyze", "run analysis", "full analysis",
                   "run orchestrated", "run the analysis", "full check",
-                  "complete analysis", "run diagnostics", "run pipeline"),
+                  "complete analysis", "technical analysis", "decision brief",
+                  "run diagnostics", "run pipeline"),
      "full", (1,2,3,4,5,6,7), False),
 
     ("recommendation", ("recommend", "what should", "best action", "replace this",
@@ -55,7 +60,7 @@ _RULES = [
               "when will", "safely run", "safely operate",
               "can it run", "can.*run", "this week", "this month",
               "how many days", "how much time", "time left",
-              "critical", "run until"),
+              "critical", "run until", "wait until"),
      "risk", (1,2,3,4), False),
 
     # ── Fault identification → agents 1-3 ────────────────────────────────────

@@ -41,10 +41,13 @@ from datetime import datetime, timezone
 from typing import List
 
 from src.schemas.recommendation import MaintenanceRecommendation
-from src.schemas.execution import ExecutionResult
+from src.schemas.execution import ExecutionResult, ExecutionStep
 from src.tools.cmms_mock_service import create_work_order
 from src.tools.inventory_mock_service import reserve_part
 from src.tools.config_loader import ExecutorConfig, load_executor_config
+from src.tools.decision_support_config import (
+    decision_support_config_version, load_decision_support_config,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +86,7 @@ class ExecutorAgent:
     # ************** Added by Prateek Mittal on 20th July 2026 ******************
     def __init__(self, cfg: ExecutorConfig = None, repository=None,
                  cmms_fn=None, inventory_fn=None, notification_fn=None,
-                 now_fn=None):
+                 now_fn=None, decision_support_config=None):
         self._cfg = cfg or load_executor_config(); self._cfg.validate()
         self._repository = repository
         self._cmms_fn = cmms_fn
@@ -91,6 +94,12 @@ class ExecutorAgent:
         self._notification_fn = notification_fn
         self._now_fn = now_fn or (lambda: datetime.now(tz=timezone.utc))
         self._version = hashlib.sha256(json.dumps(asdict(self._cfg), sort_keys=True).encode()).hexdigest()[:16]
+        self._execution_policy = (
+            decision_support_config or load_decision_support_config()
+        )
+        self._execution_policy_version = decision_support_config_version(
+            self._execution_policy
+        )
 
     def _base(self, recommendation):
         return dict(
@@ -99,6 +108,70 @@ class ExecutorAgent:
             source_prescriptive_config_version=getattr(recommendation, "prescriptive_config_version", ""),
             linked_recommendation_case_id=getattr(recommendation, "case_id", ""),
         )
+
+    def _attach_steps(self, result, recommendation):
+        policy = self._execution_policy["execution_steps"]
+        if _is_log_only(recommendation):
+            steps = [
+                ExecutionStep(step_name="Monitoring action recorded", status="done",
+                              detail="No work order or part reservation is required",
+                              owner="Reliability Engineer", deadline="ongoing"),
+                ExecutionStep(step_name="Notifications dispatched",
+                              status="done" if result.notification_status == "sent" else "pending",
+                              detail=f"notification status: {result.notification_status}",
+                              owner=policy["notifications"]["owner"],
+                              deadline=policy["notifications"]["deadline"]),
+            ]
+        else:
+            parts = result.parts_status or []
+            shortage = any(row.get("status") != "reserved" for row in parts)
+            if not recommendation.required_parts:
+                parts_status, parts_detail = "done", "No parts required"
+            elif shortage:
+                parts_status, parts_detail = "pending", "Part shortage or reservation error requires action"
+            else:
+                parts_status, parts_detail = "done", "All required parts reserved"
+            window = policy["maintenance_window"]
+            window_done = bool(recommendation.window_chosen)
+            steps = [
+                ExecutionStep(
+                    step_name="Work order created",
+                    status="done" if result.work_order_id else "blocked",
+                    detail=(result.work_order_id or result.blocked_reason),
+                    owner=policy["work_order"]["owner"],
+                    deadline=policy["work_order"]["deadline"],
+                ),
+                ExecutionStep(
+                    step_name="Notifications dispatched",
+                    status="done" if result.notification_status == "sent" else "pending",
+                    detail=f"notification status: {result.notification_status}",
+                    owner=policy["notifications"]["owner"],
+                    deadline=policy["notifications"]["deadline"],
+                ),
+                ExecutionStep(
+                    step_name="Parts procurement",
+                    status=parts_status, detail=parts_detail,
+                    owner=policy["parts"]["owner"],
+                    deadline=policy["parts"]["deadline"],
+                ),
+                ExecutionStep(
+                    step_name="Maintenance window",
+                    status="done" if window_done else "blocked",
+                    detail=(recommendation.window_chosen or
+                            "A maintenance window must be confirmed"),
+                    owner=window["owner"], deadline=window["deadline"],
+                    escalates_to=window["escalates_to"],
+                    escalation_rule=(
+                        f"Escalate to {window['escalates_to']}; then "
+                        f"{window['next_escalation']} if unresolved"
+                    ),
+                ),
+            ]
+        result.execution_steps = steps
+        result.completed_steps = sum(step.status == "done" for step in steps)
+        result.total_steps = len(steps)
+        result.execution_policy_version = self._execution_policy_version
+        return result
     # ***********************
 
     def process(self, recommendation: MaintenanceRecommendation,
@@ -143,7 +216,7 @@ class ExecutorAgent:
                 "[executor] BLOCKED case_id=%s action=%s approval_status=%s",
                 recommendation.case_id, action_name, recommendation.approval_status,
             )
-            return ExecutionResult(
+            result = ExecutionResult(
                 case_id=recommendation.case_id,
                 action_taken=action_name,
                 status="blocked",
@@ -157,6 +230,7 @@ class ExecutorAgent:
                 execution_eligible=False,
                 **base,
             )
+            return self._attach_steps(result, recommendation)
 
         # ── Step 2: log-only actions (monitor / continue_monitoring) ────
         if _is_log_only(recommendation):
@@ -169,7 +243,7 @@ class ExecutorAgent:
                 "[executor] audit=%s case=%s action=%s wo=None parts=[] notif=%s",
                 audit_ref, recommendation.case_id, action_name, notif,
             )
-            return ExecutionResult(
+            result = ExecutionResult(
                 case_id=recommendation.case_id,
                 action_taken=action_name,
                 status="success",
@@ -178,6 +252,7 @@ class ExecutorAgent:
                 executed_at=executed_at,
                 **base,
             )
+            return self._attach_steps(result, recommendation)
 
         # ── Step 3: create work order ───────────────────────────────────
         priority    = self._cfg.priority_by_urgency.get(recommendation.urgency, "P3-Medium")
@@ -202,7 +277,7 @@ class ExecutorAgent:
         except Exception as exc:
             logger.error("[executor] CMMS failure case_id=%s: %s",
                          recommendation.case_id, exc)
-            return ExecutionResult(
+            result = ExecutionResult(
                 case_id=recommendation.case_id,
                 action_taken=action_name,
                 status="failed",
@@ -213,6 +288,7 @@ class ExecutorAgent:
                 execution_eligible=False,
                 **base,
             )
+            return self._attach_steps(result, recommendation)
 
         # ── Step 4: reserve required parts ──────────────────────────────
         reservation_ids: List[str] = []
@@ -262,7 +338,7 @@ class ExecutorAgent:
 
         # ── Step 7: return result ───────────────────────────────────────
         overall_status = "partial" if has_shortage else "success"
-        return ExecutionResult(
+        result = ExecutionResult(
             case_id=recommendation.case_id,
             action_taken=action_name,
             status=overall_status,
@@ -275,6 +351,7 @@ class ExecutorAgent:
             executed_at=executed_at,
             **base,
         )
+        return self._attach_steps(result, recommendation)
 
     # ************** Added by Prateek Mittal on 20th July 2026 ******************
     def process_and_store(self, recommendation, approved=False):

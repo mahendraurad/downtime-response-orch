@@ -1,20 +1,21 @@
 # Group A Backend Changes
 
-This record covers only the backend scope authorized from the DRO Enhancement
-Specification. No frontend, Group B, or Group C implementation is included.
+This record covers the completed Group A backend scope and its minimum frontend
+contract wiring. A4's visual countdown timer remains intentionally excluded.
 
 ## Decisions confirmed
 
 - `md` is a backward-compatible alias for the `executive` persona.
-- Cost data is deferred. Missing costs are returned as unavailable and are
-  never estimated or fabricated.
+- Demo costs and persona authority limits are explicitly labelled and loaded
+  from `config/decision_support_config.json`; they can be replaced without code
+  changes. Missing data still returns `unavailable` and is never fabricated.
 - Historical cases are retrieved by Agent 8 and included as traceable
   citations in the final recommendation contract.
 - Recommendation rejection feedback is routed to Agent 8.
 - Reliability Engineering review is required after two consecutive rejections
   for the same asset and fault within 30 days.
-- Free-text rejection enforcement and execution-trace ownership/deadline rules
-  remain deferred.
+- `other` requires free text in the frontend. A6 ownership, deadlines, and the
+  Supervisor → Manager → VP Operations escalation path are configurable.
 
 ## A1 — Prescriptive response contract
 
@@ -58,9 +59,11 @@ The recommendation API contract now includes:
 - Agent 8 historical-case citations;
 - authority-check status and reason.
 
-Cost and authority values are deliberately `unavailable` / `not_evaluated`
-until approved data and authority rules are provided. The approval-card UI is
-outside this backend-only change.
+The current development model contains configured demo figures and authority
+limits. Every response carries `cost_data_status=configured_demo`, the currency,
+calculation basis, and a stable policy version so these figures cannot be
+mistaken for ERP/accounting facts. The approval card reads this nested typed
+contract directly.
 
 ## A5 — Rejection-learning backend portion
 
@@ -76,6 +79,15 @@ The backend accepts exactly five structured reason codes:
 Two consecutive rejections for the same asset and fault within 30 days set
 `reliability_review_required=true`. An approval breaks the consecutive sequence.
 Equal timestamps are deterministically ordered by persisted event sequence.
+The frontend submits one reason using radio selection and requires text only
+when `other` is selected.
+
+## A6 — Execution trace
+
+Agent 7 owns and returns the execution trace. React does not recreate it.
+Non-monitoring work has four steps: work order, notification, parts, and
+maintenance window. Each contains status, owner, deadline, and applicable
+escalation rules. Default adapters are explicitly labelled as mocks.
 
 ## Agent 8 citations
 
@@ -94,9 +106,9 @@ distinguish procedure evidence from learned operational evidence.
 
 ## Configuration
 
-Persona behavior is configured in `config/personas.json`. It includes the seven
-persona templates and the `md` alias. The implementation does not duplicate
-seven separate agent pipelines.
+Persona behavior is configured in `config/personas.json`. Cost, authority, and
+execution policies are configured in `config/decision_support_config.json`.
+The implementation does not duplicate seven separate agent pipelines.
 
 ## Tests
 
@@ -105,7 +117,7 @@ The Group A certification suite is `tests/test_group_a_backend.py`. It covers:
 - the exact seven-persona registry and `md` alias;
 - rejection of unknown personas;
 - grounded verdict-first Agent 6 output;
-- explicit absence of unapproved cost/authority data;
+- configured demo costs, provenance, and persona-specific authority limits;
 - parts ETA versus RUL;
 - SOP and Agent 8 citation separation;
 - traceable historical-case retrieval;
@@ -114,6 +126,10 @@ The Group A certification suite is `tests/test_group_a_backend.py`. It covers:
 - approval resetting the rejection sequence;
 - API routing of rejection feedback to Agent 8;
 - API rejection of unsupported reason codes.
+- Agent 7 four-step trace ownership/deadline/escalation fields;
+- frontend/backend Decision Support, rejection, dashboard, and work-order
+  contract wiring;
+- 50 deterministic and 50 live-LLM chat QC scenarios with Excel evidence.
 
 Run:
 
@@ -123,10 +139,7 @@ Run:
 
 ## Deferred or out of scope
 
-- Approved maintenance and deferred-failure cost sources and calculations.
-- Persona authority thresholds and financial approval rules.
-- Requiring free text conditionally for selected rejection reason codes.
-- A6 four-step execution trace owners, deadlines, and escalation rules.
-- A3/A5 frontend presentation and interaction.
-- A4 frontend escalation timer.
-- All Group B and Group C work.
+- Replace the labelled demo economics with governed ERP/finance values.
+- A4 frontend escalation countdown timer.
+- Production CMMS, inventory, notification, historian, and scheduler adapters.
+- Group B/C visual certification that requires a frontend test runner.

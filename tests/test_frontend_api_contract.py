@@ -20,6 +20,7 @@ def test_swagger_and_openapi_surfaces_are_available(client):
     assert "/api/chat" in paths
     assert "/api/pipeline/run" in paths
     assert "/api/recommendations/reject" in paths
+    assert "/api/dashboard/assets" in paths
 
 
 def test_pipeline_response_has_every_field_read_by_chat_view(client):
@@ -58,3 +59,32 @@ def test_notification_list_and_mark_read_contract(client):
 def test_unknown_persona_is_graceful(client):
     assert client.get("/api/notifications/not-a-persona").status_code == 404
     assert client.post("/api/notifications/not-a-persona/read").status_code == 404
+
+
+def test_dashboard_asset_contract_is_backed_by_agent_pipeline(client):
+    response = TestClient(app).get("/api/dashboard/assets")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["source"] == "backend_agent_pipeline"
+    assert payload["fleet_total"] == len(payload["assets"])
+    assert payload["fleet_total"] >= 3
+    required = {
+        "id", "asset_id", "name", "status", "rul", "vibration",
+        "temperature", "validation_status", "pipeline_log", "source",
+    }
+    assert all(required <= row.keys() for row in payload["assets"])
+    assert all(row["pipeline_log"] for row in payload["assets"])
+
+
+def test_frontend_uses_backend_contracts_for_group_a():
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1] / "frontend" / "react-app" / "src"
+    app_context = (root / "context" / "AppContext.jsx").read_text(encoding="utf-8")
+    chat = (root / "components" / "ChatView" / "ChatView.jsx").read_text(encoding="utf-8")
+    assert "fetchDashboardAssets" in app_context
+    assert "fetchWorkOrders" in app_context
+    assert "data.execution_steps" in chat
+    assert "rejectRecommendation" in chat
+    assert "type=\"radio\"" in chat
+    assert "decision_support" in chat
+    assert "buildExecutionSteps" not in chat

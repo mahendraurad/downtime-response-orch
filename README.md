@@ -270,7 +270,7 @@ python -m pytest tests/test_agent1_to_agent8_integration.py -q
 Current certification:
 
 ```text
-739 passed
+782 passed
 0 failed
 ```
 
@@ -297,17 +297,49 @@ configured upper bound.
 
 All policy files live under `config/`. Important frontend-visible controls include freshness/routing, alert cooldown, retrieval grounding, recommendation approval actions, execution allowlists, learning validation, chat length and reflection limits.
 
+Group A economics, persona authority, and A6 execution ownership/deadlines are
+configured in `config/decision_support_config.json`. Current cost figures are
+labelled demo values (`cost_data_status=configured_demo`) and are not presented
+as ERP/accounting facts.
+
+The frontend retrieves fleet projections from `GET /api/dashboard/assets` and
+work orders from `GET /api/workorders`. Both remain development APIs: fleet
+telemetry comes from registered scenarios and work-order storage is in memory.
+The UI labels its fallback and mock states rather than presenting them as live
+enterprise integrations.
+
+### Chat QC and LangSmith evaluation
+
+The versioned 50-question pack is `quality/chat_qc_questions.json`. It covers
+all seven personas, concepts, known and unknown assets, missing evidence,
+multi-asset planning, HITL-producing full runs, memory, adversarial prompts, and
+fallbacks.
+
+```powershell
+# Deterministic route/evidence baseline and Excel output
+python scripts/run_chat_qc.py --disable-llm
+
+# Live configured LLM run plus LangSmith dataset upload
+python scripts/run_chat_qc.py --publish-langsmith --dataset-name "DRO Chat QC 50"
+```
+
+Reports are written under `quality/results/`. The scoring and production
+feedback process is documented in `quality/LANGSMITH_EVALUATION_PLAN.md`.
+
 Cloud credentials are never required for deterministic local execution. LLM output is non-authoritative and cannot alter telemetry facts, risk calculations, action approval or confirmed maintenance outcomes.
 
 ## Next steps
 
-1. Add PostgreSQL LangGraph conversation/workflow checkpointing (HITL sessions are already durable).
-2. Add authentication, persona authorization and approval permissions.
-3. Replace local/mocked historian, CMMS, inventory and notification adapters.
-4. Move SOP and learned-case retrieval to Azure Blob Storage and Azure AI Search.
-5. Add governed multi-turn conversation memory and cited general-knowledge RAG.
-6. Add centralized immutable audit storage, tracing, metrics and operational alerts.
-7. Validate real LLM endpoints against prompt-injection and grounding evaluations.
-8. Run a shadow pilot against at least three historical or live bearing events.
+1. Configure and validate Azure PostgreSQL for HITL and LangGraph checkpoints.
+2. Replace demo economics and mock historian/CMMS/inventory/notification APIs
+   with governed production adapters.
+3. Add A4's frontend escalation countdown after the backend escalation event
+   contract is approved.
+4. Add frontend component/E2E tests and CI; backend/API certification already
+   runs under pytest.
+5. Bind calibrated LangSmith LLM-as-judge and online evaluators to the uploaded
+   `DRO Chat QC 50` dataset and production chat traces.
+6. Complete governed cited general-knowledge RAG and production audit retention.
+7. Run a shadow pilot against at least three historical or live bearing events.
 
 Detailed historical implementation notes are indexed in [`Reference/README.md`](Reference/README.md).

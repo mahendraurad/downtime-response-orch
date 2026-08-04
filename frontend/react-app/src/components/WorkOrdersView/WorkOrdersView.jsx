@@ -5,11 +5,11 @@ import WorkOrderDetail from './WorkOrderDetail';
 import WorkOrderAI from './WorkOrderAI';
 
 export default function WorkOrdersView() {
-  const { selectedWO, setSelectedWO } = useContext(AppContext);
+  const { workOrders, selectedWO, setSelectedWO } = useContext(AppContext);
 
   return (
     <>
-      <WorkOrderList selectedWO={selectedWO} onSelect={setSelectedWO} />
+      <WorkOrderList workOrders={workOrders} selectedWO={selectedWO} onSelect={setSelectedWO} />
       <div className="wod">
         <WorkOrderDetail wo={selectedWO} />
         <WorkOrderAI wo={selectedWO} />

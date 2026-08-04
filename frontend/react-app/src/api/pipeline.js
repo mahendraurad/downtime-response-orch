@@ -94,6 +94,23 @@ export async function getNotifCounts() {
   return resp.json();
 }
 
+export async function rejectRecommendation(recommendation, reasonCode, freeText = '', persona = 'supervisor') {
+  const response = await authedFetch(`${API}/api/recommendations/reject`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      case_id: recommendation.case_id,
+      asset_id: recommendation.asset_id,
+      fault_mode: recommendation.condition?.fault_type || 'undetermined',
+      reason_code: reasonCode,
+      free_text: freeText,
+      persona,
+    }),
+  });
+  if (!response.ok) throw new Error(`Rejection API HTTP ${response.status}`);
+  return response.json();
+}
+
 export async function getNotifs(personaId) {
   const resp = await fetch(`${API}/api/notifications/${personaId}`);
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);

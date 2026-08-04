@@ -1,11 +1,11 @@
 import React, { useContext } from 'react';
 import { AppContext } from '../context/AppContext';
-import { ASSETS } from '../data/assets';
 
 export default function Topbar() {
   const {
     currentView, setCurrentView,
     theme, setTheme,
+    assets, dataStatus,
   } = useContext(AppContext);
 
   const navItems = [
@@ -15,9 +15,9 @@ export default function Topbar() {
     { id: 'workorders', label: 'Work Orders' },
   ];
 
-  const criticalAssets = ASSETS.filter(a => a.st === 'critical');
-  const warningAssets = ASSETS.filter(a => a.st === 'warning');
-  const healthyAssets = ASSETS.filter(a => a.st === 'healthy');
+  const criticalAssets = assets.filter(a => a.st === 'critical');
+  const warningAssets = assets.filter(a => a.st === 'warning');
+  const healthyAssets = assets.filter(a => a.st === 'healthy');
   const alertCount = criticalAssets.length + warningAssets.length;
 
   function handleAssetClick(assetId) {
@@ -62,7 +62,7 @@ export default function Topbar() {
             {theme === 'light' ? '🌙' : '☀️'}
           </button>
           <div className="ldot"></div>
-          <div className="ltx">LIVE</div>
+          <div className="ltx">{dataStatus.assets === 'backend_agent_pipeline' ? 'BACKEND' : 'DEMO FALLBACK'}</div>
           {alertCount > 0 && (
             <div className="abdg">⚠ {alertCount} ALERTS</div>
           )}
@@ -111,7 +111,7 @@ export default function Topbar() {
         </div>
         <div style={{ marginLeft: 'auto', flexShrink: 0, display: 'flex', alignItems: 'center', gap: '5px' }}>
           <span className="ahr-ts-dot" />
-          <span className="ahr-ts">Live · updated now</span>
+          <span className="ahr-ts">{dataStatus.assets === 'backend_agent_pipeline' ? 'Agent pipeline snapshot' : 'Configured demo fallback'}</span>
         </div>
       </div>
     </>

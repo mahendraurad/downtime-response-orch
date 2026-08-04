@@ -7,6 +7,16 @@ from typing import Any, Dict, List
 from pydantic import BaseModel, Field
 
 
+class ExecutionStep(BaseModel):
+    step_name: str
+    status: str
+    detail: str = ""
+    owner: str = ""
+    deadline: str = ""
+    escalates_to: str = ""
+    escalation_rule: str = ""
+
+
 class ExecutionResult(BaseModel):
     """Executor Agent output."""
     case_id:            str                  = ""
@@ -29,6 +39,10 @@ class ExecutionResult(BaseModel):
     source_recommendation_schema_version: str = ""
     source_prescriptive_config_version: str  = ""
     linked_recommendation_case_id: str       = ""
+    execution_steps:    List[ExecutionStep]  = Field(default_factory=list)
+    completed_steps:    int                  = 0
+    total_steps:        int                  = 0
+    execution_policy_version: str            = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return self.model_dump()

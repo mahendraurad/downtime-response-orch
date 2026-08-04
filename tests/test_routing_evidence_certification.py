@@ -1,8 +1,12 @@
 """Certification of minimum-agent routing and evidence-gated chat results."""
+from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
 import src.api.main as api
+from src.orchestrator.graph import (
+    _sources_executor, _sources_monitoring, _sources_prescriptive,
+)
 from src.tools.data_loader import load_telemetry_rows
 
 
@@ -120,3 +124,44 @@ def test_concept_definition_uses_controlled_non_asset_evidence_only(client):
     data=client.post("/api/chat",json={"message":"What is RUL?"}).json()
     assert data["intent"]=="concept" and data["source_type"]=="controlled_glossary"
     assert data["pipeline_log"]==[] and data["sources"]==[]
+
+
+def test_monitoring_source_uses_canonical_motor_current_field():
+    trusted = SimpleNamespace(raw=SimpleNamespace(
+        vib_rms_mm_s=None, temp_c=None, motor_current_a=12.4,
+    ))
+    assert _sources_monitoring(trusted) == "current"
+    trusted.raw.motor_current_a = None
+    assert "current" not in _sources_monitoring(trusted)
+
+
+def test_prescriptive_sources_report_only_supplied_evidence():
+    unavailable = SimpleNamespace(
+        decision_support=SimpleNamespace(cost_data_status="unavailable")
+    )
+    assert _sources_prescriptive({}, unavailable) == "configured prescriptive rules"
+    configured = SimpleNamespace(
+        decision_support=SimpleNamespace(cost_data_status="configured_demo")
+    )
+    sources = _sources_prescriptive({
+        "inventory_lookup": {"SKF6310": {"qty_on_hand": 1}},
+        "context_lookup": {"planned_stop_windows": [{"window_id": "W1"}]},
+    }, configured)
+    assert sources == (
+        "configured demo cost model · supplied inventory lookup · "
+        "supplied maintenance windows"
+    )
+
+
+def test_executor_sources_distinguish_guard_from_mock_side_effects():
+    guarded = SimpleNamespace(
+        work_order_id="", parts_status=[], notification_status="skipped"
+    )
+    assert _sources_executor(guarded) == "execution guard only"
+    executed = SimpleNamespace(
+        work_order_id="WO-1", parts_status=[{"status": "reserved"}],
+        notification_status="sent",
+    )
+    assert _sources_executor(executed) == (
+        "mock CMMS · mock parts inventory · mock notification service"
+    )

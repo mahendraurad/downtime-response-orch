@@ -18,6 +18,9 @@ from src.schemas.recommendation import (
 from src.schemas.persona import PersonaContext
 from src.tools.persona_formatter import build_persona_context, persona_prompt
 from src.tools.config_loader import PrescriptiveConfig, load_prescriptive_config
+from src.tools.decision_support_config import (
+    decision_support_config_version, load_decision_support_config,
+)
 
 
 # ************** Added by Prateek Mittal on 20th July 2026 ******************
@@ -25,12 +28,19 @@ class PrescriptiveOptimizationAgent:
     """Deterministic decision owner with an optional, non-authoritative LLM writer."""
 
     def __init__(self, cfg: PrescriptiveConfig = None, llm_client=None,
-                 now_fn=None, historical_case_fn=None):
+                 now_fn=None, historical_case_fn=None,
+                 decision_support_config=None):
         self._cfg = cfg or load_prescriptive_config()
         self._cfg.validate()
         self._llm = llm_client
         self._now = now_fn or (lambda: datetime.now(timezone.utc))
         self._historical_case_fn = historical_case_fn
+        self._decision_support = (
+            decision_support_config or load_decision_support_config()
+        )
+        self._decision_support_version = decision_support_config_version(
+            self._decision_support
+        )
         encoded = json.dumps(asdict(self._cfg), sort_keys=True).encode()
         self._version = hashlib.sha256(encoded).hexdigest()[:16]
 
@@ -105,7 +115,6 @@ class PrescriptiveOptimizationAgent:
             risk, diagnosis, trusted_signal, len(historical_rows)
         )
         condition = self._condition(risk, diagnosis, trusted_signal)
-        consequences = self._consequences(risk)
         verdict = self._verdict(risk, diagnosis, chosen, rationale, persona)
         personnel = cfg.personnel
         citations = [
@@ -113,6 +122,11 @@ class PrescriptiveOptimizationAgent:
             for row in historical_rows
         ]
         parts_vs_rul = self._parts_vs_rul(required_parts, risk)
+        decision_support = self._build_decision_support(
+            chosen, duration, risk, trusted_signal, persona,
+            parts_vs_rul, citations,
+        )
+        consequences = self._consequences(risk, decision_support)
         return MaintenanceRecommendation(
             case_id=risk.case_id, asset_id=risk.asset_id, bearing_id=risk.bearing_id,
             recommended_action=RecommendedAction(
@@ -146,12 +160,80 @@ class PrescriptiveOptimizationAgent:
             confidence=confidence, persona_context=persona,
             historical_cases=citations,
             sop_citations=list(guidance.source_documents),
-            cost_data_status="unavailable",
-            authority_check="not_evaluated",
-            decision_support=DecisionSupport(
-                parts_vs_rul=parts_vs_rul,
-                historical_cases=citations,
-            ),
+            cost_data_status=decision_support.cost_data_status,
+            authority_check=decision_support.authority_check,
+            decision_support=decision_support,
+        )
+
+    def _build_decision_support(self, action, duration, risk, trusted_signal,
+                                persona, parts_vs_rul, citations):
+        cfg = self._decision_support
+        cost_cfg = cfg["cost_model"]
+        override = cost_cfg.get("asset_overrides", {}).get(risk.asset_id, {})
+        action_cost = cost_cfg["action_costs"].get(action)
+        downtime_rate = float(
+            getattr(getattr(trusted_signal, "asset_ctx", None),
+                    "downtime_cost_per_hour", 0.0) or 0.0
+        )
+        if override:
+            approved = float(override["cost_if_approved"])
+            deferred = float(override["cost_if_deferred"])
+            deferred_per_hour = float(override["deferred_cost_per_hour"])
+            breakdown = "configured asset-level demo cost override"
+            basis = str(override.get("basis", "configured demo cost model"))
+            status = "configured_demo"
+        elif action_cost and downtime_rate > 0:
+            parts = float(action_cost["parts"])
+            labour = float(action_cost["labour"])
+            downtime = round(float(duration) * downtime_rate, 2)
+            approved = round(parts + labour + downtime, 2)
+            deferred = round(float(risk.financial_exposure), 2)
+            deferred_per_hour = downtime_rate
+            breakdown = (
+                f"parts {parts:.0f} + labour {labour:.0f} + "
+                f"planned downtime {downtime:.0f}"
+            )
+            basis = "config action costs plus Agent 1 asset downtime rate"
+            status = "configured_demo"
+        else:
+            approved = deferred = deferred_per_hour = None
+            breakdown = ""
+            basis = "cost inputs unavailable"
+            status = "unavailable"
+
+        limit = cfg["authority_usd"].get(persona.id)
+        if limit is None or approved is None:
+            authority_check = "not_evaluated"
+            authority_reason = "persona is not an approver or cost inputs are unavailable"
+        elif approved <= float(limit):
+            authority_check = "within_authority"
+            authority_reason = (
+                f"{cfg['currency']} {approved:,.0f} is within the "
+                f"{persona.role} limit of {cfg['currency']} {float(limit):,.0f}"
+            )
+        else:
+            authority_check = "requires_escalation"
+            hierarchy = cfg["approval_hierarchy"]
+            idx = hierarchy.index(persona.id)
+            next_role = hierarchy[min(idx + 1, len(hierarchy) - 1)]
+            authority_reason = (
+                f"{cfg['currency']} {approved:,.0f} exceeds the "
+                f"{persona.role} limit; escalate to {next_role}"
+            )
+        return DecisionSupport(
+            cost_if_approved=approved,
+            cost_if_deferred=deferred,
+            deferred_cost_per_hour=deferred_per_hour,
+            cost_breakdown=breakdown,
+            cost_basis=basis,
+            currency=cfg["currency"],
+            cost_data_status=status,
+            parts_vs_rul=parts_vs_rul,
+            historical_cases=citations,
+            authority_check=authority_check,
+            authority_reason=authority_reason,
+            authority_limit=float(limit) if limit is not None else None,
+            decision_support_config_version=self._decision_support_version,
         )
 
     @staticmethod
@@ -276,7 +358,11 @@ class PrescriptiveOptimizationAgent:
         )
 
     @staticmethod
-    def _consequences(risk):
+    def _consequences(risk, decision_support):
+        has_costs = (
+            decision_support.cost_if_approved is not None
+            and decision_support.cost_if_deferred is not None
+        )
         return [
             Consequence(
                 type="time",
@@ -286,7 +372,14 @@ class PrescriptiveOptimizationAgent:
             Consequence(
                 type="financial",
                 description="Cost if approved versus deferred",
-                value=None, evidence_status="unavailable",
+                value=(
+                    f"{decision_support.currency} "
+                    f"{decision_support.cost_if_approved:,.0f} approved versus "
+                    f"{decision_support.currency} "
+                    f"{decision_support.cost_if_deferred:,.0f} deferred"
+                    if has_costs else None
+                ),
+                evidence_status="configured_demo" if has_costs else "unavailable",
             ),
             Consequence(
                 type="cascade",

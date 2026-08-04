@@ -1,0 +1,42 @@
+{
+  "version": "1.0",
+  "currency": "USD",
+  "cost_model": {
+    "action_costs": {
+      "stop_and_replace": {"parts": 8000, "labour": 12000},
+      "bearing_replacement": {"parts": 8000, "labour": 12000},
+      "repair_next_planned_stop": {"parts": 6000, "labour": 9000},
+      "lubrication_service": {"parts": 500, "labour": 1500},
+      "inspect_next_shift": {"parts": 0, "labour": 1200},
+      "inspection": {"parts": 0, "labour": 1200},
+      "derate_and_monitor": {"parts": 0, "labour": 600},
+      "continue_monitoring": {"parts": 0, "labour": 300}
+    },
+    "deferred_failure_multiplier": 7.0,
+    "asset_overrides": {
+      "AST_MTR_001": {
+        "cost_if_approved": 48000,
+        "cost_if_deferred": 2016000,
+        "deferred_cost_per_hour": 7500,
+        "basis": "approved DRO demo figures: planned intervention versus unplanned failure and secondary damage"
+      }
+    }
+  },
+  "authority_usd": {
+    "supervisor": 100000,
+    "manager": 1000000,
+    "executive": 5000000
+  },
+  "approval_hierarchy": ["supervisor", "manager", "executive"],
+  "execution_steps": {
+    "work_order": {"owner": "Maintenance Planner", "deadline": "immediate"},
+    "notifications": {"owner": "Plant Supervisor", "deadline": "within 15 minutes"},
+    "parts": {"owner": "Maintenance Planner", "deadline": "before RUL minimum"},
+    "maintenance_window": {
+      "owner": "Plant Supervisor",
+      "deadline": "within 4 hours",
+      "escalates_to": "Plant Manager",
+      "next_escalation": "VP Operations"
+    }
+  }
+}
