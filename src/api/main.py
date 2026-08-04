@@ -1876,34 +1876,6 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
                 "row_index": -1,
                 "evidence_source": "registered_demo_scenario",
             })
-    # Auto-build fleet_snapshot for multi-asset demo queries when ALL requested
-    # assets are registered demo scenarios and auto_load is enabled — mirrors the
-    # single-asset auto-load at line 1819.
-    # Also rebuilds when a stale snapshot from a prior turn doesn't cover the
-    # currently requested assets (e.g. user asked M-104/P-207 then M-089/G-112).
-    _existing_fleet = context.get("fleet_snapshot")
-    _requested_displays = {d for d, _, _ in requested_assets}
-    _fleet_stale = (
-        not isinstance(_existing_fleet, dict)
-        or not _requested_displays.issubset(_existing_fleet.keys())
-    )
-    if (len(requested_assets) > 1
-            and _fleet_stale
-            and _ORCH_CONFIG["chat"].get("auto_load_registered_demo_scenarios", False)):
-        _auto_fleet: Dict[str, Any] = {}
-        for _disp, _asset_id, _scenario in requested_assets:
-            try:
-                _auto_fleet[_disp] = {
-                    "signal": _get_demo_signal(_scenario, -1),
-                    "scenario": _scenario,
-                    "row_index": -1,
-                    "evidence_source": "registered_demo_scenario",
-                }
-            except Exception:
-                pass
-        if len(_auto_fleet) == len(requested_assets):
-            context["fleet_snapshot"] = _auto_fleet
-
     effective_message=req.message
     if pending and (incoming or explicit_asset or scenario or context.get("timeframe")):
         effective_message=context["_pending_message"]
