@@ -1,5 +1,6 @@
 import React, { useContext, useState } from 'react';
 import { AppContext } from '../../context/AppContext';
+import { patchWorkOrder } from '../../api/workOrders';
 
 const PR_COLOR = { URGENT: 'var(--rd)', MEDIUM: 'var(--am)', LOW: 'var(--gn)' };
 const PR_BG = { URGENT: 'var(--rdm)', MEDIUM: 'var(--adm)', LOW: 'var(--gd)' };
@@ -7,12 +8,12 @@ const PR_BG = { URGENT: 'var(--rdm)', MEDIUM: 'var(--adm)', LOW: 'var(--gd)' };
 const WO_PERSONA_ACTS = {
   supervisor: {
     pending: [
-      { l: '✓ Approve WO', cls: 'wpablu', q: 'Approve WO-2024-1847 — confirm Wednesday 06:00 crew deployment and release all logistics' },
+      { l: '✓ Approve WO', cls: 'wpablu', newSt: 'Scheduled', q: 'Approve WO-2024-1847 — confirm Wednesday 06:00 crew deployment and release all logistics' },
       { l: '🤖 Why this WO?', cls: 'wpagry', q: 'Why did DRO create this WO? Explain the fault evidence and urgency' },
       { l: '✗ Reject', cls: 'wpared', q: 'Reject this WO — what further evidence or conditions are needed before resubmitting?' },
     ],
     scheduled: [
-      { l: '▶ Mark In Progress', cls: 'wpablu', q: 'Mark this WO as in progress — confirm crew is on site and work has started' },
+      { l: '▶ Mark In Progress', cls: 'wpablu', newSt: 'In Progress', q: 'Mark this WO as in progress — confirm crew is on site and work has started' },
       { l: '📅 Reschedule', cls: 'wpagry', q: 'Reschedule this WO — what is the next available window without increasing M-104 failure risk?' },
     ],
     closed: [
@@ -50,7 +51,7 @@ const WO_PERSONA_ACTS = {
   },
   manager: {
     pending: [
-      { l: '✓ Approve from Ops Level', cls: 'wpablu', q: 'Approve this WO at Plant Manager level — confirm Wednesday window is authorised' },
+      { l: '✓ Approve from Ops Level', cls: 'wpablu', newSt: 'Scheduled', q: 'Approve this WO at Plant Manager level — confirm Wednesday window is authorised' },
       { l: '💰 Cost-Benefit Model', cls: 'wpagrn', q: 'Full cost-benefit: planned $18K vs emergency $619K+ — detailed breakdown and net avoidance case' },
     ],
     scheduled: [
@@ -65,7 +66,7 @@ const WO_PERSONA_ACTS = {
   executive: {
     pending: [
       { l: '💰 Financial Exposure', cls: 'wpared', q: 'Probability-weighted financial exposure if this WO is not approved today. Show expected value calculation' },
-      { l: '✓ Executive Approval', cls: 'wpablu', q: 'Approve at executive level — confirm strategic priority and resource commitment' },
+      { l: '✓ Executive Approval', cls: 'wpablu', newSt: 'Scheduled', q: 'Approve at executive level — confirm strategic priority and resource commitment' },
     ],
     scheduled: [
       { l: '📊 KPI Contribution', cls: 'wpablu', q: 'How does this WO contribute to Q3 reliability KPIs and DRO ROI metrics for executive scorecard?' },
@@ -107,7 +108,7 @@ const WO_PERSONA_ACTS = {
 };
 
 export default function WorkOrderDetail({ wo }) {
-  const { persona } = useContext(AppContext);
+  const { persona, updateWOStatus } = useContext(AppContext);
   const [checklist, setChecklist] = useState(() => wo ? wo.cl.map(item => ({ ...item })) : []);
 
   // Sync checklist when wo changes
@@ -122,12 +123,15 @@ export default function WorkOrderDetail({ wo }) {
   const sc = wo.st === 'Pending' ? 'var(--am)' : wo.st === 'Scheduled' ? 'var(--ac2)' : wo.st === 'Closed' ? 'var(--t3)' : 'var(--gn)';
   const sb = wo.st === 'Pending' ? 'var(--adm)' : wo.st === 'Scheduled' ? 'var(--ag)' : 'rgba(255,255,255,.04)';
 
+  const STATUS_ORDER = { 'Pending': 0, 'Scheduled': 1, 'In Progress': 2, 'Closed': 3 };
+  const currentStatusOrder = STATUS_ORDER[wo.st] ?? 0;
   const stateKey = wo.st === 'Closed' ? 'closed' : wo.st === 'Pending' ? 'pending' : 'scheduled';
   const acts = ((WO_PERSONA_ACTS[persona] || WO_PERSONA_ACTS.supervisor)[stateKey] || WO_PERSONA_ACTS.supervisor.pending);
 
   function toggleChecklist(i) {
-    const updated = checklist.map((item, idx) => idx === i ? { ...item, ck: !item.ck } : item);
-    setChecklist(updated);
+    const newDone = !checklist[i].ck;
+    setChecklist(prev => prev.map((item, idx) => idx === i ? { ...item, ck: newDone } : item));
+    patchWorkOrder(wo.id, { checklist_index: i, checklist_done: newDone }).catch(() => {});
   }
 
   return (
@@ -141,15 +145,23 @@ export default function WorkOrderDetail({ wo }) {
         <div className="wodtt">{wo.id} — {wo.ti}</div>
         <div className="wodsu">Created by {wo.by} · {wo.as} · Est. {wo.est}</div>
         <div className="wod-pacts">
-          {acts.map((act, i) => (
-            <button
-              key={i}
-              className={`wpa ${act.cls}`}
-              onClick={() => window.dispatchEvent(new CustomEvent('dro-wo-ask', { detail: act.q }))}
-            >
-              {act.l}
-            </button>
-          ))}
+          {acts.map((act, i) => {
+            const alreadyApplied = act.newSt && (STATUS_ORDER[act.newSt] ?? 0) <= currentStatusOrder;
+            return (
+              <button
+                key={i}
+                className={`wpa ${act.cls}`}
+                disabled={alreadyApplied}
+                style={alreadyApplied ? { opacity: 0.35, cursor: 'not-allowed' } : {}}
+                onClick={() => {
+                  if (act.newSt) updateWOStatus(wo.id, act.newSt);
+                  window.dispatchEvent(new CustomEvent('dro-wo-ask', { detail: act.q }));
+                }}
+              >
+                {act.l}
+              </button>
+            );
+          })}
         </div>
       </div>
 

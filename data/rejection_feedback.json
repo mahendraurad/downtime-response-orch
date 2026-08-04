@@ -40,5 +40,19 @@
     "fault_mode": "rolling_element_fault",
     "decision": "approved",
     "decided_at": "2026-08-03T09:16:25.086128+00:00"
+  },
+  {
+    "case_id": "ANOM-BRG_001-2026-05-20T12:00:00Z",
+    "asset_id": "AST_MTR_001",
+    "fault_mode": "outer_race_fault",
+    "decision": "approved",
+    "decided_at": "2026-08-04T11:25:56.802194+00:00"
+  },
+  {
+    "case_id": "ANOM-BRG_011-2026-05-20T10:00:00Z",
+    "asset_id": "AST_GBX_001",
+    "fault_mode": "rolling_element_fault",
+    "decision": "approved",
+    "decided_at": "2026-08-04T11:31:40.969960+00:00"
   }
 ]

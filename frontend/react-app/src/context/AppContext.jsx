@@ -3,7 +3,7 @@ import { ASSETS } from '../data/assets';
 import { WOS } from '../data/workOrders';
 import { getNotifCounts } from '../api/pipeline';
 import { fetchDashboardAssets } from '../api/dashboard';
-import { fetchWorkOrders } from '../api/workOrders';
+import { fetchWorkOrders, patchWorkOrder } from '../api/workOrders';
 import { useAuth } from './AuthContext';
 
 export const AppContext = createContext(null);
@@ -35,9 +35,9 @@ export function AppProvider({ children }) {
   const [currentView, setCurrentView] = useState('chat');
   const [agentAsset, setAgentAsset] = useState('M-104');
   const [assets, setAssets] = useState(ASSETS);
-  const [workOrders, setWorkOrders] = useState(WOS);
+  const [workOrders, setWorkOrders] = useState([]);
   const [selectedAsset, setSelectedAsset] = useState(ASSETS[0]);
-  const [selectedWO, setSelectedWO] = useState(WOS[0]);
+  const [selectedWO, setSelectedWO] = useState(null);
   const [dataStatus, setDataStatus] = useState({ assets: 'fallback', workOrders: 'fallback' });
   const [selectedNode, setSelectedNode] = useState(0);
   const [currentAgTab, setCurrentAgTab] = useState('overview');
@@ -74,27 +74,69 @@ export function AppProvider({ children }) {
     }).catch(() => setDataStatus(current => ({ ...current, assets: 'fallback' })));
 
     const fallbackByWO = Object.fromEntries(WOS.map(wo => [wo.id, wo]));
+
+    function mergeWOs(payload) {
+      const rows = (payload.workorders || []).map(wo => {
+        const fb = fallbackByWO[wo.id] || {};
+        return {
+          ...fb,
+          id: wo.id,
+          pr: wo.priority || 'MEDIUM',
+          st: wo.status || 'Pending',
+          ti: wo.title || wo.description || wo.id,
+          as: wo.asset_display || wo.asset_id || fb.as || '',
+          asgn: wo.assigned_to || 'Pending',
+          due: wo.due || 'Not scheduled',
+          by: wo.created_by || 'DRO Agent',
+          tp: wo.type || 'Maintenance',
+          est: wo.est_hours ? `${wo.est_hours}h` : (fb.est || ''),
+          parts: wo.parts || fb.parts || '',
+          rul: wo.rul ?? fb.rul ?? '—',
+          risk: wo.risk ?? fb.risk ?? '—',
+          cost: wo.cost ?? fb.cost ?? '—',
+          cl: (wo.checklist || []).map(item => ({
+            ck: Boolean(item.done), tx: item.text, tg: item.tag || 'Task',
+          })),
+          tl: wo.timeline?.length
+            ? wo.timeline.map(ev => ({ dot: ev.dot || 'var(--t3)', ev: ev.ev, tm: ev.tm }))
+            : (fb.tl || []),
+          backend_source: 'api/workorders',
+        };
+      });
+      return rows;
+    }
+
     fetchWorkOrders().then(payload => {
       if (!active) return;
-      const rows = (payload.workorders || []).map(wo => ({
-        ...(fallbackByWO[wo.id] || {}),
-        id: wo.id, pr: wo.priority || 'MEDIUM', st: wo.status || 'Pending',
-        ti: wo.title || wo.description || wo.id, as: wo.asset_id || '',
-        asgn: wo.assigned_to || 'Pending', due: wo.due || 'Not scheduled',
-        by: wo.created_by || 'DRO Agent', tp: wo.type || 'Maintenance',
-        est: wo.est_hours ? `${wo.est_hours}h` : '', parts: wo.parts || '',
-        cl: (wo.checklist || []).map(item => ({
-          ck: Boolean(item.done), tx: item.text, tg: item.tag || 'Task',
-        })),
-        backend_source: 'api/workorders',
-      }));
+      const rows = mergeWOs(payload);
       if (rows.length) {
         setWorkOrders(rows);
         setSelectedWO(current => rows.find(wo => wo.id === current?.id) || rows[0]);
         setDataStatus(current => ({ ...current, workOrders: 'backend' }));
       }
     }).catch(() => setDataStatus(current => ({ ...current, workOrders: 'fallback' })));
-    return () => { active = false; };
+
+    // Poll every 30s to pick up WOs created by backend agents (e.g. HITL executor)
+    const pollInterval = setInterval(() => {
+      if (!active) return;
+      fetchWorkOrders().then(payload => {
+        if (!active) return;
+        const rows = mergeWOs(payload);
+        if (rows.length) {
+          setWorkOrders(prev => {
+            // Only update if something actually changed (new WO count or status diff)
+            const hasNew = rows.length !== prev.length ||
+              rows.some(r => {
+                const existing = prev.find(p => p.id === r.id);
+                return !existing || existing.st !== r.st;
+              });
+            return hasNew ? rows : prev;
+          });
+        }
+      }).catch(() => {});
+    }, 30_000);
+
+    return () => { active = false; clearInterval(pollInterval); };
   }, []);
 
   // Per-persona message store, backed by sessionStorage so history survives persona switches
@@ -146,6 +188,21 @@ export function AppProvider({ children }) {
     getNotifCounts().then(setNotifCounts).catch(() => {});
   }, []);
 
+  const updateWOStatus = useCallback((id, newStatus) => {
+    const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const dotColor = newStatus === 'Scheduled' ? 'var(--gn)'
+      : newStatus === 'In Progress' ? 'var(--ac2)'
+      : newStatus === 'Closed' ? 'var(--t3)'
+      : 'var(--am)';
+    const timeEntry = { dot: dotColor, ev: `Status updated to ${newStatus}`, tm: `Today ${now}` };
+    const applyUpdate = wo => wo.id === id
+      ? { ...wo, st: newStatus, tl: [timeEntry, ...(wo.tl || [])] }
+      : wo;
+    setWorkOrders(prev => prev.map(applyUpdate));
+    setSelectedWO(prev => prev?.id === id ? applyUpdate(prev) : prev);
+    patchWorkOrder(id, { status: newStatus }).catch(() => {});
+  }, []);
+
   return (
     <AppContext.Provider value={{
       persona, setPersona,
@@ -161,6 +218,7 @@ export function AppProvider({ children }) {
       theme, setTheme,
       notifCounts, refreshNotifCounts,
       showLeftPanel, setShowLeftPanel,
+      updateWOStatus,
     }}>
       {children}
     </AppContext.Provider>

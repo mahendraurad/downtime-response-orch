@@ -565,38 +565,9 @@ def auth_me(user: Dict = Depends(get_current_user)):
 
 
 # ── In-memory work-order store ────────────────────────────────────────────────
-_WORKORDERS: List[Dict] = [
-    {
-        "id": "WO-2024-1847", "priority": "URGENT", "status": "Pending",
-        "title": "M-104 Drive-End Bearing Replacement",
-        "asset_id": "M-104", "type": "Corrective", "est_hours": 4,
-        "parts": "SKF 6310-2RS (Bin A-14)", "assigned_to": "Pending",
-        "due": "Wed 06:00", "created_by": "DRO Agent",
-        "checklist": [
-            {"text": "LOTO permit EL-104-A obtained and valid", "done": True, "tag": "Safety"},
-            {"text": "Assign crew: T.Rodriguez (lead) + K.Mensah", "done": False, "tag": "Crew"},
-            {"text": "Confirm SKF 6310-2RS at Bin A-14", "done": False, "tag": "Parts"},
-            {"text": "Brief crew on SOP M-104-REP-04 Rev 4.1", "done": False, "tag": "Safety"},
-            {"text": "Isolate M-104 per LOTO EL-104-A", "done": False, "tag": "LOTO"},
-            {"text": "Replace bearing, torque 85 Nm", "done": False, "tag": "Technical"},
-            {"text": "Post-repair vibration baseline ≤2.5 mm/s", "done": False, "tag": "QA"},
-        ],
-    },
-    {
-        "id": "WO-2024-1831", "priority": "MEDIUM", "status": "Scheduled",
-        "title": "P-207 Feed Pump – Lubrication & Vibration Check",
-        "asset_id": "P-207", "type": "Preventive", "est_hours": 2,
-        "parts": "Mobil SHC 100 (1L)", "assigned_to": "T. Rodriguez",
-        "due": "Wed 09:00", "created_by": "DRO Agent",
-        "checklist": [
-            {"text": "LOTO IL-207-B issued and current", "done": True, "tag": "Safety"},
-            {"text": "Mobil SHC 100 collected from stores", "done": True, "tag": "Parts"},
-            {"text": "Inspect bearing and lubrication state", "done": False, "tag": "Technical"},
-            {"text": "Re-lubricate and reassemble", "done": False, "tag": "Technical"},
-            {"text": "Post-lube vibration check – log baseline", "done": False, "tag": "QA"},
-        ],
-    },
-]
+# Starts empty — WOs are created dynamically via POST /api/workorders or
+# bridged in from the Executor Agent when a HITL approval is processed.
+_WORKORDERS: List[Dict] = []
 
 _WO_INDEX = {wo["id"]: wo for wo in _WORKORDERS}
 
@@ -1682,6 +1653,47 @@ def executor_run(req: ExecutorRunRequest, user: Dict = Depends(get_current_user)
             _learning_agent().record_approval(
                 rec.case_id, rec.asset_id, rec.condition.fault_type
             )
+            # Bridge HITL-approved WOs into the work-order store so the frontend
+            # picks them up via the /api/workorders poll.
+            wo_id = result.work_order_id
+            if wo_id and wo_id not in _WO_INDEX:
+                _ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+                _new_wo: Dict[str, Any] = {
+                    "id": wo_id,
+                    "priority": (rec.urgency or "medium").upper(),
+                    "status": "Pending",
+                    "title": (
+                        (rec.recommended_action.description if rec.recommended_action else None)
+                        or rec.condition.fault_type
+                        or "Maintenance Work Order"
+                    )[:120],
+                    "asset_id": rec.asset_id,
+                    "asset_display": rec.asset_id,
+                    "type": "Corrective",
+                    "est_hours": None,
+                    "parts": ", ".join(
+                        p.part_number for p in (rec.required_parts or [])
+                    ) or "",
+                    "assigned_to": "Pending",
+                    "due": "TBD",
+                    "created_by": "DRO Agent",
+                    "rul": None,
+                    "risk": (rec.urgency or "medium").upper(),
+                    "cost": None,
+                    "checklist": [],
+                    "timeline": [
+                        {
+                            "dot": "var(--pu)",
+                            "ev": (
+                                f"WO auto-created by Executor Agent — "
+                                f"{rec.condition.fault_type or rec.asset_id}"
+                            ),
+                            "tm": _ts,
+                        }
+                    ],
+                }
+                _WORKORDERS.append(_new_wo)
+                _WO_INDEX[wo_id] = _new_wo
         return result.model_dump()
     except Exception as exc:
         raise HTTPException(400, f"Executor error: {exc}")
