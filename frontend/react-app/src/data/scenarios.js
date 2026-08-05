@@ -44,7 +44,7 @@ export const SAMPLE_REC = {
   approval_status: 'pending',
   responsible_person: 'Plant Supervisor – James Kowalski',
   responsible_person_id: 'PERSONA_SUP',
-  responsible_approver: 'Plant Supervisor – James Kowalski',
+  responsible_approver: 'Plant Supervisor – Jam Kowalski',
   responsible_approver_id: 'PERSONA_SUP',
   contributors: [
     { role: 'Reliability Engineer', name: 'Sarah Chen', concern: 'confirms bearing fault classification' },

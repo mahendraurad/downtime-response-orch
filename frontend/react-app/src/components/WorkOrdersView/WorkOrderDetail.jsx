@@ -1,6 +1,7 @@
 import React, { useContext, useState } from 'react';
 import { AppContext } from '../../context/AppContext';
 import { patchWorkOrder } from '../../api/workOrders';
+import { askChat } from '../../api/chat';
 
 const PR_COLOR = { URGENT: 'var(--rd)', MEDIUM: 'var(--am)', LOW: 'var(--gn)' };
 const PR_BG = { URGENT: 'var(--rdm)', MEDIUM: 'var(--adm)', LOW: 'var(--gd)' };
@@ -9,7 +10,7 @@ const WO_PERSONA_ACTS = {
   supervisor: {
     pending: [
       { l: '✓ Approve WO', cls: 'wpablu', newSt: 'Scheduled', q: 'Approve WO-2024-1847 — confirm Wednesday 06:00 crew deployment and release all logistics' },
-      { l: '🤖 Why this WO?', cls: 'wpagry', q: 'Why did DRO create this WO? Explain the fault evidence and urgency' },
+      { l: '🤖 Why this WO?', cls: 'wpagry', why: true, q: 'Why did DRO create this WO? Explain the fault evidence and urgency' },
       { l: '✗ Reject', cls: 'wpared', q: 'Reject this WO — what further evidence or conditions are needed before resubmitting?' },
     ],
     scheduled: [
@@ -110,11 +111,31 @@ const WO_PERSONA_ACTS = {
 export default function WorkOrderDetail({ wo }) {
   const { persona, updateWOStatus } = useContext(AppContext);
   const [checklist, setChecklist] = useState(() => wo ? wo.cl.map(item => ({ ...item })) : []);
+  const [whyAnswer, setWhyAnswer] = useState(null);
+  const [whyLoading, setWhyLoading] = useState(false);
 
-  // Sync checklist when wo changes
+  // Sync checklist and reset why answer when wo changes
   React.useEffect(() => {
     if (wo) setChecklist(wo.cl.map(item => ({ ...item })));
+    setWhyAnswer(null);
   }, [wo && wo.id]);
+
+  async function handleWhyClick(q) {
+    if (whyLoading) return;
+    if (whyAnswer !== null) { setWhyAnswer(null); return; }
+    setWhyLoading(true);
+    try {
+      const woPrefix = wo
+        ? `[Work Order: ${wo.id} | Title: ${wo.ti} | Asset: ${wo.as} | Status: ${wo.st} | Priority: ${wo.pr} | RUL: ${wo.rul} | Risk: ${wo.risk}]\n\n`
+        : '';
+      const data = await askChat({ message: woPrefix + q, persona });
+      setWhyAnswer(data.response || data.message || 'No answer returned.');
+    } catch {
+      setWhyAnswer('Could not fetch answer. Please try again.');
+    } finally {
+      setWhyLoading(false);
+    }
+  }
 
   if (!wo) return <div className="wodhdr"><div style={{ padding: '16px', color: 'var(--t3)' }}>Select a work order</div></div>;
 
@@ -151,18 +172,25 @@ export default function WorkOrderDetail({ wo }) {
               <button
                 key={i}
                 className={`wpa ${act.cls}`}
-                disabled={alreadyApplied}
+                disabled={alreadyApplied || (act.why && whyLoading)}
                 style={alreadyApplied ? { opacity: 0.35, cursor: 'not-allowed' } : {}}
                 onClick={() => {
                   if (act.newSt) updateWOStatus(wo.id, act.newSt);
-                  window.dispatchEvent(new CustomEvent('dro-wo-ask', { detail: act.q }));
+                  if (act.why) handleWhyClick(act.q);
                 }}
               >
-                {act.l}
+                {act.why && whyLoading ? '…' : act.l}
               </button>
             );
           })}
         </div>
+        {(whyLoading || whyAnswer) && (
+          <div style={{ margin: '10px 0 0', padding: '12px 14px', borderRadius: '8px', background: 'var(--sf)', border: '1px solid var(--b)', borderLeft: '3px solid var(--ac2)', fontSize: '12px', color: 'var(--t2)', lineHeight: '1.7' }}>
+            {whyLoading
+              ? <span style={{ color: 'var(--t3)', fontStyle: 'italic' }}>Agent thinking…</span>
+              : whyAnswer}
+          </div>
+        )}
       </div>
 
       <div className="wodbody">

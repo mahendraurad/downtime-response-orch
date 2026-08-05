@@ -10,6 +10,36 @@ import { activeEscalationStep, remainingSeconds } from '../utils/escalationTimer
 export const AppContext = createContext(null);
 
 const SESSION_KEY = 'dro-chat';
+
+const WO_FALLBACK = Object.fromEntries(WOS.map(wo => [wo.id, wo]));
+
+function mergeWOs(payload) {
+  return (payload.workorders || []).map(wo => {
+    const fb = WO_FALLBACK[wo.id] || {};
+    return {
+      ...fb,
+      id: wo.id,
+      pr: wo.priority || 'MEDIUM',
+      st: wo.status || 'Pending',
+      ti: wo.title || wo.description || wo.id,
+      as: wo.asset_display || wo.asset_id || fb.as || '',
+      asgn: wo.assigned_to || 'Pending',
+      due: wo.due || 'Not scheduled',
+      by: wo.created_by || 'DRO Agent',
+      tp: wo.type || 'Maintenance',
+      est: wo.est_hours ? `${wo.est_hours}h` : (fb.est || ''),
+      parts: wo.parts || fb.parts || '',
+      rul: wo.rul ?? fb.rul ?? '—',
+      risk: wo.risk ?? fb.risk ?? '—',
+      cost: wo.cost ?? fb.cost ?? '—',
+      cl: (wo.checklist || []).map(item => ({ ck: Boolean(item.done), tx: item.text, tg: item.tag || 'Task' })),
+      tl: wo.timeline?.length
+        ? wo.timeline.map(ev => ({ dot: ev.dot || 'var(--t3)', ev: ev.ev, tm: ev.tm }))
+        : (fb.tl || []),
+      backend_source: 'api/workorders',
+    };
+  });
+}
 const MAX_MSGS_PER_PERSONA = 120;
 
 function loadSession() {
@@ -73,39 +103,6 @@ export function AppProvider({ children }) {
         setDataStatus(current => ({ ...current, assets: payload.source || 'backend' }));
       }
     }).catch(() => setDataStatus(current => ({ ...current, assets: 'fallback' })));
-
-    const fallbackByWO = Object.fromEntries(WOS.map(wo => [wo.id, wo]));
-
-    function mergeWOs(payload) {
-      const rows = (payload.workorders || []).map(wo => {
-        const fb = fallbackByWO[wo.id] || {};
-        return {
-          ...fb,
-          id: wo.id,
-          pr: wo.priority || 'MEDIUM',
-          st: wo.status || 'Pending',
-          ti: wo.title || wo.description || wo.id,
-          as: wo.asset_display || wo.asset_id || fb.as || '',
-          asgn: wo.assigned_to || 'Pending',
-          due: wo.due || 'Not scheduled',
-          by: wo.created_by || 'DRO Agent',
-          tp: wo.type || 'Maintenance',
-          est: wo.est_hours ? `${wo.est_hours}h` : (fb.est || ''),
-          parts: wo.parts || fb.parts || '',
-          rul: wo.rul ?? fb.rul ?? '—',
-          risk: wo.risk ?? fb.risk ?? '—',
-          cost: wo.cost ?? fb.cost ?? '—',
-          cl: (wo.checklist || []).map(item => ({
-            ck: Boolean(item.done), tx: item.text, tg: item.tag || 'Task',
-          })),
-          tl: wo.timeline?.length
-            ? wo.timeline.map(ev => ({ dot: ev.dot || 'var(--t3)', ev: ev.ev, tm: ev.tm }))
-            : (fb.tl || []),
-          backend_source: 'api/workorders',
-        };
-      });
-      return rows;
-    }
 
     fetchWorkOrders().then(payload => {
       if (!active) return;
@@ -247,6 +244,19 @@ export function AppProvider({ children }) {
     getNotifCounts().then(setNotifCounts).catch(() => {});
   }, []);
 
+  const refreshWorkOrders = useCallback(() => {
+    fetchWorkOrders().then(payload => {
+      const rows = mergeWOs(payload);
+      if (rows.length) {
+        setWorkOrders(prev => {
+          const hasNew = rows.length !== prev.length ||
+            rows.some(r => { const ex = prev.find(p => p.id === r.id); return !ex || ex.st !== r.st; });
+          return hasNew ? rows : prev;
+        });
+      }
+    }).catch(() => {});
+  }, []);
+
   const updateWOStatus = useCallback((id, newStatus) => {
     const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const dotColor = newStatus === 'Scheduled' ? 'var(--gn)'
@@ -272,7 +282,8 @@ export function AppProvider({ children }) {
       selectedWO, setSelectedWO,
       selectedNode, setSelectedNode,
       currentAgTab, setCurrentAgTab,
-      messages, setMessages, addMessage, clearMessages, patchMessage, pushNotification,
+      messages, messagesMap, setMessages, addMessage, clearMessages, patchMessage, pushNotification,
+      refreshWorkOrders,
       pipelineRunning, setPipelineRunning,
       theme, setTheme,
       notifCounts, refreshNotifCounts,

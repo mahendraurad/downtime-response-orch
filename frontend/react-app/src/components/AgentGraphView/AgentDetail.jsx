@@ -402,6 +402,8 @@ function PersonaTasksPanel({ persona, asset, selectedNode }) {
   );
 }
 
+// ─── Escalations Panel ───────────────────────────────────────────────────────
+
 // ─── Actions Panel ───────────────────────────────────────────────────────────
 
 const URGENCY_STYLE = {
