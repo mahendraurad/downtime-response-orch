@@ -35,6 +35,7 @@ import sys
 import time
 import uuid
 from copy import deepcopy
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Literal
 
@@ -47,22 +48,14 @@ from langsmith import traceable
 
 # Make repo root importable when run as: python -m src.api.main
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
-_ENV_PATH = os.path.join(os.path.dirname(__file__), "..", "..", ".env")
-try:
-    from dotenv import load_dotenv
-    load_dotenv(_ENV_PATH)
-except ImportError:
-    # Keep existing environments runnable before requirements are refreshed.
-    if os.path.exists(_ENV_PATH):
-        with open(_ENV_PATH, "r", encoding="utf-8") as _env_file:
-            for _line in _env_file:
-                _line = _line.strip()
-                if not _line or _line.startswith("#") or "=" not in _line:
-                    continue
-                _name, _value = _line.split("=", 1)
-                os.environ.setdefault(_name.strip(), _value.strip().strip('"').strip("'"))
+from src.tools.environment import load_project_environment
+load_project_environment()
 
-from src.orchestrator.graph import run_pipeline
+from src.orchestrator.graph import (
+    close_graph_resources,
+    graph_checkpoint_health,
+    run_pipeline,
+)
 from src.api.auth import (
     LoginRequest, LoginResponse,
     authenticate_user, create_access_token,
@@ -77,8 +70,20 @@ from src.tools.orchestrator_audit import write_audit
 from src.tools.llm_client import LLMClient
 from src.tools.hitl_repository import build_hitl_repository
 from src.tools.persona_formatter import build_persona_context
+from src.tools.governed_rag import GovernedKnowledgeRAG
+from src.tools.observability import flush_observability
 
-app = FastAPI(title="DRO API", version="1.0.0")
+
+@asynccontextmanager
+async def _application_lifespan(_app: FastAPI):
+    yield
+    if hasattr(_HITL_REPOSITORY, "close"):
+        _HITL_REPOSITORY.close()
+    close_graph_resources()
+    flush_observability()
+
+
+app = FastAPI(title="DRO API", version="1.0.0", lifespan=_application_lifespan)
 
 _ORCH_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "config", "orchestrator_config.json")
 with open(_ORCH_CONFIG_PATH, "r", encoding="utf-8") as _fh:
@@ -89,16 +94,6 @@ _REFLEXION = ReflexionAgent(
     max_iterations=_ORCH_CONFIG["reflection"].get("max_refinement_iterations", 3),
 )
 _CHAT_LLM = LLMClient()   # reads AZURE_AI_* env vars; silently skipped if not configured
-
-_CHAT_LLM_SYSTEM = (
-    "You are a rotating-equipment reliability engineer assisting a plant maintenance team. "
-    "Answer general reliability and maintenance questions concisely using ISO/IEE standards and best practices. "
-    "If the question requires specific asset telemetry, real-time sensor readings, or on-site measurements "
-    "that you do not have, set requires_telemetry to true so the user can be prompted to provide them. "
-    "Never fabricate specific RUL values, vibration readings, temperatures, or asset-specific recommendations. "
-    "Return JSON with exactly these two keys: "
-    "{\"answer\": \"<your answer as plain text>\", \"requires_telemetry\": true|false}"
-)
 
 _INTENT_CLASSIFIER_SYSTEM = (
     "You are an intent classifier for an industrial reliability maintenance chat. "
@@ -230,16 +225,6 @@ def _learning_history_draft(persona: str, limit: int = 3):
         "agent_outputs": {"learned_cases": cases}}, cases)
 
 
-_CONCEPTS = {
-    "rul": "Remaining Useful Life (RUL) is the estimated time or operating usage before an asset reaches a defined failure or maintenance threshold. An asset-specific RUL requires current telemetry, operating context, and a validated model.",
-    "signals": "Vibration helps reveal mechanical impacts, imbalance, looseness, and bearing-frequency patterns; temperature helps reveal friction, lubrication, and load-related heating. Their trends must be compared with an asset-specific baseline before a decision is made.",
-    "anomaly": "An anomaly is a statistically meaningful departure from an asset's expected behavior under a comparable operating regime. It is evidence for investigation, not by itself a confirmed fault.",
-    "bpfo": "BPFO is the ball-pass frequency of the outer race. Elevated energy around BPFO and its harmonics can support an outer-race fault diagnosis when operating speed, bearing geometry, and other evidence agree.",
-    "bpfi": "BPFI is the ball-pass frequency of the inner race. Elevated energy around BPFI and its sidebands can support an inner-race fault diagnosis when corroborated by other evidence.",
-    "bpfi_bpfo": "BPFO relates to rolling elements passing a defect on the stationary outer race; BPFI relates to a defect on the rotating inner race. Their frequencies and sideband patterns differ, and either diagnosis still requires corroborating vibration evidence and bearing geometry.",
-    "condition_monitoring": "Condition monitoring compares machine signals and trends with expected behavior so deterioration can be detected and acted on before functional failure.",
-}
-
 _MULTI_ASSET_SCENARIOS = {
     "M-104": ("AST_MTR_001", "outer_race_fault"),
     "P-207": ("AST_PMP_001", "lubrication_issue"),
@@ -254,19 +239,71 @@ _PERSONAS = {"supervisor", "engineer", "maintenance", "manager",
              "executive", "md", "ot", "safety"}
 
 
-def _concept_draft(message: str, persona: str):
-    text = message.lower()
-    if "rul" in text or "remaining useful life" in text: key="rul"
-    elif "bpfo" in text and "bpfi" in text: key="bpfi_bpfo"
-    elif "bpfo" in text: key="bpfo"
-    elif "bpfi" in text: key="bpfi"
-    elif "anomaly" in text: key="anomaly"
-    elif "condition monitoring" in text: key="condition_monitoring"
-    else: key="signals"
-    answer = _CONCEPTS[key]
-    return {"persona": persona, "response": answer, "details": [], "actions": [],
-        "call_plan": [], "needs_context": False, "clarification_required": False,
-        "source_type": "controlled_glossary"}
+_GENERAL_RAG = None
+
+
+def _general_rag_service():
+    """Lazy and patchable so startup and tests do not require cloud retrieval."""
+    global _GENERAL_RAG
+    if _GENERAL_RAG is None:
+        _GENERAL_RAG = GovernedKnowledgeRAG()
+    return _GENERAL_RAG
+
+
+def _general_knowledge_draft(message: str, persona: str):
+    started = time.perf_counter()
+    result = _general_rag_service().answer(message, llm_client=_CHAT_LLM)
+    elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
+    source_type = {
+        "grounded": "approved_rag",
+        "no_match": "rag_no_match",
+        "retrieval_failed": "rag_error",
+        "blocked": "rag_blocked",
+    }.get(result.status, "rag_error")
+    result_dict = result.to_dict()
+    draft = {
+        "persona": persona,
+        "response": result.answer,
+        "details": [],
+        "actions": [],
+        "call_plan": ["knowledge_rag"],
+        "needs_context": False,
+        "clarification_required": False,
+        "source_type": source_type,
+        "citations": [item.model_dump() for item in result.citations],
+        "rag": {
+            "status": result.status,
+            "status_reason": result.status_reason,
+            "retrieval_query": result.retrieval_query,
+            "retrieval_hit_count": result.retrieval_hit_count,
+            "index_version": result.index_version,
+            "llm_used": result.llm_used,
+        },
+        "agent_outputs": {"knowledge_rag": result_dict},
+    }
+    state = {"pipeline_log": [{
+        "node": "knowledge_rag",
+        "status": result.status,
+        "latency_ms": elapsed_ms,
+        "retrieval_hit_count": result.retrieval_hit_count,
+    }]}
+    return draft, state
+
+
+def _is_general_knowledge_request(message: str, plan, classified: str,
+                                  signal, supplied_asset: str,
+                                  requested_assets: list) -> bool:
+    if signal is not None or supplied_asset or requested_assets:
+        return False
+    if plan.intent in {"concept", "general"}:
+        return True
+    if classified != "general" or plan.intent in {"fleet", "learning_history"}:
+        return False
+    text = str(message).lower()
+    return any(marker in text for marker in (
+        "what is", "what does", "define", "explain", "how does",
+        "meaning of", "common causes", "best practices",
+    ))
 
 
 def _clarification_draft(persona: str, intent: str, missing: list[str],
@@ -319,7 +356,8 @@ def _deadline_for_recommendation(recommendation) -> str:
             "monitor":"continue monitoring"}.get(recommendation.urgency,"review this week")
 
 
-def _multi_asset_plan(requested_assets, fleet_snapshot: dict, persona: str, run_id: str):
+def _multi_asset_plan(requested_assets, fleet_snapshot: dict, persona: str,
+                      run_id: str, checkpoint_thread_id: str = ""):
     """Evaluate named assets only from explicitly supplied fleet evidence."""
     results=[]; combined_log=[]; details=[]; actions=[]
     for display,asset_id,scenario in requested_assets:
@@ -352,6 +390,8 @@ def _multi_asset_plan(requested_assets, fleet_snapshot: dict, persona: str, run_
             state=run_pipeline(
                 deepcopy(signal), run_id=f"{run_id}-{display}", intent="full",
                 approval_status="pending", persona=persona,
+                thread_id=(f"{checkpoint_thread_id}:{display}"
+                           if checkpoint_thread_id else ""),
             )
             log=[{**row,"asset":display} for row in state.get("pipeline_log",[])]
             combined_log.extend(log)
@@ -443,6 +483,8 @@ def health_check():
     audit_log   : audit directory is writable               [critical]
     sop_corpus  : data/sops/ directory exists and has files [degraded if missing]
     llm         : Azure LLM credentials present             [informational only]
+    hitl_store  : durable human-decision repository         [critical]
+    checkpoints : LangGraph checkpoint repository           [critical when configured]
     """
     checks: Dict[str, Any] = {}
     is_unhealthy = False
@@ -503,6 +545,20 @@ def health_check():
         checks["llm"] = {"status": "ok", "detail": "Azure LLM credentials present"}
     else:
         checks["llm"] = {"status": "not_configured", "detail": "Azure LLM credentials absent; deterministic fallbacks active"}
+
+    # 6. Durable state stores. Probes deliberately omit hostnames and URLs.
+    hitl_probe = (_HITL_REPOSITORY.probe()
+                  if hasattr(_HITL_REPOSITORY, "probe")
+                  else {"status": "error", "backend": "unknown"})
+    checks["hitl_store"] = hitl_probe
+    if hitl_probe["status"] != "ok":
+        is_unhealthy = True
+
+    checkpoint_probe = graph_checkpoint_health()
+    checks["checkpoints"] = checkpoint_probe
+    if (checkpoint_probe.get("backend") == "postgres"
+            and checkpoint_probe["status"] != "ok"):
+        is_unhealthy = True
 
     # Aggregate
     if is_unhealthy:
@@ -814,6 +870,7 @@ class PipelineRunRequest(BaseModel):
     scenario: Optional[str] = None   # convenience: run a named demo scenario
     row_index: int = -1              # row index within scenario (-1 = last)
     query: Optional[str] = None      # natural-language query → controls pipeline depth
+    thread_id: Optional[str] = None  # stable caller/conversation identity
 
 
 class PipelineRunResponse(BaseModel):
@@ -992,6 +1049,8 @@ def _classify_intent(query: str) -> str:
 def pipeline_run(req: PipelineRunRequest, user: Dict = Depends(get_current_user)):
     """Run the DRO pipeline on a signal; depth controlled by query intent."""
     require_persona(req.persona, user)
+    if req.thread_id and not re.fullmatch(r"[A-Za-z0-9_.:-]{1,160}", req.thread_id):
+        raise HTTPException(422, "thread_id contains unsupported characters or is too long.")
     intent = _classify_intent(req.query)
     try:
         if req.scenario:
@@ -1002,9 +1061,15 @@ def pipeline_run(req: PipelineRunRequest, user: Dict = Depends(get_current_user)
             signal = deepcopy(rows[idx])
             for i in range(idx):
                 run_pipeline(deepcopy(rows[i]), persona=req.persona)
-            state = run_pipeline(signal, intent=intent, persona=req.persona)
+            state = run_pipeline(
+                signal, intent=intent, persona=req.persona,
+                thread_id=req.thread_id or "",
+            )
         else:
-            state = run_pipeline(req.signal, intent=intent, persona=req.persona)
+            state = run_pipeline(
+                req.signal, intent=intent, persona=req.persona,
+                thread_id=req.thread_id or "",
+            )
     except HTTPException:
         raise
     except Exception as exc:
@@ -1673,16 +1738,41 @@ def executor_run(req: ExecutorRunRequest, user: Dict = Depends(get_current_user)
     require_persona(req.persona, user)
     from src.schemas.recommendation import MaintenanceRecommendation
     from src.agents.executor_agent import ExecutorAgent
+    from src.orchestrator.graph import (
+        graph_checkpointing_enabled, resume_pipeline,
+    )
     if req.approved:
         _authorize_hitl(req.persona,"execution")
     try:
         rec = MaintenanceRecommendation(**req.recommendation)
-        result = ExecutorAgent().process(rec, approved=req.approved)
+        if (
+            req.approved and rec.checkpoint_thread_id
+            and rec.checkpoint_namespace and graph_checkpointing_enabled()
+        ):
+            try:
+                resumed = resume_pipeline(
+                    rec.checkpoint_thread_id,
+                    rec.checkpoint_namespace,
+                    approval_status="approved",
+                )
+            except LookupError as exc:
+                raise HTTPException(
+                    409, "The persisted approval workflow could not be found."
+                ) from exc
+            result = resumed.get("execution_result")
+            if result is None:
+                raise HTTPException(
+                    409, "The persisted approval workflow did not execute."
+                )
+        else:
+            result = ExecutorAgent().process(rec, approved=req.approved)
         if req.approved and result.status in {"success", "partial"}:
             _learning_agent().record_approval(
                 rec.case_id, rec.asset_id, rec.condition.fault_type
             )
         return result.model_dump()
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(400, f"Executor error: {exc}")
 
@@ -1888,11 +1978,15 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
             "Asset names alone are not evidence. No fleet or asset result has been generated.")
         plan_intent="multi_asset_plan"
     elif len(requested_assets)>1:
-        draft,state=_multi_asset_plan(requested_assets,context["fleet_snapshot"],
-                                      req.persona,run_id)
+        draft,state=_multi_asset_plan(
+            requested_assets, context["fleet_snapshot"], req.persona, run_id,
+            checkpoint_thread_id=conversation_id,
+        )
         plan_intent="multi_asset_plan"
-    elif plan.intent == "concept":
-        draft=_concept_draft(effective_message,req.persona)
+    elif _is_general_knowledge_request(
+            effective_message, plan, _classified, signal,
+            supplied_asset or "", requested_assets):
+        draft,state=_general_knowledge_draft(effective_message,req.persona)
         plan_intent=plan.intent
     elif plan.intent == "fleet":
         missing=[]
@@ -1936,6 +2030,7 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
                 inventory_lookup=context.get("inventory_lookup"),
                 context_lookup=context.get("operations_context"),
                 approval_status="pending", persona=req.persona,
+                thread_id=conversation_id,
             )
             formatted=format_for_persona(state,req.persona)
             _pipeline_headline=formatted.get("headline","Analysis complete.")
@@ -1979,48 +2074,9 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
                 _hitl_fields = _build_hitl_gates(state, run_id, req.persona, plan.pipeline_intent)
         plan_intent=plan.intent
     else:
-        llm_draft = None
-        if _CHAT_LLM.is_configured():
-            try:
-                # Asset named in message but not registered — tell the LLM so it
-                # can explain the situation without needing telemetry.
-                _unregistered = bool(supplied_asset and supplied_asset not in load_asset_master())
-                if _unregistered:
-                    user_prompt_for_llm = (
-                        f"{req.message}\n\n"
-                        f"System note: {supplied_asset} is not found in the registered asset database. "
-                        "Acknowledge this clearly and advise the user to verify the asset ID or register "
-                        "the asset with its bearing and channel mappings before any analysis can be run. "
-                        "Do not fabricate sensor readings or maintenance history for this asset."
-                    )
-                else:
-                    user_prompt_for_llm = req.message
-                llm_resp = _CHAT_LLM.complete_json(
-                    system_prompt=_CHAT_LLM_SYSTEM,
-                    user_prompt=user_prompt_for_llm,
-                    temperature=0.3,
-                    max_tokens=400,
-                )
-                # For unregistered assets skip the requires_telemetry gate —
-                # the answer is about system state, not field measurements.
-                if (llm_resp
-                        and isinstance(llm_resp.get("answer"), str)
-                        and llm_resp["answer"].strip()
-                        and (_unregistered or not llm_resp.get("requires_telemetry"))):
-                    llm_draft = {"persona": req.persona,
-                                 "response": llm_resp["answer"].strip(),
-                                 "call_plan": list(plan.agents),
-                                 "needs_context": False,
-                                 "clarification_required": False,
-                                 "source_type": "llm_asset_lookup" if _unregistered else "llm_general_knowledge"}
-            except Exception:
-                pass
-        if llm_draft:
-            draft = llm_draft
-        else:
-            draft=_clarification_draft(req.persona,"general",["objective","timeframe"],
-                ["What decision or explanation do you need?","What timeframe or operational scope applies?"],
-                "This question is broad. Please clarify the objective and scope before I answer.")
+        draft=_clarification_draft(req.persona,"general",["objective","timeframe"],
+            ["What decision or explanation do you need?","What timeframe or operational scope applies?"],
+            "This question is broad or requires operational evidence. Please clarify the objective and scope before I answer.")
         plan_intent=plan.intent
     reflected=_REFLEXION.process(draft,state,plan)
     if draft.get("clarification_required"):
@@ -2036,7 +2092,7 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
                           "pending":bool(context.get("_pending_message"))}}
     if _hitl_fields:
         result.update(_hitl_fields)
-    try: result["audit"]=write_audit(_AUDIT_PATH,event="chat",run_id=run_id,status="ok",intent=plan.intent,agents=plan.agents)
+    try: result["audit"]=write_audit(_AUDIT_PATH,event="chat",run_id=run_id,status="ok",intent=plan.intent,agents=draft.get("call_plan",plan.agents))
     except Exception: result["audit"]={"status":"audit_write_failed"}
     return result
 

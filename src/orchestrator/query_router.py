@@ -16,7 +16,10 @@ _RULES = [
                  "vibration and temperature matter", "explain bpfo", "explain bpfi",
                  "bpfo in plain english", "bpfi different from bpfo",
                  "difference between bpfi", "what is anomaly", "what is bpfo", "what is bpfi",
-                 "what is condition monitoring", "define anomaly"),
+                 "what is condition monitoring", "define anomaly",
+                 "how does vibration analysis", "explain vibration analysis",
+                 "what is iso 10816", "explain iso 10816",
+                 "common causes of bearing failure", "reliability best practices"),
      "concept", (), False),
 
     # ── Fleet-wide questions ──────────────────────────────────────────────────

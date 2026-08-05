@@ -83,8 +83,33 @@ def test_frontend_uses_backend_contracts_for_group_a():
     chat = (root / "components" / "ChatView" / "ChatView.jsx").read_text(encoding="utf-8")
     assert "fetchDashboardAssets" in app_context
     assert "fetchWorkOrders" in app_context
+    assert "activeEscalationStep" in app_context
+    assert "Object.entries(previous)" in app_context
+    assert "escalationTriggered" in app_context
     assert "data.execution_steps" in chat
     assert "rejectRecommendation" in chat
     assert "type=\"radio\"" in chat
     assert "decision_support" in chat
+    assert "approval_escalation" in chat
+    assert "approval escalation countdown" in chat
+    assert "escalationStageIndex" in chat
+    assert "target: step.to_persona_id" in app_context
+    assert "transferId" in app_context
+    assert "FOR: Plant Supervisor" not in chat
     assert "buildExecutionSteps" not in chat
+
+
+def test_pipeline_approval_contract_includes_timed_persona_escalation(client):
+    response = client.post("/api/pipeline/run", json={
+        "signal": {}, "scenario": "outer_race_fault", "persona": "supervisor"
+    })
+    assert response.status_code == 200
+    recommendation = response.json()["recommendation"]
+    escalation = recommendation["decision_support"]["approval_escalation"]
+    assert escalation["status"] == "active"
+    assert escalation["current_persona_id"] == "supervisor"
+    assert [step["to_persona_id"] for step in escalation["steps"]] == [
+        "manager", "executive",
+    ]
+    assert all(step["escalates_at_utc"] for step in escalation["steps"])
+    assert all(step["timeout_seconds"] > 0 for step in escalation["steps"])

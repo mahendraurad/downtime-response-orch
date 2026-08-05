@@ -1,7 +1,7 @@
 # Group A Backend Changes
 
-This record covers the completed Group A backend scope and its minimum frontend
-contract wiring. A4's visual countdown timer remains intentionally excluded.
+This record covers the completed Group A backend scope and its frontend
+contract wiring, including the A4 approval escalation timer.
 
 ## Decisions confirmed
 
@@ -82,6 +82,27 @@ Equal timestamps are deterministically ordered by persisted event sequence.
 The frontend submits one reason using radio selection and requires text only
 when `other` is selected.
 
+## A4 — Approval escalation timer
+
+Agent 6 now returns a typed, backend-scheduled approval path with the current
+approver, the next persona's ID and display name, the timeout, and an exact UTC
+deadline for every transition. The configured path is Plant Supervisor → Plant
+Manager → VP Operations; VP Operations is the final authority.
+
+Timeouts are configured by urgency in `config/decision_support_config.json`:
+
+- immediate: 15 minutes;
+- urgent: 1 hour;
+- planned: 4 hours;
+- monitor: 24 hours.
+
+The React approval card displays the exact local deadline and a live countdown.
+A session-level worker scans all persona inboxes, so an expired decision is
+transferred even when its original card is not the currently selected persona.
+It marks the old card resolved, creates one idempotent approval card for the
+next persona, and resumes overdue work immediately when session state is
+restored. No deadline or persona is hard-coded in the card.
+
 ## A6 — Execution trace
 
 Agent 7 owns and returns the execution trace. React does not recreate it.
@@ -129,6 +150,8 @@ The Group A certification suite is `tests/test_group_a_backend.py`. It covers:
 - Agent 7 four-step trace ownership/deadline/escalation fields;
 - frontend/backend Decision Support, rejection, dashboard, and work-order
   contract wiring;
+- exact timed Supervisor → Manager → VP Operations schedules, non-approver
+  entry at Supervisor, final-authority behavior, and frontend escalation wiring;
 - 50 deterministic and 50 live-LLM chat QC scenarios with Excel evidence.
 
 Run:
@@ -140,6 +163,5 @@ Run:
 ## Deferred or out of scope
 
 - Replace the labelled demo economics with governed ERP/finance values.
-- A4 frontend escalation countdown timer.
 - Production CMMS, inventory, notification, historian, and scheduler adapters.
 - Group B/C visual certification that requires a frontend test runner.

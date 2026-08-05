@@ -1,0 +1,15 @@
+DRO APPROVED RELIABILITY AND CONDITION-MONITORING GLOSSARY
+
+Remaining Useful Life (RUL) is the estimated time or operating usage before an asset reaches a defined failure or maintenance threshold. RUL is an estimate with uncertainty, not a guaranteed failure date. An asset-specific RUL requires current validated telemetry, operating context, degradation history, and a model suitable for that asset and failure mode.
+
+Condition monitoring compares machine measurements and trends with expected behaviour under comparable operating conditions. Its purpose is to detect deterioration early enough for a controlled investigation or maintenance decision. An anomaly is a statistically meaningful departure from expected behaviour; it is evidence for investigation, not by itself a confirmed fault.
+
+Vibration analysis evaluates amplitude, frequency content, harmonics, sidebands, impulses, and trends. Vibration can reveal imbalance, misalignment, looseness, impacts, and bearing-frequency patterns. Vibration and temperature must both be compared with an asset-specific baseline before making an operational decision. Temperature complements vibration by indicating friction, lubrication condition, loading, cooling problems, and developing heat.
+
+BPFO is the ball-pass frequency of the outer race. BPFI is the ball-pass frequency of the inner race. Energy at these frequencies and their harmonics can support a bearing-fault hypothesis when bearing geometry, shaft speed, sidebands, signal quality, and other measurements agree; frequency energy alone is not a complete diagnosis.
+
+Common causes of bearing failure include inadequate or excessive lubrication, contamination, misalignment, incorrect mounting, overload, electrical damage, fatigue, and unsuitable operating conditions. Identifying the actual cause requires asset history, inspection evidence, operating context, and condition-monitoring measurements; a general list is not an asset diagnosis.
+
+ISO 10816-3 provides vibration severity guidance for applicable industrial machines using measurement location, machine class, support condition, and operating state. A zone classification is a screening and escalation aid, not a substitute for asset-specific limits, fault diagnosis, or safety review. The currently applicable standard and plant procedure must be confirmed before making a compliance decision.
+
+To improve reliability, a practical programme starts with trustworthy sensor and historian data, criticality ranking, consistent failure coding, risk-based work prioritisation, planned defect elimination, post-repair verification, and review of confirmed outcomes. General good practice cannot identify which asset should be repaired first; fleet ranking requires a validated fleet snapshot and an approved aggregation method.

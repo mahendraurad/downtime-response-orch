@@ -603,6 +603,11 @@ class KnowledgeConfig:
     max_inspection_steps: int
     max_safety_notes: int
     section_preview_characters: int
+    general_top_k: int
+    general_minimum_score: float
+    general_max_passages: int
+    general_max_answer_characters: int
+    general_llm_synthesis_enabled: bool
     log_retrievals: bool
 
     def validate(self) -> None:
@@ -610,6 +615,8 @@ class KnowledgeConfig:
         for name in (
             "top_k", "max_relevant_sections", "max_inspection_steps",
             "max_safety_notes", "section_preview_characters",
+            "general_top_k", "general_max_passages",
+            "general_max_answer_characters",
         ):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
@@ -617,6 +624,7 @@ class KnowledgeConfig:
         for name in (
             "minimum_score", "fault_mode_boost", "asset_type_boost",
             "iso_stage_boost",
+            "general_minimum_score",
         ):
             value = getattr(self, name)
             if (isinstance(value, bool) or not isinstance(value, (int, float))
@@ -634,6 +642,7 @@ def load_knowledge_config(path: str = _KNOWLEDGE_CONFIG) -> KnowledgeConfig:
         raw = json.load(fh)
     retrieval = raw["retrieval"]
     output = raw["output"]
+    open_ended = raw.get("open_ended", {})
     cfg = KnowledgeConfig(
         top_k=retrieval["top_k"],
         minimum_score=retrieval["minimum_score"],
@@ -646,6 +655,11 @@ def load_knowledge_config(path: str = _KNOWLEDGE_CONFIG) -> KnowledgeConfig:
         max_inspection_steps=output["max_inspection_steps"],
         max_safety_notes=output["max_safety_notes"],
         section_preview_characters=output["section_preview_characters"],
+        general_top_k=open_ended.get("top_k", retrieval["top_k"]),
+        general_minimum_score=open_ended.get("minimum_score", retrieval["minimum_score"]),
+        general_max_passages=open_ended.get("max_passages", 3),
+        general_max_answer_characters=open_ended.get("max_answer_characters", 1600),
+        general_llm_synthesis_enabled=open_ended.get("llm_synthesis_enabled", True),
         log_retrievals=raw["logging"]["log_retrievals"],
     )
     cfg.validate()

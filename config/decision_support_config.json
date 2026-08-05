@@ -1,5 +1,5 @@
 {
-  "version": "1.0",
+  "version": "1.1",
   "currency": "USD",
   "cost_model": {
     "action_costs": {
@@ -28,6 +28,15 @@
     "executive": 5000000
   },
   "approval_hierarchy": ["supervisor", "manager", "executive"],
+  "approval_escalation": {
+    "enabled": true,
+    "timeout_seconds_by_urgency": {
+      "immediate": 900,
+      "urgent": 3600,
+      "planned": 14400,
+      "monitor": 86400
+    }
+  },
   "execution_steps": {
     "work_order": {"owner": "Maintenance Planner", "deadline": "immediate"},
     "notifications": {"owner": "Plant Supervisor", "deadline": "within 15 minutes"},
