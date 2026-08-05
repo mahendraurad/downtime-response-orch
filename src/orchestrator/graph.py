@@ -17,6 +17,7 @@ import os
 import sys
 import tempfile
 import time
+import re
 from copy import deepcopy
 from typing import Any, Dict
 
@@ -320,6 +321,8 @@ def node_prescriptive(state):
             persona_context=state.get("persona_context"),
             trusted_signal=state.get("trusted_signal"),
         )
+        result.checkpoint_thread_id = state.get("checkpoint_thread_id", "")
+        result.checkpoint_namespace = state.get("checkpoint_namespace", "")
         log.append({"node":"prescriptive","status":"ok","latency_ms":ms,
                     "data_sources":_sources_prescriptive(state, result)})
         return {**state,"recommendation":result,"pipeline_log":log}
@@ -397,6 +400,77 @@ def _build_graph(checkpointer=None):
 from src.tools.checkpointing import build_checkpoint_resources
 _checkpoint_resources = build_checkpoint_resources()
 _graph = _build_graph(checkpointer=_checkpoint_resources.saver)
+
+
+def close_graph_resources() -> None:
+    """Close the PostgreSQL checkpointer pool during application shutdown."""
+    _checkpoint_resources.close()
+
+
+def graph_checkpointing_enabled() -> bool:
+    return _checkpoint_resources.enabled
+
+
+def graph_checkpoint_health() -> dict[str, str]:
+    """Expose a sanitized checkpointer readiness probe to the API."""
+    return _checkpoint_resources.probe()
+
+
+def _graph_config(thread_id: str, namespace: str) -> dict:
+    allowed = re.compile(r"^[A-Za-z0-9_.:-]{1,160}$")
+    if not allowed.fullmatch(thread_id or ""):
+        raise ValueError("checkpoint thread_id contains unsupported characters")
+    if not allowed.fullmatch(namespace or ""):
+        raise ValueError("checkpoint namespace contains unsupported characters")
+    # ``checkpoint_ns`` is reserved by LangGraph for compiled subgraphs. Use a
+    # physical run-qualified thread key for top-level run isolation while
+    # retaining the logical conversation/thread and run namespace separately
+    # in the typed state and recommendation contract.
+    physical_thread_id = f"{thread_id}:{namespace}"
+    return {
+        "configurable": {
+            "thread_id": physical_thread_id,
+            "checkpoint_ns": "",
+        },
+        "metadata": {
+            "dro_thread_id": thread_id,
+            "dro_checkpoint_namespace": namespace,
+        },
+    }
+
+
+def get_pipeline_checkpoint(thread_id: str, checkpoint_namespace: str):
+    """Return the persisted LangGraph state snapshot for audit or recovery."""
+    return _graph.get_state(_graph_config(thread_id, checkpoint_namespace))
+
+
+def resume_pipeline(thread_id: str, checkpoint_namespace: str,
+                    approval_status: str, feedback_event=None) -> DROGraphState:
+    """Resume a checkpointed recommendation without replaying Agents 1–6.
+
+    The pending graph has already terminated safely after Agent 6. Updating the
+    state as the prescriptive node lets LangGraph evaluate the existing edge and
+    invoke Agent 7 exactly once after approval.
+    """
+    if approval_status not in {"approved", "rejected"}:
+        raise ValueError("approval_status must be approved or rejected")
+    config = _graph_config(thread_id, checkpoint_namespace)
+    snapshot = _graph.get_state(config)
+    if not snapshot.values:
+        raise LookupError("LangGraph checkpoint was not found")
+    current = snapshot.values
+    if current.get("execution_result") is not None:
+        return current
+    if current.get("recommendation") is None:
+        raise ValueError("checkpoint has no recommendation to resume")
+
+    update = {"approval_status": approval_status}
+    if feedback_event is not None:
+        update["feedback_event"] = feedback_event
+    _graph.update_state(config, update, as_node="prescriptive")
+    if approval_status == "rejected":
+        return _graph.get_state(config).values
+    return _graph.invoke(None, config=config)
 
 
 # ── Public entry point ────────────────────────────────────────────────────────
@@ -590,7 +664,8 @@ def run_from_diagnosis(diagnosis, anomaly_event, trusted_signal,
 def run_pipeline(raw_signal: Dict[str, Any], run_id: str = "",
                  intent: str = "full", inventory_lookup: dict = None,
                  context_lookup: dict = None, approval_status: str = "pending",
-                 feedback_event=None, persona="supervisor") -> DROGraphState:
+                 feedback_event=None, persona="supervisor", thread_id: str = "",
+                 checkpoint_namespace: str = "") -> DROGraphState:
     """
     Run the DRO pipeline for a single signal reading.
 
@@ -603,10 +678,14 @@ def run_pipeline(raw_signal: Dict[str, Any], run_id: str = "",
     """
     import uuid
     rid = run_id or str(uuid.uuid4())[:8]
+    checkpoint_thread = thread_id or rid
+    checkpoint_ns = checkpoint_namespace or rid
     from src.tools.persona_formatter import build_persona_context
     initial: DROGraphState = {
         "run_id": rid,
         "case_id": rid,
+        "checkpoint_thread_id": checkpoint_thread,
+        "checkpoint_namespace": checkpoint_ns,
         "intent": intent,
         "raw_signal": raw_signal,
         "inventory_lookup": inventory_lookup or {}, "context_lookup": context_lookup or {},
@@ -614,6 +693,6 @@ def run_pipeline(raw_signal: Dict[str, Any], run_id: str = "",
         "pipeline_log": [],
         "persona_context": build_persona_context(persona),
     }
-    invoke_config = {"configurable": {"thread_id": rid}}
+    invoke_config = _graph_config(checkpoint_thread, checkpoint_ns)
     final_state = _graph.invoke(initial, config=invoke_config)
     return final_state

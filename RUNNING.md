@@ -54,3 +54,20 @@ python scripts\run_executor_demo.py
 Agent 6–8 and full-chain behavior are comprehensively exercised through pytest. See `README.md` for the relevant commands and contracts.
 
 Cloud credentials are optional. When no endpoint is configured, deterministic rules remain authoritative and optional LLM advisory paths degrade safely.
+
+## Azure PostgreSQL and LangGraph verification
+
+Keep secrets in the ignored `.env.local` or deployment environment. Required
+settings are documented in `.env.example`. For a new database only, enable the
+two setup flags once, start the application, and then return both flags to
+`false`.
+
+```powershell
+python scripts\verify_postgres_langgraph.py
+```
+
+The command verifies the PostgreSQL connection, LangGraph checkpoint readback,
+approval resume, replay idempotency, atomic HITL claim, and decision readback.
+It deletes its verification-only records before exit. `GET /api/health` reports
+the selected state-store backends and readiness without returning connection
+strings.
