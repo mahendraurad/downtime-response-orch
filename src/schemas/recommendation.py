@@ -167,6 +167,8 @@ class MaintenanceRecommendation(BaseModel):
     cost_data_status: str = "unavailable"
     authority_check: str = "not_evaluated"
     decision_support: DecisionSupport = Field(default_factory=DecisionSupport)
+    checkpoint_thread_id: str = ""
+    checkpoint_namespace: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return self.model_dump()

@@ -23,6 +23,8 @@ class DROGraphState(TypedDict, total=False):
     """
     run_id:             str
     case_id:            str
+    checkpoint_thread_id: str
+    checkpoint_namespace: str
     intent:             str   # status | anomaly | diagnosis | risk | full (query-aware routing)
     raw_signal:         Any   # raw dict from historian / API caller
     trusted_signal:     Any   # TrustedBearingSignal | None

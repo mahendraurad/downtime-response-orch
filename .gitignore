@@ -16,6 +16,7 @@ env/
 
 # Environment variables — never commit
 .env
+.env.local
 
 # VS Code
 .vscode/settings.json

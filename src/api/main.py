@@ -35,6 +35,7 @@ import sys
 import time
 import uuid
 from copy import deepcopy
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Literal
 
@@ -47,22 +48,14 @@ from langsmith import traceable
 
 # Make repo root importable when run as: python -m src.api.main
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
-_ENV_PATH = os.path.join(os.path.dirname(__file__), "..", "..", ".env")
-try:
-    from dotenv import load_dotenv
-    load_dotenv(_ENV_PATH)
-except ImportError:
-    # Keep existing environments runnable before requirements are refreshed.
-    if os.path.exists(_ENV_PATH):
-        with open(_ENV_PATH, "r", encoding="utf-8") as _env_file:
-            for _line in _env_file:
-                _line = _line.strip()
-                if not _line or _line.startswith("#") or "=" not in _line:
-                    continue
-                _name, _value = _line.split("=", 1)
-                os.environ.setdefault(_name.strip(), _value.strip().strip('"').strip("'"))
+from src.tools.environment import load_project_environment
+load_project_environment()
 
-from src.orchestrator.graph import run_pipeline
+from src.orchestrator.graph import (
+    close_graph_resources,
+    graph_checkpoint_health,
+    run_pipeline,
+)
 from src.api.auth import (
     LoginRequest, LoginResponse,
     authenticate_user, create_access_token,
@@ -78,8 +71,19 @@ from src.tools.llm_client import LLMClient
 from src.tools.hitl_repository import build_hitl_repository
 from src.tools.persona_formatter import build_persona_context
 from src.tools.governed_rag import GovernedKnowledgeRAG
+from src.tools.observability import flush_observability
 
-app = FastAPI(title="DRO API", version="1.0.0")
+
+@asynccontextmanager
+async def _application_lifespan(_app: FastAPI):
+    yield
+    if hasattr(_HITL_REPOSITORY, "close"):
+        _HITL_REPOSITORY.close()
+    close_graph_resources()
+    flush_observability()
+
+
+app = FastAPI(title="DRO API", version="1.0.0", lifespan=_application_lifespan)
 
 _ORCH_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "config", "orchestrator_config.json")
 with open(_ORCH_CONFIG_PATH, "r", encoding="utf-8") as _fh:
@@ -352,7 +356,8 @@ def _deadline_for_recommendation(recommendation) -> str:
             "monitor":"continue monitoring"}.get(recommendation.urgency,"review this week")
 
 
-def _multi_asset_plan(requested_assets, fleet_snapshot: dict, persona: str, run_id: str):
+def _multi_asset_plan(requested_assets, fleet_snapshot: dict, persona: str,
+                      run_id: str, checkpoint_thread_id: str = ""):
     """Evaluate named assets only from explicitly supplied fleet evidence."""
     results=[]; combined_log=[]; details=[]; actions=[]
     for display,asset_id,scenario in requested_assets:
@@ -385,6 +390,8 @@ def _multi_asset_plan(requested_assets, fleet_snapshot: dict, persona: str, run_
             state=run_pipeline(
                 deepcopy(signal), run_id=f"{run_id}-{display}", intent="full",
                 approval_status="pending", persona=persona,
+                thread_id=(f"{checkpoint_thread_id}:{display}"
+                           if checkpoint_thread_id else ""),
             )
             log=[{**row,"asset":display} for row in state.get("pipeline_log",[])]
             combined_log.extend(log)
@@ -476,6 +483,8 @@ def health_check():
     audit_log   : audit directory is writable               [critical]
     sop_corpus  : data/sops/ directory exists and has files [degraded if missing]
     llm         : Azure LLM credentials present             [informational only]
+    hitl_store  : durable human-decision repository         [critical]
+    checkpoints : LangGraph checkpoint repository           [critical when configured]
     """
     checks: Dict[str, Any] = {}
     is_unhealthy = False
@@ -536,6 +545,20 @@ def health_check():
         checks["llm"] = {"status": "ok", "detail": "Azure LLM credentials present"}
     else:
         checks["llm"] = {"status": "not_configured", "detail": "Azure LLM credentials absent; deterministic fallbacks active"}
+
+    # 6. Durable state stores. Probes deliberately omit hostnames and URLs.
+    hitl_probe = (_HITL_REPOSITORY.probe()
+                  if hasattr(_HITL_REPOSITORY, "probe")
+                  else {"status": "error", "backend": "unknown"})
+    checks["hitl_store"] = hitl_probe
+    if hitl_probe["status"] != "ok":
+        is_unhealthy = True
+
+    checkpoint_probe = graph_checkpoint_health()
+    checks["checkpoints"] = checkpoint_probe
+    if (checkpoint_probe.get("backend") == "postgres"
+            and checkpoint_probe["status"] != "ok"):
+        is_unhealthy = True
 
     # Aggregate
     if is_unhealthy:
@@ -847,6 +870,7 @@ class PipelineRunRequest(BaseModel):
     scenario: Optional[str] = None   # convenience: run a named demo scenario
     row_index: int = -1              # row index within scenario (-1 = last)
     query: Optional[str] = None      # natural-language query → controls pipeline depth
+    thread_id: Optional[str] = None  # stable caller/conversation identity
 
 
 class PipelineRunResponse(BaseModel):
@@ -1025,6 +1049,8 @@ def _classify_intent(query: str) -> str:
 def pipeline_run(req: PipelineRunRequest, user: Dict = Depends(get_current_user)):
     """Run the DRO pipeline on a signal; depth controlled by query intent."""
     require_persona(req.persona, user)
+    if req.thread_id and not re.fullmatch(r"[A-Za-z0-9_.:-]{1,160}", req.thread_id):
+        raise HTTPException(422, "thread_id contains unsupported characters or is too long.")
     intent = _classify_intent(req.query)
     try:
         if req.scenario:
@@ -1035,9 +1061,15 @@ def pipeline_run(req: PipelineRunRequest, user: Dict = Depends(get_current_user)
             signal = deepcopy(rows[idx])
             for i in range(idx):
                 run_pipeline(deepcopy(rows[i]), persona=req.persona)
-            state = run_pipeline(signal, intent=intent, persona=req.persona)
+            state = run_pipeline(
+                signal, intent=intent, persona=req.persona,
+                thread_id=req.thread_id or "",
+            )
         else:
-            state = run_pipeline(req.signal, intent=intent, persona=req.persona)
+            state = run_pipeline(
+                req.signal, intent=intent, persona=req.persona,
+                thread_id=req.thread_id or "",
+            )
     except HTTPException:
         raise
     except Exception as exc:
@@ -1706,16 +1738,41 @@ def executor_run(req: ExecutorRunRequest, user: Dict = Depends(get_current_user)
     require_persona(req.persona, user)
     from src.schemas.recommendation import MaintenanceRecommendation
     from src.agents.executor_agent import ExecutorAgent
+    from src.orchestrator.graph import (
+        graph_checkpointing_enabled, resume_pipeline,
+    )
     if req.approved:
         _authorize_hitl(req.persona,"execution")
     try:
         rec = MaintenanceRecommendation(**req.recommendation)
-        result = ExecutorAgent().process(rec, approved=req.approved)
+        if (
+            req.approved and rec.checkpoint_thread_id
+            and rec.checkpoint_namespace and graph_checkpointing_enabled()
+        ):
+            try:
+                resumed = resume_pipeline(
+                    rec.checkpoint_thread_id,
+                    rec.checkpoint_namespace,
+                    approval_status="approved",
+                )
+            except LookupError as exc:
+                raise HTTPException(
+                    409, "The persisted approval workflow could not be found."
+                ) from exc
+            result = resumed.get("execution_result")
+            if result is None:
+                raise HTTPException(
+                    409, "The persisted approval workflow did not execute."
+                )
+        else:
+            result = ExecutorAgent().process(rec, approved=req.approved)
         if req.approved and result.status in {"success", "partial"}:
             _learning_agent().record_approval(
                 rec.case_id, rec.asset_id, rec.condition.fault_type
             )
         return result.model_dump()
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(400, f"Executor error: {exc}")
 
@@ -1921,8 +1978,10 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
             "Asset names alone are not evidence. No fleet or asset result has been generated.")
         plan_intent="multi_asset_plan"
     elif len(requested_assets)>1:
-        draft,state=_multi_asset_plan(requested_assets,context["fleet_snapshot"],
-                                      req.persona,run_id)
+        draft,state=_multi_asset_plan(
+            requested_assets, context["fleet_snapshot"], req.persona, run_id,
+            checkpoint_thread_id=conversation_id,
+        )
         plan_intent="multi_asset_plan"
     elif _is_general_knowledge_request(
             effective_message, plan, _classified, signal,
@@ -1971,6 +2030,7 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
                 inventory_lookup=context.get("inventory_lookup"),
                 context_lookup=context.get("operations_context"),
                 approval_status="pending", persona=req.persona,
+                thread_id=conversation_id,
             )
             formatted=format_for_persona(state,req.persona)
             _pipeline_headline=formatted.get("headline","Analysis complete.")

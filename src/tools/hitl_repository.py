@@ -111,6 +111,18 @@ class SQLiteHITLRepository:
                     ON hitl_decisions(run_id, decided_at);
             """)
 
+    def probe(self) -> dict[str, str]:
+        try:
+            with closing(self._connect()) as db:
+                db.execute("SELECT 1").fetchone()
+            return {"status": "ok", "backend": "sqlite"}
+        except Exception as exc:
+            return {
+                "status": "error",
+                "backend": "sqlite",
+                "detail": type(exc).__name__,
+            }
+
     def save_session(self, run_id: str, gate: str, persona: str, payload: dict,
                      created_at: float, expires_at: float):
         now = time.time()
@@ -241,14 +253,53 @@ class PostgreSQLHITLRepository:
     def __init__(self, connection_string: str):
         try:
             import psycopg
+            from psycopg_pool import ConnectionPool
         except ImportError as exc:
-            raise RuntimeError("Install psycopg[binary] to use PostgreSQL HITL persistence") from exc
+            raise RuntimeError(
+                "Install psycopg[binary] and psycopg_pool to use PostgreSQL "
+                "HITL persistence"
+            ) from exc
         self._psycopg = psycopg
         self.connection_string = connection_string
-        self._initialize()
+        min_size = int(os.getenv("POSTGRES_POOL_MIN_SIZE", "1"))
+        max_size = int(os.getenv("POSTGRES_POOL_MAX_SIZE", "10"))
+        if min_size <= 0 or max_size < min_size:
+            raise RuntimeError("invalid PostgreSQL HITL pool size configuration")
+        self._pool = ConnectionPool(
+            conninfo=connection_string,
+            min_size=min_size,
+            max_size=max_size,
+            open=True,
+            name="dro-hitl",
+        )
+        self._pool.wait()
+        if os.getenv("POSTGRES_HITL_SETUP", "false").lower() in {
+            "1", "true", "yes", "on",
+        }:
+            self._initialize()
+        else:
+            self._verify_schema()
 
     def _connect(self):
-        return self._psycopg.connect(self.connection_string)
+        return self._pool.connection()
+
+    def close(self):
+        self._pool.close()
+
+    def probe(self) -> dict[str, str]:
+        """Check connectivity without returning connection details or secrets."""
+        try:
+            with self._connect() as db:
+                with db.cursor() as cursor:
+                    cursor.execute("SELECT 1")
+                    cursor.fetchone()
+            return {"status": "ok", "backend": "postgres"}
+        except Exception as exc:
+            return {
+                "status": "error",
+                "backend": "postgres",
+                "detail": type(exc).__name__,
+            }
 
     def _initialize(self):
         migration = Path(__file__).resolve().parents[2] / "migrations" / "001_hitl_postgres.sql"
@@ -256,6 +307,20 @@ class PostgreSQLHITLRepository:
             with db.cursor() as cursor:
                 cursor.execute(migration.read_text(encoding="utf-8"))
             db.commit()
+
+    def _verify_schema(self):
+        with self._connect() as db:
+            with db.cursor() as cursor:
+                cursor.execute(
+                    "SELECT to_regclass('public.hitl_sessions'), "
+                    "to_regclass('public.hitl_decisions')"
+                )
+                tables = cursor.fetchone()
+        if not tables or any(table is None for table in tables):
+            raise RuntimeError(
+                "HITL PostgreSQL schema is missing; run once with "
+                "POSTGRES_HITL_SETUP=true"
+            )
 
     def save_session(self, run_id, gate, persona, payload, created_at, expires_at):
         now = time.time()
