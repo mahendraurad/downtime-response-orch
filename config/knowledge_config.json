@@ -15,6 +15,13 @@
     "max_safety_notes": 6,
     "section_preview_characters": 300
   },
+  "open_ended": {
+    "top_k": 8,
+    "minimum_score": 0.05,
+    "max_passages": 3,
+    "max_answer_characters": 1600,
+    "llm_synthesis_enabled": true
+  },
   "logging": {
     "log_retrievals": true
   },

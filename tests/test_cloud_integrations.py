@@ -37,6 +37,7 @@ def test_azure_search_maps_results_to_agent_5_contract(monkeypatch):
 
     assert hits == [{
         "source": "SOP-17", "text": "Step 1: Isolate the motor.",
+        "chunk_id": "", "source_uri": "",
         "score": 0.91, "raw_score": 0.91, "fault_mode": "outer_race_fault",
         "asset_type": "motor", "iso_stage": 3,
     }]
@@ -58,6 +59,8 @@ def test_azure_search_discards_results_without_citation_or_content(monkeypatch):
 def test_azure_search_supports_minimal_chunk_schema(monkeypatch):
     monkeypatch.setenv("AZURE_SEARCH_CONTENT_FIELD", "chunk")
     monkeypatch.setenv("AZURE_SEARCH_SOURCE_FIELD", "title")
+    monkeypatch.setenv("AZURE_SEARCH_CHUNK_ID_FIELD", "chunk_id")
+    monkeypatch.setenv("AZURE_SEARCH_SOURCE_URI_FIELD", "parent_id")
     monkeypatch.setenv("AZURE_SEARCH_VECTOR_FIELD", "")
     monkeypatch.setenv("AZURE_SEARCH_FAULT_MODE_FIELD", "none")
     monkeypatch.setenv("AZURE_SEARCH_ASSET_TYPE_FIELD", "none")
@@ -65,6 +68,7 @@ def test_azure_search_supports_minimal_chunk_schema(monkeypatch):
     adapter = AzureSearchRetriever("https://search.example", "secret", "sops")
     client = _FakeSearchClient([{
         "title": "Bearing SOP", "chunk": "Approved inspection procedure.",
+        "chunk_id": "chunk-17", "parent_id": "blob://sop/bearing",
         "@search.score": 1.2,
     }])
     adapter._client = client
@@ -75,9 +79,11 @@ def test_azure_search_supports_minimal_chunk_schema(monkeypatch):
     )
 
     assert hits[0]["source"] == "Bearing SOP"
+    assert hits[0]["chunk_id"] == "chunk-17"
+    assert hits[0]["source_uri"] == "blob://sop/bearing"
     assert hits[0]["fault_mode"] == ""
     assert client.kwargs["filter"] is None
-    assert client.kwargs["select"] == ["title", "chunk"]
+    assert client.kwargs["select"] == ["title", "chunk", "chunk_id", "parent_id"]
 
 
 def test_odata_filter_value_is_escaped():

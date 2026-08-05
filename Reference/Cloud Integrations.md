@@ -24,6 +24,8 @@ Set `RAG_BACKEND=azure` and configure:
 - `AZURE_SEARCH_ENDPOINT`
 - `AZURE_SEARCH_KEY`
 - `AZURE_SEARCH_INDEX_NAME`
+- `AZURE_SEARCH_CHUNK_ID_FIELD`
+- `AZURE_SEARCH_SOURCE_URI_FIELD`
 - The content, citation/source, fault mode, asset type, and ISO stage field
   names shown in `.env.example`.
 
@@ -45,6 +47,12 @@ to that field.
 Every accepted result must contain both source and content. Missing citations
 are discarded, and Agent 5 returns `no_guidance` if no source-backed result
 survives its relevance policy.
+
+Conceptual and approved open-ended chat questions use the same retrieval
+backend through the governed RAG service. The chat response exposes document
+title, chunk ID, source URI/parent locator, normalized score, and inline
+citation markers. Agent 8 learned cases are excluded from this general source
+type and retain their separate case-reference contract.
 
 Use `RAG_BACKEND=auto` only for development, where falling back to the local SOP
 index is acceptable. Production should use the explicit `azure` value so

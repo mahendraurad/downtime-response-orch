@@ -47,6 +47,12 @@ class AzureSearchRetriever:
             raise RuntimeError("AZURE_SEARCH_AUTH must be auto, key, or rbac")
         self.content_field = os.getenv("AZURE_SEARCH_CONTENT_FIELD", "content")
         self.source_field = os.getenv("AZURE_SEARCH_SOURCE_FIELD", "source")
+        self.chunk_id_field = _optional_field(
+            "AZURE_SEARCH_CHUNK_ID_FIELD", "chunk_id"
+        )
+        self.source_uri_field = _optional_field(
+            "AZURE_SEARCH_SOURCE_URI_FIELD", "parent_id"
+        )
         # Metadata fields are optional because a minimal Azure chunk index may
         # contain only chunk, title, parent/key, and vector fields.
         self.fault_field = _optional_field(
@@ -112,7 +118,8 @@ class AzureSearchRetriever:
 
         select_fields = [
             field for field in (
-                self.source_field, self.content_field, self.fault_field,
+                self.source_field, self.content_field, self.chunk_id_field,
+                self.source_uri_field, self.fault_field,
                 self.asset_field, self.stage_field,
             ) if field
         ]
@@ -148,6 +155,14 @@ class AzureSearchRetriever:
             raw_score = float(item.get("@search.score", 0.0) or 0.0)
             results.append({
                 "source": source,
+                "chunk_id": (
+                    str(item.get(self.chunk_id_field, "") or "")
+                    if self.chunk_id_field else ""
+                ),
+                "source_uri": (
+                    str(item.get(self.source_uri_field, "") or "")
+                    if self.source_uri_field else ""
+                ),
                 "text": text,
                 "score": _normalize_search_score(
                     raw_score, hybrid=bool(self.vector_field)
@@ -173,6 +188,8 @@ class AzureSearchRetriever:
             "backend": "azure-search", "endpoint": self.endpoint,
             "index": self.index_name, "content_field": self.content_field,
             "source_field": self.source_field, "vector_field": self.vector_field,
+            "chunk_id_field": self.chunk_id_field,
+            "source_uri_field": self.source_uri_field,
             "auth_mode": self.auth_mode,
         }
         return hashlib.sha256(

@@ -10,6 +10,7 @@ This folder contains historical implementation and review material. It is not re
 - `Orchestrator Wiring Changes.md` — agent call and conditional-routing history.
 - `Orchestrator Audit and Error Controls.md` — audit and graceful-failure design.
 - `Reflexion Agent Changes.md` — bounded response-refinement design.
+- `Open-ended RAG Changes.md` — governed conceptual retrieval, citation, safety, and API test record.
 - `developer-docs/` — earlier developer documents retained for historical context; some describe older partial-pipeline states.
 - `legacy-diagnostics/` — root-level diagnostic scripts superseded by the authoritative `tests/` suite.
 - DOCX files — shareable manager reports generated during development.

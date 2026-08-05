@@ -4,14 +4,14 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from src.schemas.risk import RiskAssessment
 from src.schemas.diagnosis import FaultDiagnosis
 from src.schemas.knowledge import KnowledgeGuidance
 from src.schemas.recommendation import (
-    ConfidenceSummary, ConditionSummary, Consequence, Contributor,
-    DecisionSupport,
+    ApprovalEscalation, ApprovalEscalationStep, ConfidenceSummary,
+    ConditionSummary, Consequence, Contributor, DecisionSupport,
     HistoricalCaseCitation, MaintenanceRecommendation, PrescriptiveAction,
     PartsRULComparison, RecommendedAction, RequiredPart, Verdict,
 )
@@ -122,9 +122,11 @@ class PrescriptiveOptimizationAgent:
             for row in historical_rows
         ]
         parts_vs_rul = self._parts_vs_rul(required_parts, risk)
+        generated_at = self._now()
         decision_support = self._build_decision_support(
             chosen, duration, risk, trusted_signal, persona,
-            parts_vs_rul, citations,
+            parts_vs_rul, citations, approval_required,
+            cfg.urgency[risk_level], generated_at,
         )
         consequences = self._consequences(risk, decision_support)
         return MaintenanceRecommendation(
@@ -147,7 +149,7 @@ class PrescriptiveOptimizationAgent:
             responsible_approver_id=personnel["responsible_approver_id"],
             contributors=[Contributor(role="Reliability Engineer", name="DRO Agent 6",
                                       concern="risk, guidance, inventory and window constraints")],
-            generated_at_utc=self._now().isoformat(), status_reason="validated ranked recommendation",
+            generated_at_utc=generated_at.isoformat(), status_reason="validated ranked recommendation",
             prescriptive_config_version=self._version,
             source_risk_config_version=risk.risk_config_version,
             source_knowledge_config_version=guidance.knowledge_config_version,
@@ -166,7 +168,8 @@ class PrescriptiveOptimizationAgent:
         )
 
     def _build_decision_support(self, action, duration, risk, trusted_signal,
-                                persona, parts_vs_rul, citations):
+                                persona, parts_vs_rul, citations,
+                                approval_required, urgency, generated_at):
         cfg = self._decision_support
         cost_cfg = cfg["cost_model"]
         override = cost_cfg.get("asset_overrides", {}).get(risk.asset_id, {})
@@ -220,6 +223,9 @@ class PrescriptiveOptimizationAgent:
                 f"{cfg['currency']} {approved:,.0f} exceeds the "
                 f"{persona.role} limit; escalate to {next_role}"
             )
+        escalation = self._approval_escalation(
+            persona, approval_required, urgency, generated_at
+        )
         return DecisionSupport(
             cost_if_approved=approved,
             cost_if_deferred=deferred,
@@ -234,6 +240,49 @@ class PrescriptiveOptimizationAgent:
             authority_reason=authority_reason,
             authority_limit=float(limit) if limit is not None else None,
             decision_support_config_version=self._decision_support_version,
+            approval_escalation=escalation,
+        )
+
+    def _approval_escalation(self, persona, approval_required, urgency,
+                             generated_at):
+        policy = self._decision_support["approval_escalation"]
+        hierarchy = self._decision_support["approval_hierarchy"]
+        if not approval_required or not policy["enabled"]:
+            return ApprovalEscalation(status="not_required")
+
+        # Non-approver personas send the initial decision to the first configured
+        # authority. Approver personas enter the chain at their own level.
+        current_id = persona.id if persona.id in hierarchy else hierarchy[0]
+        current = build_persona_context(current_id)
+        start_index = hierarchy.index(current_id)
+        if start_index == len(hierarchy) - 1:
+            return ApprovalEscalation(
+                status="final_authority",
+                current_persona_id=current.id,
+                current_persona_name=current.display_name,
+            )
+
+        timeout_seconds = policy["timeout_seconds_by_urgency"][urgency]
+        deadline = generated_at
+        steps = []
+        for index in range(start_index, len(hierarchy) - 1):
+            source = build_persona_context(hierarchy[index])
+            target = build_persona_context(hierarchy[index + 1])
+            deadline += timedelta(seconds=timeout_seconds)
+            steps.append(ApprovalEscalationStep(
+                sequence=len(steps) + 1,
+                from_persona_id=source.id,
+                from_persona_name=source.display_name,
+                to_persona_id=target.id,
+                to_persona_name=target.display_name,
+                timeout_seconds=timeout_seconds,
+                escalates_at_utc=deadline.isoformat(),
+            ))
+        return ApprovalEscalation(
+            status="active",
+            current_persona_id=current.id,
+            current_persona_name=current.display_name,
+            steps=steps,
         )
 
     @staticmethod

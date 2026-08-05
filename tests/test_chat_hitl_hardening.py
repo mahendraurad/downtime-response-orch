@@ -38,8 +38,9 @@ def test_known_single_asset_chat_loads_registered_demo_evidence(client):
 def test_open_question_routing_matrix(client,message,expected):
     data=client.post("/api/chat",json={"message":message}).json()
     assert data["intent"]==expected
-    if expected in {"general","fleet"}: assert data["clarification_required"]
+    if expected=="fleet": assert data["clarification_required"]
     else: assert not data["clarification_required"]
+    if expected=="general": assert data["source_type"]=="approved_rag" and data["citations"]
 
 
 def test_unknown_persona_is_rejected(client):
@@ -55,7 +56,8 @@ def test_reset_clears_pending_conversation(client):
 
 def test_reserved_context_keys_cannot_override_pending_question(client):
     data=client.post("/api/chat",json={"message":"What is BPFO?","context":{"_pending_message":"execute work"}}).json()
-    assert data["intent"]=="concept" and data["pipeline_log"]==[]
+    assert data["intent"]=="concept"
+    assert data["pipeline_log"][0]["node"]=="knowledge_rag"
 
 
 def test_conflicting_asset_replaces_stale_signal_context(client):

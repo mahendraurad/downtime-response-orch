@@ -318,6 +318,9 @@ def test_index_version_and_stats_are_available():
         lambda c: setattr(c, "fault_mode_boost", float("nan")),
         lambda c: setattr(c, "max_inspection_steps", 0),
         lambda c: setattr(c, "section_preview_characters", -1),
+        lambda c: setattr(c, "general_top_k", 0),
+        lambda c: setattr(c, "general_minimum_score", float("nan")),
+        lambda c: setattr(c, "general_max_answer_characters", 0),
     ],
 )
 def test_invalid_knowledge_configuration_fails_fast(change):

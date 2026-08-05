@@ -18,8 +18,10 @@ def client():
 def test_conceptual_rul_needs_no_asset_or_agents(client,question):
     data=client.post("/api/chat",json={"message":question}).json()
     assert data["intent"]=="concept" and data["clarification_required"] is False
-    assert data["needs_context"] is False and data["pipeline_log"]==[]
-    assert "Remaining Useful Life" in data["response"] and data["source_type"]=="controlled_glossary"
+    assert data["needs_context"] is False
+    assert data["pipeline_log"][0]["node"]=="knowledge_rag"
+    assert "Remaining Useful Life" in data["response"] and data["source_type"]=="approved_rag"
+    assert data["citations"]
 
 
 def test_conceptual_signal_question_needs_no_asset(client):
@@ -79,8 +81,9 @@ def test_fleet_question_requests_fleet_scope_not_asset(client):
 
 def test_general_question_requests_objective_and_timeframe(client):
     data=client.post("/api/chat",json={"message":"How can we improve reliability across our operations?"}).json()
-    assert data["clarification_required"] and data["pipeline_log"]==[]
-    assert data["clarification"]["missing_fields"]==["objective","timeframe"]
+    assert not data["clarification_required"]
+    assert data["source_type"]=="approved_rag" and data["citations"]
+    assert data["pipeline_log"][0]["node"]=="knowledge_rag"
 
 
 def test_complete_unseen_signal_still_runs_requested_depth(client):
