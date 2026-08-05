@@ -62,7 +62,7 @@ export default function Topbar() {
             {theme === 'light' ? '🌙' : '☀️'}
           </button>
           <div className="ldot"></div>
-          <div className="ltx">{dataStatus.assets === 'backend_agent_pipeline' ? 'BACKEND' : 'DEMO FALLBACK'}</div>
+          <div className="ltx">{dataStatus.assets === 'backend_agent_pipeline' ? 'BACKEND LIVE' : 'DEMO FALLBACK'}</div>
           {alertCount > 0 && (
             <div className="abdg">⚠ {alertCount} ALERTS</div>
           )}
