@@ -12,10 +12,11 @@ The repository is ready for frontend integration in deterministic local mode. Az
 | LangGraph conditional orchestration | Implemented |
 | Persona-aware pipeline and chat APIs | Implemented |
 | Human approval and HITL gates | Implemented |
+| Azure PostgreSQL HITL + LangGraph checkpoints | Connected and live-verified |
 | Reflexion and graceful error envelopes | Implemented |
 | Governed cited open-ended RAG | Implemented locally; Azure adapter ready |
 | Local persistence and mock connectors | Implemented |
-| Automated backend tests | `818 passed` |
+| Automated backend tests | `833 passed` |
 | React frontend from `feature/8agents_frontend` | Integrated on `dev` |
 | Real CMMS/ERP/historian and Azure services | Next phase |
 
@@ -87,7 +88,7 @@ Useful URLs:
 - API documentation: `http://127.0.0.1:8000/docs`
 - OpenAPI JSON: `http://127.0.0.1:8000/openapi.json`
 - Existing frontend: `http://127.0.0.1:8000/`
-- Health check: `GET /api/assets`
+- Health check: `GET /api/health`
 
 ## Start the React frontend
 
@@ -182,6 +183,20 @@ SQLite path, and gate permissions under `hitl` in
 `config/orchestrator_config.json`. PostgreSQL schema DDL is versioned in
 `migrations/001_hitl_postgres.sql`.
 
+With `CHECKPOINT_BACKEND=postgres`, every pipeline run also has a caller-stable
+thread ID plus a run namespace. Agent 6 recommendations carry those checkpoint
+coordinates. Approval resumes the persisted graph at Agent 7 without replaying
+Agents 1–6, and a repeated approval is idempotent. Both PostgreSQL clients use
+bounded connection pools and are closed by the FastAPI lifespan handler.
+
+Use an ignored `.env.local` for developer-only overrides; process/container
+settings always take precedence. After one-time schema setup, validate the live
+state layer without printing secrets:
+
+```powershell
+python scripts\verify_postgres_langgraph.py
+```
+
 Multi-asset questions name every requested asset in `multi_asset_results`. Each
 asset is evaluated independently through the required pipeline depth, receives
 an action and deadline, and carries asset-labelled pipeline logs. A failure or
@@ -273,7 +288,7 @@ python -m pytest tests/test_agent1_to_agent8_integration.py -q
 Current certification:
 
 ```text
-818 passed
+833 passed
 0 failed
 ```
 
@@ -333,7 +348,8 @@ Cloud credentials are never required for deterministic local execution. LLM outp
 
 ## Next steps
 
-1. Configure and validate Azure PostgreSQL for HITL and LangGraph checkpoints.
+1. Move the validated PostgreSQL secret to Key Vault/workload identity, rotate
+   the temporary developer password, and provision a least-privilege app role.
 2. Replace demo economics and mock historian/CMMS/inventory/notification APIs
    with governed production adapters.
 3. Move approval escalation from the completed session-level UI worker to a

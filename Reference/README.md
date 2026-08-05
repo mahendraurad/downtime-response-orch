@@ -15,4 +15,6 @@ This folder contains historical implementation and review material. It is not re
 - `legacy-diagnostics/` — root-level diagnostic scripts superseded by the authoritative `tests/` suite.
 - DOCX files — shareable manager reports generated during development.
 
+- `Cloud Integrations.md` documents PostgreSQL/LangGraph persistence, Azure Search, and observability operations.
+
 For current setup, API and frontend integration instructions, use the repository-root `README.md` and `RUNNING.md`.
