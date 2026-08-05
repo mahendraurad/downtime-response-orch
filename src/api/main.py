@@ -413,17 +413,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Serve the frontend HTML ───────────────────────────────────────────────────
-_FRONTEND_HTML = os.path.join(
-    os.path.dirname(__file__), "..", "..", "frontend", "index.html"
+# ── Serve the React frontend (production build) ───────────────────────────────
+_FRONTEND_DIST = os.path.join(
+    os.path.dirname(__file__), "..", "..", "frontend", "react-app", "dist"
 )
-
-
-@app.get("/")
-def root():
-    if os.path.exists(_FRONTEND_HTML):
-        return FileResponse(_FRONTEND_HTML)
-    return {"message": "DRO API running. Frontend not found at frontend/index.html."}
 
 
 # ── Health endpoint ───────────────────────────────────────────────────────────
@@ -2152,6 +2145,10 @@ async def sensor_stream(websocket: WebSocket, asset_id: str):
     except WebSocketDisconnect:
         pass
 
+
+# ── Serve React build — must be last so /api/* routes take priority ──────────
+if os.path.isdir(_FRONTEND_DIST):
+    app.mount("/", StaticFiles(directory=_FRONTEND_DIST, html=True), name="frontend")
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
