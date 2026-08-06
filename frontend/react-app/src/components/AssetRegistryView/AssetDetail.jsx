@@ -99,7 +99,7 @@ export default function AssetDetail({ asset }) {
       <div className="adetbody">
 
         {/* ── Collapsible AI Summary ── */}
-        <div style={{ marginBottom: '14px', borderRadius: '8px', border: '1px solid var(--b)', overflow: 'auto', 'overflow-y':'auto' }}>
+        <div style={{ marginBottom: '14px', borderRadius: '8px', border: '1px solid var(--b)', overflow: 'auto' }}>
           {/* Toggle header */}
           <button
             onClick={handleToggle}
@@ -113,7 +113,7 @@ export default function AssetDetail({ asset }) {
           >
             <span style={{ fontSize: '13px' }}>🤖</span>
             <span style={{ flex: 1, fontSize: '12px', fontWeight: 600, color: 'var(--t)' }}>
-              Pointers on how to read this page
+              AI insights
             </span>
             <span style={{ fontSize: '11px', color: 'var(--t3)', fontFamily: 'var(--m)', flexShrink: 0 }}>
               {expanded ? '▲' : '▼'}
@@ -122,7 +122,7 @@ export default function AssetDetail({ asset }) {
 
           {/* Expandable body */}
           {expanded && (
-            <div style={{ padding: '14px 16px', background: 'var(--sf)' }}>
+            <div style={{ padding: '14px 16px', background: 'var(--sf)', minHeight: '220px', maxHeight: '420px', overflowY: 'auto' }}>
               <div
                 style={{ fontSize: '12px', color: 'var(--t2)', lineHeight: '1.8' }}
                 dangerouslySetInnerHTML={{ __html: buildStaticSummary(asset) }}

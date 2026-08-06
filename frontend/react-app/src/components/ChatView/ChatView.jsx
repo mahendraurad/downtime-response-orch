@@ -1104,7 +1104,7 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
   const [showRejectInput, setShowRejectInput] = useState(false);
   const [rejectCode, setRejectCode] = useState('');
   const [rejectReason, setRejectReason] = useState('');
-  const { refreshNotifCounts, pushNotification, patchMessage } = useContext(AppContext);
+  const { refreshNotifCounts, pushNotification, patchMessage, refreshWorkOrders } = useContext(AppContext);
   const rec = msg.rec;
   const decisionSupport = rec.decision_support || {};
   const escalation = decisionSupport.approval_escalation || {};
@@ -1143,6 +1143,7 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
           ? await runExecutor(rec, true, persona)
           : await rejectRecommendation(rec, rejectCode, reason || '', persona);
         refreshNotifCounts();
+        if (approved) refreshWorkOrders();
 
         let html;
         if (approved) {
@@ -1202,7 +1203,12 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
         }
 
         appendA(html, approved ? ['executor · result'] : ['agent 8 · rejection learning']);
-      } catch (err) { appendA('Executor call failed: ' + err.message, []); }
+      } catch (err) {
+        const msg403 = err.message?.includes('403')
+          ? 'This persona does not have execution authority. Switch to a persona with approval rights (Supervisor, Manager, or Maintenance Planner).'
+          : 'Executor call failed: ' + err.message;
+        appendA(msg403, []);
+      }
     });
   }
 
@@ -1233,7 +1239,7 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
                   {p.part_number} ×{p.quantity}
                 </span>
               ))}<br />
-              Approver: <strong>{rec.responsible_approver}</strong>
+
             </div>
 
             {/* Rationale */}

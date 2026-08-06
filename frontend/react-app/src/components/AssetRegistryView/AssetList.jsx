@@ -7,6 +7,7 @@ export default function AssetList({ assets = [], selectedAsset, onSelect }) {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
 
+  const STATUS_ORDER = { critical: 0, warning: 1, healthy: 2 };
   const filtered = assets.filter(a => {
     const matchFilter = filter === 'all' || a.st === filter;
     const matchSearch = search === '' ||
@@ -14,7 +15,7 @@ export default function AssetList({ assets = [], selectedAsset, onSelect }) {
       a.nm.toLowerCase().includes(search.toLowerCase()) ||
       a.tp.toLowerCase().includes(search.toLowerCase());
     return matchFilter && matchSearch;
-  });
+  }).sort((a, b) => (STATUS_ORDER[a.st] ?? 99) - (STATUS_ORDER[b.st] ?? 99));
 
   return (
     <div className="asl">
