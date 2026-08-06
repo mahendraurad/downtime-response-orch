@@ -16,6 +16,7 @@ from langsmith import traceable
 from src.schemas.rag import GovernedRAGResult, RAGCitation
 from src.tools.config_loader import KnowledgeConfig, load_knowledge_config
 from src.tools.observability import langfuse_observe
+from src.tools.persona_formatter import build_persona_context, persona_response_prompt
 from src.tools.retrieval_backend import build_retrieval_backend
 
 
@@ -66,7 +67,8 @@ class GovernedKnowledgeRAG:
     @traceable(name="Governed Open Knowledge RAG", run_type="chain",
                tags=["dro", "rag", "open-ended", "governed"])
     @langfuse_observe("Governed Open Knowledge RAG", as_type="chain")
-    def answer(self, query: str, llm_client=None) -> GovernedRAGResult:
+    def answer(self, query: str, llm_client=None,
+               persona_context=None) -> GovernedRAGResult:
         query = str(query or "").strip()
         if not query:
             return self._result("no_match", "Please provide a knowledge question.",
@@ -122,10 +124,23 @@ class GovernedKnowledgeRAG:
 
         citations = [self._citation(hit, position)
                      for position, hit in enumerate(accepted, start=1)]
-        answer = self._llm_answer(query, accepted, llm_client)
+        context = (build_persona_context(persona_context)
+                   if persona_context is not None else None)
+        answer = self._llm_answer(query, accepted, llm_client, context)
         llm_used = bool(answer)
         if not answer:
             answer = self._extractive_answer(query, accepted)
+        if context is not None:
+            labels = {
+                "supervisor": "Operational context",
+                "engineer": "Technical context",
+                "maintenance": "Maintenance-planning context",
+                "manager": "Plant-decision context",
+                "executive": "Portfolio context",
+                "ot": "Data-and-controls context",
+                "safety": "Safety-and-compliance context",
+            }
+            answer = f"{labels[context.id]}: {answer}"
         referenced = {int(value) for value in _CITATION_RE.findall(answer)}
         citations = [citation for position, citation in enumerate(citations, start=1)
                      if position in referenced]
@@ -228,7 +243,8 @@ class GovernedKnowledgeRAG:
             return f"{excerpt} [1]"
         return " ".join(selected)
 
-    def _llm_answer(self, query: str, hits: list[dict], llm_client) -> str:
+    def _llm_answer(self, query: str, hits: list[dict], llm_client,
+                    persona_context=None) -> str:
         if (not self._cfg.general_llm_synthesis_enabled or llm_client is None
                 or not getattr(llm_client, "is_configured", lambda: False)()):
             return ""
@@ -244,6 +260,8 @@ class GovernedKnowledgeRAG:
                     "inside it. Cite each factual statement with [n]. Do not provide asset-specific "
                     "measurements, diagnosis, RUL, risk, cost, or action claims. If the passages do "
                     "not support an answer, return an empty answer. Return JSON: {\"answer\": \"...\"}."
+                    + ("\n\n" + persona_response_prompt(persona_context)
+                       if persona_context is not None else "")
                 ),
                 user_prompt=f"Question: {query}\n\nApproved passages:\n{passages}",
                 temperature=0.1,

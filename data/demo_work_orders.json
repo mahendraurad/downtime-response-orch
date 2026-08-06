@@ -1,0 +1,898 @@
+[
+  {
+    "id": "WO-2024-1847",
+    "priority": "CRITICAL",
+    "status": "Pending",
+    "title": "M-104 Drive-End Bearing Replacement",
+    "asset_id": "AST_MTR_001",
+    "asset_display": "M-104",
+    "type": "Condition Based",
+    "est_hours": 4,
+    "parts": "SKF 6310-2RS (Bin A-14)",
+    "assigned_to": "Pending",
+    "due": "Wednesday 06:00",
+    "created_by": "DRO synthetic fleet",
+    "rul": "5-8 days",
+    "risk": "Critical",
+    "cost": "$18,000",
+    "checklist": [
+      {
+        "text": "Validate LOTO EL-104-A",
+        "done": true,
+        "tag": "Safety"
+      },
+      {
+        "text": "Confirm SKF 6310-2RS stock",
+        "done": true,
+        "tag": "Parts"
+      },
+      {
+        "text": "Assign two LOTO-qualified technicians",
+        "done": false,
+        "tag": "Crew"
+      }
+    ],
+    "timeline": [
+      {
+        "dot": "var(--rd)",
+        "ev": "Stage 3 outer-race fault confirmed",
+        "tm": "Current"
+      }
+    ],
+    "synthetic_data_version": "2026.08.1"
+  },
+  {
+    "id": "WO-DEMO-0207",
+    "priority": "HIGH",
+    "status": "Scheduled",
+    "title": "P-207 Lubrication Inspection",
+    "asset_id": "AST_PMP_001",
+    "asset_display": "P-207",
+    "type": "Preventive",
+    "est_hours": 2,
+    "parts": "Mobil SHC 100, 200 mL",
+    "assigned_to": "Demo Reliability Crew",
+    "due": "Wednesday 09:00",
+    "created_by": "DRO synthetic fleet",
+    "rul": "15-22 days",
+    "risk": "Medium",
+    "cost": "$2,400",
+    "checklist": [
+      {
+        "text": "Confirm IL-207-B",
+        "done": true,
+        "tag": "Safety"
+      },
+      {
+        "text": "Collect lubricant and sampling kit",
+        "done": false,
+        "tag": "Parts"
+      }
+    ],
+    "timeline": [
+      {
+        "dot": "var(--am)",
+        "ev": "Lubrication degradation detected",
+        "tm": "Current"
+      }
+    ],
+    "synthetic_data_version": "2026.08.1"
+  },
+  {
+    "id": "WO-DEMO-0301",
+    "priority": "MEDIUM",
+    "status": "Scheduled",
+    "title": "C-301 Sensor Dropout Inspection",
+    "asset_id": "AST_CON_001",
+    "asset_display": "C-301",
+    "type": "Instrumentation",
+    "est_hours": 1.5,
+    "parts": "CH-31B connector kit",
+    "assigned_to": "Demo OT Crew",
+    "due": "Thursday 14:00",
+    "created_by": "DRO synthetic fleet",
+    "rul": "Data review",
+    "risk": "Medium",
+    "cost": "$1,250",
+    "checklist": [
+      {
+        "text": "Inspect junction box J-301",
+        "done": false,
+        "tag": "OT"
+      },
+      {
+        "text": "Validate IL-301-B",
+        "done": false,
+        "tag": "Safety"
+      }
+    ],
+    "timeline": [
+      {
+        "dot": "var(--am)",
+        "ev": "Intermittent signal dropout detected",
+        "tm": "Current"
+      }
+    ],
+    "synthetic_data_version": "2026.08.1"
+  },
+  {
+    "id": "WO-DEMO-0401",
+    "priority": "HIGH",
+    "status": "Scheduled",
+    "title": "M-121 — Inspect and replace bearing as condition requires",
+    "asset_id": "AST_SYN_MTR_121",
+    "asset_display": "M-121",
+    "type": "Condition Based",
+    "est_hours": 3,
+    "parts": "SKF 6312-2RS",
+    "assigned_to": "Demo Reliability Crew",
+    "due": "Within 7 days",
+    "created_by": "DRO synthetic fleet",
+    "rul": "8-30 days",
+    "risk": "High",
+    "cost": "$19,500",
+    "checklist": [
+      {
+        "text": "Validate current telemetry and diagnosis",
+        "done": true,
+        "tag": "Evidence"
+      },
+      {
+        "text": "Confirm LOTO permit and qualified crew",
+        "done": false,
+        "tag": "Safety"
+      },
+      {
+        "text": "Confirm SKF 6312-2RS or required repair kit",
+        "done": false,
+        "tag": "Parts"
+      },
+      {
+        "text": "Capture post-work vibration and temperature baseline",
+        "done": false,
+        "tag": "QA"
+      }
+    ],
+    "timeline": [
+      {
+        "dot": "var(--ac)",
+        "ev": "Generated from synthetic condition evidence",
+        "tm": "Demo dataset"
+      },
+      {
+        "dot": "var(--am)",
+        "ev": "Awaiting planning/approval action",
+        "tm": "Current"
+      }
+    ],
+    "synthetic_data_version": "2026.08.1"
+  },
+  {
+    "id": "WO-DEMO-0403",
+    "priority": "MEDIUM",
+    "status": "Scheduled",
+    "title": "M-123 — Inspect and replace bearing as condition requires",
+    "asset_id": "AST_SYN_MTR_123",
+    "asset_display": "M-123",
+    "type": "Condition Based",
+    "est_hours": 3,
+    "parts": "SKF 6309-2RS",
+    "assigned_to": "Demo Reliability Crew",
+    "due": "Within 7 days",
+    "created_by": "DRO synthetic fleet",
+    "rul": "8-30 days",
+    "risk": "Medium",
+    "cost": "$14,300",
+    "checklist": [
+      {
+        "text": "Validate current telemetry and diagnosis",
+        "done": true,
+        "tag": "Evidence"
+      },
+      {
+        "text": "Confirm LOTO permit and qualified crew",
+        "done": false,
+        "tag": "Safety"
+      },
+      {
+        "text": "Confirm SKF 6309-2RS or required repair kit",
+        "done": false,
+        "tag": "Parts"
+      },
+      {
+        "text": "Capture post-work vibration and temperature baseline",
+        "done": false,
+        "tag": "QA"
+      }
+    ],
+    "timeline": [
+      {
+        "dot": "var(--ac)",
+        "ev": "Generated from synthetic condition evidence",
+        "tm": "Demo dataset"
+      },
+      {
+        "dot": "var(--am)",
+        "ev": "Awaiting planning/approval action",
+        "tm": "Current"
+      }
+    ],
+    "synthetic_data_version": "2026.08.1"
+  },
+  {
+    "id": "WO-DEMO-0404",
+    "priority": "HIGH",
+    "status": "Scheduled",
+    "title": "M-124 — Inspect and replace bearing as condition requires",
+    "asset_id": "AST_SYN_MTR_124",
+    "asset_display": "M-124",
+    "type": "Condition Based",
+    "est_hours": 3,
+    "parts": "SKF 6314-C3",
+    "assigned_to": "Demo Reliability Crew",
+    "due": "Within 7 days",
+    "created_by": "DRO synthetic fleet",
+    "rul": "8-30 days",
+    "risk": "High",
+    "cost": "$28,600",
+    "checklist": [
+      {
+        "text": "Validate current telemetry and diagnosis",
+        "done": true,
+        "tag": "Evidence"
+      },
+      {
+        "text": "Confirm LOTO permit and qualified crew",
+        "done": false,
+        "tag": "Safety"
+      },
+      {
+        "text": "Confirm SKF 6314-C3 or required repair kit",
+        "done": false,
+        "tag": "Parts"
+      },
+      {
+        "text": "Capture post-work vibration and temperature baseline",
+        "done": false,
+        "tag": "QA"
+      }
+    ],
+    "timeline": [
+      {
+        "dot": "var(--ac)",
+        "ev": "Generated from synthetic condition evidence",
+        "tm": "Demo dataset"
+      },
+      {
+        "dot": "var(--am)",
+        "ev": "Awaiting planning/approval action",
+        "tm": "Current"
+      }
+    ],
+    "synthetic_data_version": "2026.08.1"
+  },
+  {
+    "id": "WO-DEMO-0407",
+    "priority": "HIGH",
+    "status": "Scheduled",
+    "title": "P-220 — Inspect and replace bearing as condition requires",
+    "asset_id": "AST_SYN_PMP_220",
+    "asset_display": "P-220",
+    "type": "Condition Based",
+    "est_hours": 3,
+    "parts": "SKF 6308-2RS",
+    "assigned_to": "Demo Reliability Crew",
+    "due": "Within 7 days",
+    "created_by": "DRO synthetic fleet",
+    "rul": "8-30 days",
+    "risk": "High",
+    "cost": "$23,400",
+    "checklist": [
+      {
+        "text": "Validate current telemetry and diagnosis",
+        "done": true,
+        "tag": "Evidence"
+      },
+      {
+        "text": "Confirm LOTO permit and qualified crew",
+        "done": false,
+        "tag": "Safety"
+      },
+      {
+        "text": "Confirm SKF 6308-2RS or required repair kit",
+        "done": false,
+        "tag": "Parts"
+      },
+      {
+        "text": "Capture post-work vibration and temperature baseline",
+        "done": false,
+        "tag": "QA"
+      }
+    ],
+    "timeline": [
+      {
+        "dot": "var(--ac)",
+        "ev": "Generated from synthetic condition evidence",
+        "tm": "Demo dataset"
+      },
+      {
+        "dot": "var(--am)",
+        "ev": "Awaiting planning/approval action",
+        "tm": "Current"
+      }
+    ],
+    "synthetic_data_version": "2026.08.1"
+  },
+  {
+    "id": "WO-DEMO-0409",
+    "priority": "CRITICAL",
+    "status": "Pending",
+    "title": "P-222 — Inspect and replace bearing as condition requires",
+    "asset_id": "AST_SYN_PMP_222",
+    "asset_display": "P-222",
+    "type": "Condition Based",
+    "est_hours": 4,
+    "parts": "FAG 6209-C3",
+    "assigned_to": "Pending",
+    "due": "This shift",
+    "created_by": "DRO synthetic fleet",
+    "rul": "0-7 days",
+    "risk": "Critical",
+    "cost": "$19,500",
+    "checklist": [
+      {
+        "text": "Validate current telemetry and diagnosis",
+        "done": true,
+        "tag": "Evidence"
+      },
+      {
+        "text": "Confirm LOTO permit and qualified crew",
+        "done": false,
+        "tag": "Safety"
+      },
+      {
+        "text": "Confirm FAG 6209-C3 or required repair kit",
+        "done": false,
+        "tag": "Parts"
+      },
+      {
+        "text": "Capture post-work vibration and temperature baseline",
+        "done": false,
+        "tag": "QA"
+      }
+    ],
+    "timeline": [
+      {
+        "dot": "var(--ac)",
+        "ev": "Generated from synthetic condition evidence",
+        "tm": "Demo dataset"
+      },
+      {
+        "dot": "var(--am)",
+        "ev": "Awaiting planning/approval action",
+        "tm": "Current"
+      }
+    ],
+    "synthetic_data_version": "2026.08.1"
+  },
+  {
+    "id": "WO-DEMO-0410",
+    "priority": "HIGH",
+    "status": "Scheduled",
+    "title": "P-223 — Inspect cooling and lubrication",
+    "asset_id": "AST_SYN_PMP_223",
+    "asset_display": "P-223",
+    "type": "Condition Based",
+    "est_hours": 3,
+    "parts": "SKF 7310-BECBP",
+    "assigned_to": "Demo Reliability Crew",
+    "due": "Within 7 days",
+    "created_by": "DRO synthetic fleet",
+    "rul": "8-30 days",
+    "risk": "Medium",
+    "cost": "$14,300",
+    "checklist": [
+      {
+        "text": "Validate current telemetry and diagnosis",
+        "done": true,
+        "tag": "Evidence"
+      },
+      {
+        "text": "Confirm LOTO permit and qualified crew",
+        "done": false,
+        "tag": "Safety"
+      },
+      {
+        "text": "Confirm SKF 7310-BECBP or required repair kit",
+        "done": false,
+        "tag": "Parts"
+      },
+      {
+        "text": "Capture post-work vibration and temperature baseline",
+        "done": false,
+        "tag": "QA"
+      }
+    ],
+    "timeline": [
+      {
+        "dot": "var(--ac)",
+        "ev": "Generated from synthetic condition evidence",
+        "tm": "Demo dataset"
+      },
+      {
+        "dot": "var(--am)",
+        "ev": "Awaiting planning/approval action",
+        "tm": "Current"
+      }
+    ],
+    "synthetic_data_version": "2026.08.1"
+  },
+  {
+    "id": "WO-DEMO-0411",
+    "priority": "MEDIUM",
+    "status": "Scheduled",
+    "title": "P-224 — Inspect and replace bearing as condition requires",
+    "asset_id": "AST_SYN_PMP_224",
+    "asset_display": "P-224",
+    "type": "Condition Based",
+    "est_hours": 3,
+    "parts": "NSK 6307-DDU",
+    "assigned_to": "Demo Reliability Crew",
+    "due": "Within 7 days",
+    "created_by": "DRO synthetic fleet",
+    "rul": "8-30 days",
+    "risk": "Medium",
+    "cost": "$7,800",
+    "checklist": [
+      {
+        "text": "Validate current telemetry and diagnosis",
+        "done": true,
+        "tag": "Evidence"
+      },
+      {
+        "text": "Confirm LOTO permit and qualified crew",
+        "done": false,
+        "tag": "Safety"
+      },
+      {
+        "text": "Confirm NSK 6307-DDU or required repair kit",
+        "done": false,
+        "tag": "Parts"
+      },
+      {
+        "text": "Capture post-work vibration and temperature baseline",
+        "done": false,
+        "tag": "QA"
+      }
+    ],
+    "timeline": [
+      {
+        "dot": "var(--ac)",
+        "ev": "Generated from synthetic condition evidence",
+        "tm": "Demo dataset"
+      },
+      {
+        "dot": "var(--am)",
+        "ev": "Awaiting planning/approval action",
+        "tm": "Current"
+      }
+    ],
+    "synthetic_data_version": "2026.08.1"
+  },
+  {
+    "id": "WO-DEMO-0413",
+    "priority": "HIGH",
+    "status": "Scheduled",
+    "title": "C-315 — Inspect and replace bearing as condition requires",
+    "asset_id": "AST_SYN_CON_315",
+    "asset_display": "C-315",
+    "type": "Condition Based",
+    "est_hours": 3,
+    "parts": "SKF 6307-2RS",
+    "assigned_to": "Demo Reliability Crew",
+    "due": "Within 7 days",
+    "created_by": "DRO synthetic fleet",
+    "rul": "8-30 days",
+    "risk": "High",
+    "cost": "$5,000",
+    "checklist": [
+      {
+        "text": "Validate current telemetry and diagnosis",
+        "done": true,
+        "tag": "Evidence"
+      },
+      {
+        "text": "Confirm LOTO permit and qualified crew",
+        "done": false,
+        "tag": "Safety"
+      },
+      {
+        "text": "Confirm SKF 6307-2RS or required repair kit",
+        "done": false,
+        "tag": "Parts"
+      },
+      {
+        "text": "Capture post-work vibration and temperature baseline",
+        "done": false,
+        "tag": "QA"
+      }
+    ],
+    "timeline": [
+      {
+        "dot": "var(--ac)",
+        "ev": "Generated from synthetic condition evidence",
+        "tm": "Demo dataset"
+      },
+      {
+        "dot": "var(--am)",
+        "ev": "Awaiting planning/approval action",
+        "tm": "Current"
+      }
+    ],
+    "synthetic_data_version": "2026.08.1"
+  },
+  {
+    "id": "WO-DEMO-0415",
+    "priority": "MEDIUM",
+    "status": "Scheduled",
+    "title": "C-317 — Inspect sensor and restore signal",
+    "asset_id": "AST_SYN_CON_317",
+    "asset_display": "C-317",
+    "type": "Instrumentation",
+    "est_hours": 2,
+    "parts": "Sensor connector kit",
+    "assigned_to": "Demo Reliability Crew",
+    "due": "Within 7 days",
+    "created_by": "DRO synthetic fleet",
+    "rul": "8-30 days",
+    "risk": "Medium",
+    "cost": "$5,000",
+    "checklist": [
+      {
+        "text": "Validate current telemetry and diagnosis",
+        "done": true,
+        "tag": "Evidence"
+      },
+      {
+        "text": "Confirm LOTO permit and qualified crew",
+        "done": false,
+        "tag": "Safety"
+      },
+      {
+        "text": "Confirm NSK 6308-DDU or required repair kit",
+        "done": false,
+        "tag": "Parts"
+      },
+      {
+        "text": "Capture post-work vibration and temperature baseline",
+        "done": false,
+        "tag": "QA"
+      }
+    ],
+    "timeline": [
+      {
+        "dot": "var(--ac)",
+        "ev": "Generated from synthetic condition evidence",
+        "tm": "Demo dataset"
+      },
+      {
+        "dot": "var(--am)",
+        "ev": "Awaiting planning/approval action",
+        "tm": "Current"
+      }
+    ],
+    "synthetic_data_version": "2026.08.1"
+  },
+  {
+    "id": "WO-DEMO-0416",
+    "priority": "MEDIUM",
+    "status": "Scheduled",
+    "title": "C-318 — Inspect and replace bearing as condition requires",
+    "asset_id": "AST_SYN_CON_318",
+    "asset_display": "C-318",
+    "type": "Condition Based",
+    "est_hours": 3,
+    "parts": "FAG 6208-2RS",
+    "assigned_to": "Demo Reliability Crew",
+    "due": "Within 7 days",
+    "created_by": "DRO synthetic fleet",
+    "rul": "8-30 days",
+    "risk": "Medium",
+    "cost": "$5,000",
+    "checklist": [
+      {
+        "text": "Validate current telemetry and diagnosis",
+        "done": true,
+        "tag": "Evidence"
+      },
+      {
+        "text": "Confirm LOTO permit and qualified crew",
+        "done": false,
+        "tag": "Safety"
+      },
+      {
+        "text": "Confirm FAG 6208-2RS or required repair kit",
+        "done": false,
+        "tag": "Parts"
+      },
+      {
+        "text": "Capture post-work vibration and temperature baseline",
+        "done": false,
+        "tag": "QA"
+      }
+    ],
+    "timeline": [
+      {
+        "dot": "var(--ac)",
+        "ev": "Generated from synthetic condition evidence",
+        "tm": "Demo dataset"
+      },
+      {
+        "dot": "var(--am)",
+        "ev": "Awaiting planning/approval action",
+        "tm": "Current"
+      }
+    ],
+    "synthetic_data_version": "2026.08.1"
+  },
+  {
+    "id": "WO-DEMO-0417",
+    "priority": "CRITICAL",
+    "status": "Pending",
+    "title": "G-120 — Inspect and replace bearing as condition requires",
+    "asset_id": "AST_SYN_GBX_120",
+    "asset_display": "G-120",
+    "type": "Condition Based",
+    "est_hours": 4,
+    "parts": "SKF 22320-E",
+    "assigned_to": "Pending",
+    "due": "This shift",
+    "created_by": "DRO synthetic fleet",
+    "rul": "0-7 days",
+    "risk": "Critical",
+    "cost": "$65,000",
+    "checklist": [
+      {
+        "text": "Validate current telemetry and diagnosis",
+        "done": true,
+        "tag": "Evidence"
+      },
+      {
+        "text": "Confirm LOTO permit and qualified crew",
+        "done": false,
+        "tag": "Safety"
+      },
+      {
+        "text": "Confirm SKF 22320-E or required repair kit",
+        "done": false,
+        "tag": "Parts"
+      },
+      {
+        "text": "Capture post-work vibration and temperature baseline",
+        "done": false,
+        "tag": "QA"
+      }
+    ],
+    "timeline": [
+      {
+        "dot": "var(--ac)",
+        "ev": "Generated from synthetic condition evidence",
+        "tm": "Demo dataset"
+      },
+      {
+        "dot": "var(--am)",
+        "ev": "Awaiting planning/approval action",
+        "tm": "Current"
+      }
+    ],
+    "synthetic_data_version": "2026.08.1"
+  },
+  {
+    "id": "WO-DEMO-0418",
+    "priority": "CRITICAL",
+    "status": "Pending",
+    "title": "G-121 — Inspect and replace bearing as condition requires",
+    "asset_id": "AST_SYN_GBX_121",
+    "asset_display": "G-121",
+    "type": "Condition Based",
+    "est_hours": 4,
+    "parts": "FAG 22318-E1",
+    "assigned_to": "Pending",
+    "due": "This shift",
+    "created_by": "DRO synthetic fleet",
+    "rul": "0-7 days",
+    "risk": "Critical",
+    "cost": "$46,800",
+    "checklist": [
+      {
+        "text": "Validate current telemetry and diagnosis",
+        "done": true,
+        "tag": "Evidence"
+      },
+      {
+        "text": "Confirm LOTO permit and qualified crew",
+        "done": false,
+        "tag": "Safety"
+      },
+      {
+        "text": "Confirm FAG 22318-E1 or required repair kit",
+        "done": false,
+        "tag": "Parts"
+      },
+      {
+        "text": "Capture post-work vibration and temperature baseline",
+        "done": false,
+        "tag": "QA"
+      }
+    ],
+    "timeline": [
+      {
+        "dot": "var(--ac)",
+        "ev": "Generated from synthetic condition evidence",
+        "tm": "Demo dataset"
+      },
+      {
+        "dot": "var(--am)",
+        "ev": "Awaiting planning/approval action",
+        "tm": "Current"
+      }
+    ],
+    "synthetic_data_version": "2026.08.1"
+  },
+  {
+    "id": "WO-DEMO-0420",
+    "priority": "MEDIUM",
+    "status": "Scheduled",
+    "title": "G-123 — Inspect and replace bearing as condition requires",
+    "asset_id": "AST_SYN_GBX_123",
+    "asset_display": "G-123",
+    "type": "Condition Based",
+    "est_hours": 3,
+    "parts": "FAG 22214-E1",
+    "assigned_to": "Demo Reliability Crew",
+    "due": "Within 7 days",
+    "created_by": "DRO synthetic fleet",
+    "rul": "8-30 days",
+    "risk": "Medium",
+    "cost": "$23,400",
+    "checklist": [
+      {
+        "text": "Validate current telemetry and diagnosis",
+        "done": true,
+        "tag": "Evidence"
+      },
+      {
+        "text": "Confirm LOTO permit and qualified crew",
+        "done": false,
+        "tag": "Safety"
+      },
+      {
+        "text": "Confirm FAG 22214-E1 or required repair kit",
+        "done": false,
+        "tag": "Parts"
+      },
+      {
+        "text": "Capture post-work vibration and temperature baseline",
+        "done": false,
+        "tag": "QA"
+      }
+    ],
+    "timeline": [
+      {
+        "dot": "var(--ac)",
+        "ev": "Generated from synthetic condition evidence",
+        "tm": "Demo dataset"
+      },
+      {
+        "dot": "var(--am)",
+        "ev": "Awaiting planning/approval action",
+        "tm": "Current"
+      }
+    ],
+    "synthetic_data_version": "2026.08.1"
+  },
+  {
+    "id": "WO-DEMO-0422",
+    "priority": "HIGH",
+    "status": "Scheduled",
+    "title": "F-411 — Inspect and replace bearing as condition requires",
+    "asset_id": "AST_SYN_FAN_411",
+    "asset_display": "F-411",
+    "type": "Condition Based",
+    "est_hours": 3,
+    "parts": "SKF 22218-E",
+    "assigned_to": "Demo Reliability Crew",
+    "due": "Within 7 days",
+    "created_by": "DRO synthetic fleet",
+    "rul": "8-30 days",
+    "risk": "High",
+    "cost": "$34,320",
+    "checklist": [
+      {
+        "text": "Validate current telemetry and diagnosis",
+        "done": true,
+        "tag": "Evidence"
+      },
+      {
+        "text": "Confirm LOTO permit and qualified crew",
+        "done": false,
+        "tag": "Safety"
+      },
+      {
+        "text": "Confirm SKF 22218-E or required repair kit",
+        "done": false,
+        "tag": "Parts"
+      },
+      {
+        "text": "Capture post-work vibration and temperature baseline",
+        "done": false,
+        "tag": "QA"
+      }
+    ],
+    "timeline": [
+      {
+        "dot": "var(--ac)",
+        "ev": "Generated from synthetic condition evidence",
+        "tm": "Demo dataset"
+      },
+      {
+        "dot": "var(--am)",
+        "ev": "Awaiting planning/approval action",
+        "tm": "Current"
+      }
+    ],
+    "synthetic_data_version": "2026.08.1"
+  },
+  {
+    "id": "WO-DEMO-0424",
+    "priority": "CRITICAL",
+    "status": "Pending",
+    "title": "K-501 — Inspect and replace bearing as condition requires",
+    "asset_id": "AST_SYN_CMP_501",
+    "asset_display": "K-501",
+    "type": "Condition Based",
+    "est_hours": 4,
+    "parts": "SKF 7312-BECBP",
+    "assigned_to": "Pending",
+    "due": "This shift",
+    "created_by": "DRO synthetic fleet",
+    "rul": "0-7 days",
+    "risk": "Critical",
+    "cost": "$23,400",
+    "checklist": [
+      {
+        "text": "Validate current telemetry and diagnosis",
+        "done": true,
+        "tag": "Evidence"
+      },
+      {
+        "text": "Confirm LOTO permit and qualified crew",
+        "done": false,
+        "tag": "Safety"
+      },
+      {
+        "text": "Confirm SKF 7312-BECBP or required repair kit",
+        "done": false,
+        "tag": "Parts"
+      },
+      {
+        "text": "Capture post-work vibration and temperature baseline",
+        "done": false,
+        "tag": "QA"
+      }
+    ],
+    "timeline": [
+      {
+        "dot": "var(--ac)",
+        "ev": "Generated from synthetic condition evidence",
+        "tm": "Demo dataset"
+      },
+      {
+        "dot": "var(--am)",
+        "ev": "Awaiting planning/approval action",
+        "tm": "Current"
+      }
+    ],
+    "synthetic_data_version": "2026.08.1"
+  }
+]

@@ -16,17 +16,13 @@ of formatted fields tailored to that persona's concerns and vocabulary.
 from __future__ import annotations
 
 from typing import Any, Dict, Optional
+from src.tools.data_loader import load_fleet_scenario_map
 from src.tools.persona_formatter import build_persona_context
 
 # Internal asset IDs → frontend display labels
 _ASSET_DISPLAY = {
-    "AST_MTR_001": "M-104",
-    "AST_MTR_002": "M-089",
-    "AST_PMP_001": "P-207",
-    "AST_PMP_002": "C-301",
-    "AST_CON_001": "C-301",
-    "AST_GBX_001": "G-112",
-    "AST_UNKNOWN_001": "UNKNOWN",
+    canonical: display
+    for display, (canonical, _) in load_fleet_scenario_map().items()
 }
 
 
@@ -45,7 +41,8 @@ def format_for_persona(state: Dict[str, Any], persona: str) -> Dict[str, Any]:
     Return a persona-tailored summary dict from the pipeline state.
     Keys: greeting, headline, details (list), actions (list), tags (list)
     """
-    persona = build_persona_context(persona).id
+    persona_context = build_persona_context(persona)
+    persona = persona_context.id
     trusted   = state.get("trusted_signal")
     anomaly   = state.get("anomaly_event")
     diagnosis = state.get("fault_diagnosis")
@@ -68,6 +65,7 @@ def format_for_persona(state: Dict[str, Any], persona: str) -> Dict[str, Any]:
         _reason_str = _reasons[0] if _reasons else "asset or bearing not found in master table"
         return {
             "persona":   persona,
+            "persona_context": persona_context.model_dump(),
             "headline":  f"{asset_id} — Signal REJECTED by Data Foundation Agent. Pipeline halted.",
             "details":   [
                 f"Rejection reason: {_reason_str}",
@@ -120,7 +118,7 @@ def format_for_persona(state: Dict[str, Any], persona: str) -> Dict[str, Any]:
         "safety":     _fmt_safety,
     }
     fn = formatters.get(persona, _fmt_supervisor)
-    return fn(
+    result = fn(
         asset_id=asset_id, bearing_id=bearing_id,
         fault_mode=fault_mode, iso_stage=iso_stage,
         risk_level=risk_level, rul_band=rul_band,
@@ -133,6 +131,8 @@ def format_for_persona(state: Dict[str, Any], persona: str) -> Dict[str, Any]:
         evidence=evidence, total_ms=total_ms, state=state,
         recommendation=recommendation,
     )
+    result["persona_context"] = persona_context.model_dump()
+    return result
 
 
 # ── Per-persona formatters ────────────────────────────────────────────────────

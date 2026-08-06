@@ -1,0 +1,185 @@
+{
+  "version": "2026.08.1",
+  "assets": [
+    {
+      "display_asset_id": "M-104",
+      "asset_id": "AST_MTR_001",
+      "scenario": "outer_race_fault",
+      "profile": "outer_stage3"
+    },
+    {
+      "display_asset_id": "M-089",
+      "asset_id": "AST_MTR_002",
+      "scenario": "healthy",
+      "profile": "healthy"
+    },
+    {
+      "display_asset_id": "P-207",
+      "asset_id": "AST_PMP_001",
+      "scenario": "lubrication_issue",
+      "profile": "lubrication_stage2"
+    },
+    {
+      "display_asset_id": "P-208",
+      "asset_id": "AST_PMP_002",
+      "scenario": "borderline_fault",
+      "profile": "borderline"
+    },
+    {
+      "display_asset_id": "C-301",
+      "asset_id": "AST_CON_001",
+      "scenario": "signal_dropout",
+      "profile": "signal_dropout"
+    },
+    {
+      "display_asset_id": "G-112",
+      "asset_id": "AST_GBX_001",
+      "scenario": "fleet_g_112_post_repair",
+      "profile": "healthy"
+    },
+    {
+      "display_asset_id": "M-121",
+      "asset_id": "AST_SYN_MTR_121",
+      "scenario": "fleet_m_121",
+      "profile": "outer_stage2"
+    },
+    {
+      "display_asset_id": "M-122",
+      "asset_id": "AST_SYN_MTR_122",
+      "scenario": "fleet_m_122",
+      "profile": "healthy"
+    },
+    {
+      "display_asset_id": "M-123",
+      "asset_id": "AST_SYN_MTR_123",
+      "scenario": "fleet_m_123",
+      "profile": "inner_stage1"
+    },
+    {
+      "display_asset_id": "M-124",
+      "asset_id": "AST_SYN_MTR_124",
+      "scenario": "fleet_m_124",
+      "profile": "lubrication_stage2"
+    },
+    {
+      "display_asset_id": "M-125",
+      "asset_id": "AST_SYN_MTR_125",
+      "scenario": "fleet_m_125",
+      "profile": "startup"
+    },
+    {
+      "display_asset_id": "M-126",
+      "asset_id": "AST_SYN_MTR_126",
+      "scenario": "fleet_m_126",
+      "profile": "electrical"
+    },
+    {
+      "display_asset_id": "P-220",
+      "asset_id": "AST_SYN_PMP_220",
+      "scenario": "fleet_p_220",
+      "profile": "rolling_stage2"
+    },
+    {
+      "display_asset_id": "P-221",
+      "asset_id": "AST_SYN_PMP_221",
+      "scenario": "fleet_p_221",
+      "profile": "healthy"
+    },
+    {
+      "display_asset_id": "P-222",
+      "asset_id": "AST_SYN_PMP_222",
+      "scenario": "fleet_p_222",
+      "profile": "lubrication_stage3"
+    },
+    {
+      "display_asset_id": "P-223",
+      "asset_id": "AST_SYN_PMP_223",
+      "scenario": "fleet_p_223",
+      "profile": "thermal"
+    },
+    {
+      "display_asset_id": "P-224",
+      "asset_id": "AST_SYN_PMP_224",
+      "scenario": "fleet_p_224",
+      "profile": "outer_stage1"
+    },
+    {
+      "display_asset_id": "P-225",
+      "asset_id": "AST_SYN_PMP_225",
+      "scenario": "fleet_p_225",
+      "profile": "healthy"
+    },
+    {
+      "display_asset_id": "C-315",
+      "asset_id": "AST_SYN_CON_315",
+      "scenario": "fleet_c_315",
+      "profile": "cage_stage2"
+    },
+    {
+      "display_asset_id": "C-316",
+      "asset_id": "AST_SYN_CON_316",
+      "scenario": "fleet_c_316",
+      "profile": "healthy"
+    },
+    {
+      "display_asset_id": "C-317",
+      "asset_id": "AST_SYN_CON_317",
+      "scenario": "fleet_c_317",
+      "profile": "signal_dropout"
+    },
+    {
+      "display_asset_id": "C-318",
+      "asset_id": "AST_SYN_CON_318",
+      "scenario": "fleet_c_318",
+      "profile": "rolling_stage1"
+    },
+    {
+      "display_asset_id": "G-120",
+      "asset_id": "AST_SYN_GBX_120",
+      "scenario": "fleet_g_120",
+      "profile": "outer_stage3"
+    },
+    {
+      "display_asset_id": "G-121",
+      "asset_id": "AST_SYN_GBX_121",
+      "scenario": "fleet_g_121",
+      "profile": "cage_stage3"
+    },
+    {
+      "display_asset_id": "G-122",
+      "asset_id": "AST_SYN_GBX_122",
+      "scenario": "fleet_g_122",
+      "profile": "healthy"
+    },
+    {
+      "display_asset_id": "G-123",
+      "asset_id": "AST_SYN_GBX_123",
+      "scenario": "fleet_g_123",
+      "profile": "lubrication_stage1"
+    },
+    {
+      "display_asset_id": "F-410",
+      "asset_id": "AST_SYN_FAN_410",
+      "scenario": "fleet_f_410",
+      "profile": "load_spike"
+    },
+    {
+      "display_asset_id": "F-411",
+      "asset_id": "AST_SYN_FAN_411",
+      "scenario": "fleet_f_411",
+      "profile": "inner_stage2"
+    },
+    {
+      "display_asset_id": "F-412",
+      "asset_id": "AST_SYN_FAN_412",
+      "scenario": "fleet_f_412",
+      "profile": "healthy"
+    },
+    {
+      "display_asset_id": "K-501",
+      "asset_id": "AST_SYN_CMP_501",
+      "scenario": "fleet_k_501",
+      "profile": "rolling_stage3"
+    }
+  ]
+}

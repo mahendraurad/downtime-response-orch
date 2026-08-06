@@ -63,13 +63,19 @@ from src.api.auth import (
     _EXPIRE_HOURS as _JWT_EXPIRE_HOURS,
 )
 from src.api.persona_formatter import format_for_persona
-from src.tools.data_loader import load_telemetry_rows, load_asset_master
+from src.tools.data_loader import (
+    list_telemetry_scenarios,
+    load_asset_master,
+    load_demo_work_orders,
+    load_fleet_scenario_map,
+    load_telemetry_rows,
+)
 from src.orchestrator.query_router import plan_query
 from src.agents.reflexion_agent import ReflexionAgent
 from src.tools.orchestrator_audit import write_audit
 from src.tools.llm_client import LLMClient
 from src.tools.hitl_repository import build_hitl_repository
-from src.tools.persona_formatter import build_persona_context
+from src.tools.persona_formatter import build_persona_context, persona_response_prompt
 from src.tools.governed_rag import GovernedKnowledgeRAG
 from src.tools.observability import flush_observability
 
@@ -118,7 +124,7 @@ _INTENT_CLASSIFIER_SYSTEM = (
 )
 
 _CONVERSATIONAL_LLM_SYSTEM = (
-    "You are a rotating-equipment reliability engineer in a plant maintenance team chat. "
+    "You are the DRO plant-maintenance assistant in a role-aware team chat. "
     "The user is asking a follow-up question about something that already happened in the conversation. "
     "Use the conversation history to understand the context (e.g. a recommendation was made, "
     "HITL was triggered, the user approved or rejected something) and answer concisely. "
@@ -164,6 +170,7 @@ def _llm_chat_classify(message: str, conversation_history: list | None) -> dict:
 
 def _conversational_draft(message: str, conversation_history: list | None, persona: str) -> dict:
     """Build a response for a conversational follow-up using LLM with history context."""
+    persona_context = build_persona_context(persona)
     if _CHAT_LLM.is_configured():
         try:
             history_text = ""
@@ -179,13 +186,17 @@ def _conversational_draft(message: str, conversation_history: list | None, perso
                 if history_text else message
             )
             llm_resp = _CHAT_LLM.complete_json(
-                system_prompt=_CONVERSATIONAL_LLM_SYSTEM,
+                system_prompt=(
+                    _CONVERSATIONAL_LLM_SYSTEM + "\n\n"
+                    + persona_response_prompt(persona_context)
+                ),
                 user_prompt=user_prompt,
                 temperature=0.4,
                 max_tokens=400,
             )
             if llm_resp and isinstance(llm_resp.get("answer"), str) and llm_resp["answer"].strip():
-                return {"persona": persona, "response": llm_resp["answer"].strip(),
+                return {"persona": persona_context.id, "persona_context": persona_context.model_dump(),
+                        "response": llm_resp["answer"].strip(),
                         "call_plan": [], "needs_context": False, "clarification_required": False,
                         "source_type": "llm_conversational",
                         "agent_outputs": {"recommendation": None, "execution_result": None}}
@@ -204,9 +215,11 @@ def _learning_agent():
 
 @traceable(name="Agent 8 - Learning History Query", run_type="retriever", tags=["dro", "agent-8"])
 def _learning_history_draft(persona: str, limit: int = 3):
+    persona_context = build_persona_context(persona)
     cases = _learning_agent().recent_cases(limit)
     if not cases:
-        return ({"persona": persona,
+        return ({"persona": persona_context.id,
+            "persona_context": persona_context.model_dump(),
             "response": "No validated closed failure cases are available in Agent 8 memory. Learning is recorded only after successful execution and confirmed closure feedback.",
             "details": [], "actions": [], "case_references": [],
             "call_plan": ["agent_8"], "needs_context": False,
@@ -215,8 +228,9 @@ def _learning_history_draft(persona: str, limit: int = 3):
         f"{case.get('case_id', 'unknown case')}: {case.get('fault_mode', 'unknown fault')}; outcome: {case.get('outcome', 'not recorded')}. Learning: {case.get('content', 'not recorded')}"
         for case in cases
     ]
-    audience = "Executive summary" if str(persona).lower() in {"md", "executive", "manager"} else "Failure history"
-    return ({"persona": persona,
+    audience = f"{persona_context.role} learning context"
+    return ({"persona": persona_context.id,
+        "persona_context": persona_context.model_dump(),
         "response": f"{audience}: the last {len(cases)} validated closed failure cases are summarized below.",
         "details": details,
         "actions": ["Use these confirmed outcomes to review recurring causes and maintenance effectiveness."],
@@ -225,13 +239,7 @@ def _learning_history_draft(persona: str, limit: int = 3):
         "agent_outputs": {"learned_cases": cases}}, cases)
 
 
-_MULTI_ASSET_SCENARIOS = {
-    "M-104": ("AST_MTR_001", "outer_race_fault"),
-    "P-207": ("AST_PMP_001", "lubrication_issue"),
-    "C-301": ("AST_CON_001", "signal_dropout"),
-    "M-089": ("AST_MTR_002", "healthy"),
-    "G-112": ("AST_GBX_001", "gearbox_fault"),
-}
+_MULTI_ASSET_SCENARIOS = load_fleet_scenario_map()
 
 Persona = Literal["supervisor", "engineer", "maintenance", "manager",
                   "executive", "md", "ot", "safety"]
@@ -252,7 +260,10 @@ def _general_rag_service():
 
 def _general_knowledge_draft(message: str, persona: str):
     started = time.perf_counter()
-    result = _general_rag_service().answer(message, llm_client=_CHAT_LLM)
+    persona_context = build_persona_context(persona)
+    result = _general_rag_service().answer(
+        message, llm_client=_CHAT_LLM, persona_context=persona_context,
+    )
     elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
     source_type = {
         "grounded": "approved_rag",
@@ -262,7 +273,8 @@ def _general_knowledge_draft(message: str, persona: str):
     }.get(result.status, "rag_error")
     result_dict = result.to_dict()
     draft = {
-        "persona": persona,
+        "persona": persona_context.id,
+        "persona_context": persona_context.model_dump(),
         "response": result.answer,
         "details": [],
         "actions": [],
@@ -308,7 +320,9 @@ def _is_general_knowledge_request(message: str, plan, classified: str,
 
 def _clarification_draft(persona: str, intent: str, missing: list[str],
                          questions: list[str], reason: str, asset_id: str = ""):
-    return {"persona": persona, "response": reason, "details": [], "actions": [],
+    context = build_persona_context(persona)
+    return {"persona": context.id, "persona_context": context.model_dump(),
+        "response": reason, "details": [], "actions": [],
         "call_plan": [], "needs_context": True, "clarification_required": True,
         "clarification": {"intent": intent, "missing_fields": missing,
                            "questions": questions, "asset_id": asset_id},
@@ -359,6 +373,7 @@ def _deadline_for_recommendation(recommendation) -> str:
 def _multi_asset_plan(requested_assets, fleet_snapshot: dict, persona: str,
                       run_id: str, checkpoint_thread_id: str = ""):
     """Evaluate named assets only from explicitly supplied fleet evidence."""
+    persona_context = build_persona_context(persona)
     results=[]; combined_log=[]; details=[]; actions=[]
     for display,asset_id,scenario in requested_assets:
         evidence=(fleet_snapshot.get(display) or fleet_snapshot.get(asset_id)
@@ -429,8 +444,9 @@ def _multi_asset_plan(requested_assets, fleet_snapshot: dict, persona: str,
             details.append(f"{display}: analysis unavailable; manual review required before planning.")
             actions.append(f"{display}: manual review — before planning")
     evaluated=sum(bool(row["pipeline_log"]) for row in results)
-    draft={"persona":persona,
-        "response":f"Evidence-based action plan evaluated {evaluated} of {len(results)} requested assets.",
+    draft={"persona":persona_context.id,
+        "persona_context": persona_context.model_dump(),
+        "response":f"{persona_context.role} context: evidence-based action plan evaluated {evaluated} of {len(results)} requested assets.",
         "details":details,"actions":actions,"call_plan":["agents_1_to_6_per_asset"],
         "needs_context":False,"clarification_required":False,
         "multi_asset_results":results,"agent_outputs":{"recommendation":None,"execution_result":None}}
@@ -614,9 +630,8 @@ def auth_me(user: Dict = Depends(get_current_user)):
 
 
 # ── In-memory work-order store ────────────────────────────────────────────────
-# Starts empty — WOs are created dynamically via POST /api/workorders or
-# bridged in from the Executor Agent when a HITL approval is processed.
-_WORKORDERS: List[Dict] = []
+# Seeded from deterministic demo data; executor-created orders are appended.
+_WORKORDERS: List[Dict] = load_demo_work_orders()
 
 _WO_INDEX = {wo["id"]: wo for wo in _WORKORDERS}
 
@@ -840,6 +855,7 @@ class PipelineRunRequest(BaseModel):
 class PipelineRunResponse(BaseModel):
     run_id: str
     persona: str
+    persona_context: Optional[Dict] = None
     headline: str
     details: List[str]
     actions: List[str]
@@ -1215,6 +1231,7 @@ def pipeline_run(req: PipelineRunRequest, user: Dict = Depends(get_current_user)
     return PipelineRunResponse(
         run_id=run_id,
         persona=req.persona,
+        persona_context=build_persona_context(req.persona).model_dump(),
         headline=_headline,
         details=_details,
         actions=_actions,
@@ -1259,6 +1276,7 @@ def hitl_remediation(req: HITLRemediationRequest, user: Dict = Depends(get_curre
     if action == "DROP":
         return PipelineRunResponse(
             run_id=req.run_id, persona=persona,
+            persona_context=build_persona_context(persona).model_dump(),
             headline="Signal discarded — operator dropped this reading.",
             details=[
                 "Missing critical fields could not be recovered.",
@@ -1345,6 +1363,7 @@ def hitl_remediation(req: HITLRemediationRequest, user: Dict = Depends(get_curre
     _stamp_hitl_sessions()
     return PipelineRunResponse(
         run_id=req.run_id, persona=persona,
+        persona_context=build_persona_context(persona).model_dump(),
         headline=formatted.get("headline", ""),
         details=formatted.get("details", []),
         actions=formatted.get("actions", []),
@@ -1381,6 +1400,7 @@ def hitl_monitoring_resolution(req: HITLMonitoringRequest, user: Dict = Depends(
     if action == "SUPPRESS":
         return PipelineRunResponse(
             run_id=req.run_id, persona=persona,
+            persona_context=build_persona_context(persona).model_dump(),
             headline="EWMA anomaly suppressed — operator identified as expected transient.",
             details=[
                 "The borderline EWMA alert has been suppressed by operator decision.",
@@ -1480,6 +1500,7 @@ def hitl_monitoring_resolution(req: HITLMonitoringRequest, user: Dict = Depends(
 
     return PipelineRunResponse(
         run_id=req.run_id, persona=persona,
+        persona_context=build_persona_context(persona).model_dump(),
         headline=_headline, details=_details, actions=_actions, tags=_tags,
         pipeline_log=state.get("pipeline_log", []),
         fault_diagnosis=None if _diag_paused else _to_dict(diagnosis),
@@ -1579,6 +1600,7 @@ def hitl_diagnosis_resolution(req: HITLDiagnosisRequest, user: Dict = Depends(ge
     _stamp_hitl_sessions()
     return PipelineRunResponse(
         run_id=req.run_id, persona=persona,
+        persona_context=build_persona_context(persona).model_dump(),
         headline=formatted.get("headline", ""),
         details=formatted.get("details", []),
         actions=formatted.get("actions", []),
@@ -1619,6 +1641,7 @@ def hitl_knowledge_resolution(req: HITLKnowledgeRequest, user: Dict = Depends(ge
         note = req.manual_sop_note or "Manual SOP review ticket raised."
         return PipelineRunResponse(
             run_id=req.run_id, persona=persona,
+            persona_context=build_persona_context(persona).model_dump(),
             headline=f"No SOP found — {asset_id} flagged for manual procedure lookup.",
             details=[
                 f"No standard operating procedure exists in the catalog for: "
@@ -1645,6 +1668,7 @@ def hitl_knowledge_resolution(req: HITLKnowledgeRequest, user: Dict = Depends(ge
     # ACCEPT_EMPTY — proceed with the existing risk/diagnosis, no SOP
     return PipelineRunResponse(
         run_id=req.run_id, persona=persona,
+        persona_context=build_persona_context(persona).model_dump(),
         headline=f"Analysis complete — no SOP retrieved for {asset_id}.",
         details=[
             f"Fault: {fault_mode.replace('_', ' ')}. Risk assessment is available.",
@@ -1827,17 +1851,7 @@ def read_persona_notifications(persona_id: str):
 @app.get("/api/pipeline/scenarios")
 def list_scenarios():
     """Return available demo scenario names."""
-    return {
-        "scenarios": [
-            {"name": "outer_race_fault",    "description": "Motor outer race spall — Stage 1→3"},
-            {"name": "inner_race_fault",    "description": "Motor inner race degradation"},
-            {"name": "lubrication_issue",   "description": "Pump lubrication degradation"},
-            {"name": "rolling_element_fault", "description": "Ball or roller bearing fault (BSF signature)"},
-            {"name": "healthy",             "description": "Healthy motor — no fault"},
-            {"name": "fi_hitl_test",        "description": "HITL test: early inner-race, low confidence → Gate 3"},
-            {"name": "knowledge_hitl_test", "description": "HITL test: undetermined fault → Gate 5 (no SOP)"},
-        ]
-    }
+    return {"scenarios": list_telemetry_scenarios()}
 
 
 # ── Asset endpoints ───────────────────────────────────────────────────────────
@@ -1889,6 +1903,7 @@ def dashboard_assets(user: Dict = Depends(get_current_user)):
 def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
     """Route persona-aware natural language through the backend orchestrator."""
     require_persona(req.persona, user)
+    selected_persona = build_persona_context(req.persona)
     run_id=f"CHAT-{uuid.uuid4().hex[:10].upper()}"
     conversation_id=req.conversation_id or f"CONV-{uuid.uuid4().hex[:10].upper()}"
     if len(conversation_id)>80 or not re.fullmatch(r"[A-Za-z0-9_.:-]+",conversation_id):
@@ -1896,7 +1911,8 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
     if req.message.strip().lower() in {"reset","start over","new conversation","cancel this request"}:
         _CHAT_CONTEXT_STORE.pop(conversation_id,None)
         return {"run_id":run_id,"conversation_id":conversation_id,"intent":"reset",
-            "persona":req.persona,"response":"Conversation context has been cleared.",
+            "persona":selected_persona.id,"persona_context":selected_persona.model_dump(),
+            "response":"Conversation context has been cleared.",
             "details":[],"actions":[],"call_plan":[],"pipeline_log":[],"sources":[],
             "needs_context":False,"clarification_required":False,"reflection_status":"accepted"}
     context=_load_chat_context(conversation_id)
@@ -1949,7 +1965,8 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
                                "good","excellent","brilliant","appreciate it","appreciated"})
     if effective_message.strip().lower().rstrip(" !.,") in _SOCIAL_PHRASES:
         _soc={"run_id":run_id,"conversation_id":conversation_id,"intent":"conversational",
-              "persona":req.persona,"reflection_status":"accepted",
+              "persona":selected_persona.id,"persona_context":selected_persona.model_dump(),
+              "reflection_status":"accepted",
               "response":"You're welcome! Let me know if there's anything else I can help you with.",
               "details":[],"actions":[],"call_plan":[],"pipeline_log":[],
               "needs_context":False,"clarification_required":False}
@@ -2039,7 +2056,8 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
             )
             formatted=format_for_persona(state,req.persona)
             _pipeline_headline=formatted.get("headline","Analysis complete.")
-            draft={"persona":req.persona,"response":_pipeline_headline,"details":formatted.get("details",[]),"actions":formatted.get("actions",[]),"call_plan":list(plan.agents),"needs_context":False,"clarification_required":False,
+            _persona_context = build_persona_context(req.persona)
+            draft={"persona":_persona_context.id,"persona_context":_persona_context.model_dump(),"response":_pipeline_headline,"details":formatted.get("details",[]),"actions":formatted.get("actions",[]),"call_plan":list(plan.agents),"needs_context":False,"clarification_required":False,
                    "agent_outputs":{"recommendation":state["recommendation"].to_dict() if state.get("recommendation") else None,
                                     "execution_result":state["execution_result"].to_dict() if state.get("execution_result") else None}}
             # LLM synthesis: convert structured pipeline results into a direct answer
@@ -2052,11 +2070,12 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
                     )
                     _synth=_CHAT_LLM.complete_json(
                         system_prompt=(
-                            "You are a rotating-equipment reliability engineer. "
+                            "You are the DRO plant-maintenance assistant. "
                             "Use ONLY the pipeline data provided to answer the user's question directly. "
                             "If the question is yes/no, start with YES or NO. "
                             "Be concise (2-4 sentences). Never fabricate data not in the pipeline result. "
-                            'Return JSON: {"answer": "<synthesized plain-text answer>"}'
+                            'Return JSON: {"answer": "<synthesized plain-text answer>"}.\n\n'
+                            + persona_response_prompt(_persona_context)
                         ),
                         user_prompt=f"User question: {req.message}\n\nPipeline data:\n{_pipe_summary}",
                         temperature=0.2,
@@ -2136,15 +2155,27 @@ def update_workorder(wo_id: str, req: WOUpdateRequest):
 
 # ── WebSocket: live sensor stream ─────────────────────────────────────────────
 
-# Baseline sensor values per asset (vibration, temperature)
-_SENSOR_BASELINES = {
-    "M-104": {"vib": 14.7, "temp": 87.4, "bpfo": 4.02, "rpm": 1474},
-    "P-207": {"vib": 4.1,  "temp": 61.2, "bpfo": 0.46, "rpm": 2900},
-    "C-301": {"vib": 3.2,  "temp": 54.8, "bpfo": 0.82, "rpm": 960},
-    "M-089": {"vib": 1.8,  "temp": 48.2, "bpfo": 0.9,  "rpm": 1480},
-    "G-112": {"vib": 1.2,  "temp": 45.1, "bpfo": 0.7,  "rpm": 720},
-}
 _DEFAULT_SENSOR = {"vib": 2.0, "temp": 55.0, "bpfo": 1.0, "rpm": 1480}
+
+
+def _sensor_baselines() -> Dict[str, Dict[str, float]]:
+    """Build websocket baselines from the same fleet evidence as the API."""
+    result = {}
+    for display, (_, scenario) in _MULTI_ASSET_SCENARIOS.items():
+        rows = load_telemetry_rows(scenario)
+        if not rows:
+            continue
+        signal = rows[-1]
+        result[display] = {
+            "vib": signal.get("vib_rms_mm_s") or _DEFAULT_SENSOR["vib"],
+            "temp": signal.get("temp_c") or _DEFAULT_SENSOR["temp"],
+            "bpfo": signal.get("bpfo_energy") or _DEFAULT_SENSOR["bpfo"],
+            "rpm": signal.get("rpm") or _DEFAULT_SENSOR["rpm"],
+        }
+    return result
+
+
+_SENSOR_BASELINES = _sensor_baselines()
 
 
 @app.websocket("/ws/sensors/{asset_id}")

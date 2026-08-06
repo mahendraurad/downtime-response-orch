@@ -40,6 +40,17 @@ Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/api/chat `
   -ContentType "application/json" -Body $body
 ```
 
+## Regenerate the synthetic fleet
+
+Change `config/synthetic_fleet_config.json` when more demo assets or different
+profiles are needed. Regeneration is deterministic and preserves the original
+demo scenarios:
+
+```powershell
+python scripts\generate_synthetic_fleet.py
+python -m pytest tests\test_synthetic_fleet.py -q
+```
+
 ## Individual agent demos
 
 ```powershell

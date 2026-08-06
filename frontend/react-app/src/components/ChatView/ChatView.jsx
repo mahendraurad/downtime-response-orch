@@ -1,7 +1,6 @@
 import React, { useContext, useEffect, useRef, useState, useCallback } from 'react';
 import { AppContext } from '../../context/AppContext';
-import { PD } from '../../data/personas';
-import { FLEET_TOTAL } from '../../data/assets';
+import { PD, resolvePersonaData } from '../../data/personas';
 import { ts } from '../../utils/helpers';
 import {
   activeEscalationStep, formatCountdown, formatEscalationTime,
@@ -134,17 +133,22 @@ function generateChipsFromResponse(d, fallbackQp) {
 }
 
 export default function ChatView() {
-  const { persona, messages, setMessages, addMessage } = useContext(AppContext);
+  const { persona, messages, setMessages, addMessage, assets, workOrders } = useContext(AppContext);
+  const fleetSummary = {
+    total: assets?.length || 0,
+    critical: assets?.filter(asset => asset.st === 'critical').length || 0,
+    warning: assets?.filter(asset => asset.st === 'warning').length || 0,
+  };
   const [showRightPanel, setShowRightPanel] = useState(true);
   const [inputVal, setInputVal] = useState('');
   const [thinking, setThinking] = useState(false);
   const [livePipelineLog, setLivePipelineLog] = useState([]);
-  const [contextChips, setContextChips] = useState(() => PD[persona]?.qp?.slice(0, 3) || []);
+  const [contextChips, setContextChips] = useState(() => resolvePersonaData(persona, fleetSummary, workOrders)?.qp?.slice(0, 3) || []);
   const msgsRef = useRef(null);
   const inpRef = useRef(null);
   const conversationIdRef = useRef(null);
   const shownExecRecsRef = useRef([]);
-  const p = PD[persona];
+  const p = resolvePersonaData(persona, fleetSummary, workOrders);
 
   // Scroll to bottom whenever messages change
   useEffect(() => {
@@ -154,7 +158,7 @@ export default function ChatView() {
   // On persona switch: reset conversation, restore stored history or show home
   useEffect(() => {
     conversationIdRef.current = null;
-    setContextChips(PD[persona]?.qp?.slice(0, 3) || []);
+    setContextChips(resolvePersonaData(persona, fleetSummary, workOrders)?.qp?.slice(0, 3) || []);
     if (!messages || messages.length === 0) {
       renderChatHome();
     }
@@ -163,6 +167,16 @@ export default function ChatView() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [persona]);
+
+  // Replace fallback counts when the backend fleet arrives, but do not
+  // overwrite contextual chips after the user has started a conversation.
+  useEffect(() => {
+    const onlyHome = !messages?.some(message => message.type !== 'home');
+    if (onlyHome) {
+      setContextChips(resolvePersonaData(persona, fleetSummary, workOrders)?.qp?.slice(0, 3) || []);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [persona, fleetSummary.total, fleetSummary.critical, fleetSummary.warning, workOrders]);
 
   // Listen for global events from Topbar / PersonaPanel
   useEffect(() => {
@@ -189,7 +203,7 @@ export default function ChatView() {
   }, [persona]);
 
   function renderChatHome() {
-    const pd = PD[persona];
+    const pd = resolvePersonaData(persona, fleetSummary, workOrders);
     const homeMsg = {
       id: mkId(),
       type: 'home',
@@ -392,6 +406,8 @@ export default function ChatView() {
               doThink={doThink}
               appendA={appendA}
               addMessage={addMessage}
+              fleetSummary={fleetSummary}
+              workOrders={workOrders}
             />
           ))}
           {thinking && (
@@ -460,11 +476,12 @@ export default function ChatView() {
   );
 }
 
-function MessageBubble({ msg, persona, onSq, doThink, appendA, addMessage }) {
+function MessageBubble({ msg, persona, onSq, doThink, appendA, addMessage, fleetSummary, workOrders }) {
   const p = PD[persona];
 
   if (msg.type === 'home') {
-    const pd = PD[msg.persona] || PD[persona];
+    const pd = resolvePersonaData(msg.persona, fleetSummary, workOrders)
+      || resolvePersonaData(persona, fleetSummary, workOrders);
     return (
       <div className="mg fi">
         <div className="mav" style={{ background: 'var(--ag)' }}>🤖</div>
@@ -480,9 +497,9 @@ function MessageBubble({ msg, persona, onSq, doThink, appendA, addMessage }) {
                 </div>
               </div>
               <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap', marginBottom: '11px', paddingBottom: '11px', borderBottom: '1px solid var(--b)' }}>
-                <span style={{ padding: '2px 8px', borderRadius: '20px', fontSize: '9.5px', fontWeight: 600, background: 'rgba(46,204,138,.1)', border: '1px solid rgba(46,204,138,.25)', color: 'var(--gn)' }}>● {FLEET_TOTAL} assets</span>
-                <span style={{ padding: '2px 8px', borderRadius: '20px', fontSize: '9.5px', fontWeight: 600, background: 'var(--rdm)', border: '1px solid rgba(255,77,106,.25)', color: 'var(--rd)' }}>⚠ 3 alerts active</span>
-                <span style={{ padding: '2px 8px', borderRadius: '20px', fontSize: '9.5px', fontWeight: 600, background: 'rgba(255,183,64,.1)', border: '1px solid rgba(255,183,64,.25)', color: 'var(--am)' }}>◐ 2 critical</span>
+                <span style={{ padding: '2px 8px', borderRadius: '20px', fontSize: '9.5px', fontWeight: 600, background: 'rgba(46,204,138,.1)', border: '1px solid rgba(46,204,138,.25)', color: 'var(--gn)' }}>● {fleetSummary.total} assets</span>
+                <span style={{ padding: '2px 8px', borderRadius: '20px', fontSize: '9.5px', fontWeight: 600, background: 'var(--rdm)', border: '1px solid rgba(255,77,106,.25)', color: 'var(--rd)' }}>⚠ {fleetSummary.critical + fleetSummary.warning} alerts active</span>
+                <span style={{ padding: '2px 8px', borderRadius: '20px', fontSize: '9.5px', fontWeight: 600, background: 'rgba(255,183,64,.1)', border: '1px solid rgba(255,183,64,.25)', color: 'var(--am)' }}>◐ {fleetSummary.critical} critical</span>
               </div>
             </div>
             <div dangerouslySetInnerHTML={{ __html: pd.gr.replace(/\n/g, '<br>') }} />

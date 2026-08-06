@@ -18,3 +18,6 @@ This folder contains historical implementation and review material. It is not re
 - `Cloud Integrations.md` documents PostgreSQL/LangGraph persistence, Azure Search, and observability operations.
 
 For current setup, API and frontend integration instructions, use the repository-root `README.md` and `RUNNING.md`.
+
+`Synthetic Fleet Changes.md` documents configurable fleet generation, scenario
+coverage, backend/frontend consumption, and certification.

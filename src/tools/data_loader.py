@@ -97,6 +97,75 @@ def load_telemetry_rows(scenario: str) -> List[Dict]:
     return data[scenario]
 
 
+def list_telemetry_scenarios() -> List[Dict[str, Any]]:
+    """Return every configured telemetry scenario with fleet metadata."""
+    data = _load_json("telemetry_scenarios.json")
+    fleet = _load_json("fleet_scenario_map.json")
+    by_scenario = {row["scenario"]: row for row in fleet.get("assets", [])}
+    descriptions = {
+        "healthy": "Healthy motor — no active fault",
+        "outer_race_fault": "Motor outer-race spall — Stage 1 to Stage 3",
+        "inner_race_fault": "Motor inner-race degradation",
+        "lubrication_issue": "Pump lubrication degradation",
+        "rolling_element_fault": "Rolling-element fault with BSF signature",
+        "signal_dropout": "Data-quality and sensor-dropout gate",
+        "unknown_asset": "Unknown-asset rejection",
+        "startup_filter": "Startup-regime anomaly suppression",
+        "gearbox_fault": "Gearbox bearing degradation",
+        "fi_hitl_test": "Low-confidence diagnosis HITL gate",
+        "knowledge_hitl_test": "Missing-guidance HITL gate",
+        "cage_fault": "Bearing-cage FTF signature",
+        "electrical_anomaly": "Electrical deviation with normal bearing signals",
+        "thermal_event": "Thermal excursion",
+        "borderline_fault": "Borderline anomaly requiring review",
+        "load_spike": "High-load operating condition",
+    }
+    result = []
+    for name, rows in data.items():
+        if name.startswith("_") or not isinstance(rows, list):
+            continue
+        mapping = by_scenario.get(name, {})
+        display = mapping.get("display_asset_id", "")
+        profile = mapping.get("profile", "")
+        description = descriptions.get(name)
+        if not description:
+            description = (
+                f"{display} deterministic fleet history — "
+                f"{profile.replace('_', ' ')}"
+            ).strip()
+        result.append({
+            "name": name, "description": description,
+            "display_asset_id": display,
+            "asset_id": mapping.get("asset_id", ""),
+            "profile": profile, "record_count": len(rows),
+        })
+    return result
+
+
+def load_fleet_scenario_map() -> Dict[str, Tuple[str, str]]:
+    """Return display asset ID -> (canonical asset ID, scenario)."""
+    payload = _load_json("fleet_scenario_map.json")
+    result: Dict[str, Tuple[str, str]] = {}
+    for row in payload.get("assets", []):
+        display = str(row.get("display_asset_id", "")).strip().upper()
+        asset_id = str(row.get("asset_id", "")).strip().upper()
+        scenario = str(row.get("scenario", "")).strip()
+        if not display or not asset_id or not scenario:
+            raise ValueError("fleet_scenario_map.json contains an incomplete row")
+        if display in result:
+            raise ValueError(f"duplicate display asset ID in fleet map: {display}")
+        result[display] = (asset_id, scenario)
+    return result
+
+
+def load_demo_work_orders() -> List[Dict]:
+    """Load a fresh copy of the backend-owned synthetic work-order seed."""
+    rows = _load_json("demo_work_orders.json")
+    if not isinstance(rows, list):
+        raise ValueError("demo_work_orders.json must contain a list")
+    return rows
+
+
 def load_all_telemetry_rows() -> List[Dict]:
     """Returns every telemetry row across all scenarios (useful for bulk tests)."""
     data = _load_json("telemetry_scenarios.json")

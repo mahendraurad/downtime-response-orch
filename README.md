@@ -16,7 +16,7 @@ The repository is ready for frontend integration in deterministic local mode. Az
 | Reflexion and graceful error envelopes | Implemented |
 | Governed cited open-ended RAG | Implemented locally; Azure adapter ready |
 | Local persistence and mock connectors | Implemented |
-| Automated backend tests | `833 passed` |
+| Automated backend tests | `905 passed` |
 | React frontend from `feature/8agents_frontend` | Integrated on `dev` |
 | Real CMMS/ERP/historian and Azure services | Next phase |
 
@@ -54,6 +54,51 @@ src/schemas/  Typed Pydantic contracts shared between agents
 src/tools/    Validators, repositories, adapters, retrieval and audit utilities
 tests/        Unit, edge, API, orchestration and Agent 1→8 integration tests
 ```
+
+## Configurable synthetic fleet
+
+The local demo fleet is intentionally broad enough to exercise the backend and
+all seven persona views without external plant systems:
+
+| Data | Current coverage |
+|---|---:|
+| Assets | 30 |
+| Bearings/channels | 60 / 60 |
+| Telemetry scenarios | 40 |
+| Seeded work orders | 18 |
+| Equipment classes | Motors, pumps, conveyors, gearboxes, fans, compressor |
+
+The fleet covers healthy operation, outer/inner race, rolling-element, cage and
+lubrication faults across stages 1–3, plus thermal rise, startup, electrical
+deviation, load spike, borderline quality and signal dropout cases. Original
+demo identities and scenarios remain available.
+
+Edit `config/synthetic_fleet_config.json`, then regenerate the derived master,
+telemetry, mapping and work-order fixtures deterministically:
+
+```powershell
+python scripts\generate_synthetic_fleet.py
+python -m pytest tests\test_synthetic_fleet.py -q
+```
+
+`GET /api/dashboard/assets`, `GET /api/pipeline/scenarios`, work-order APIs and
+websocket sensor baselines consume the generated data. Frontend fleet totals
+and alert counts are calculated from the backend response rather than the
+five-row offline fallback.
+
+Persona home tasks are projected from the current `/api/workorders` response.
+Each role sees relevant active work orders ranked by priority, with identifiers,
+assets, status, deadlines, RUL/risk, parts, crew, checklist and cost fields
+included only when present in the backend record. Closing, cancelling or
+rejecting a work order removes it from active persona tasks.
+
+The selected persona also controls the backend response context. The same
+validated evidence is framed differently for operational, engineering,
+planning, management, executive, controls and safety audiences. This contract
+is applied to deterministic pipeline formatting, optional LLM synthesis,
+follow-up conversation, cited RAG, clarification, multi-asset, Agent 8 and HITL
+resume responses. Every response exposes its resolved `persona_context`; role
+framing is never allowed to change measurements, decisions or citations.
 
 ## Setup
 
@@ -288,7 +333,7 @@ python -m pytest tests/test_agent1_to_agent8_integration.py -q
 Current certification:
 
 ```text
-833 passed
+905 passed
 0 failed
 ```
 

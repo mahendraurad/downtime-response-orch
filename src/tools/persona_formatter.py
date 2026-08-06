@@ -54,6 +54,20 @@ def persona_prompt(context: PersonaContext) -> str:
     )
 
 
+def persona_response_prompt(context: PersonaContext) -> str:
+    """Return the authoritative audience contract for narrative generation."""
+    return (
+        persona_prompt(context)
+        + "\nAudience instructions:\n"
+        + f"- Frame the answer for the {context.role}, within the domain: {context.domain}.\n"
+        + f"- Prioritize these details: {', '.join(context.details) or 'only relevant evidence'}.\n"
+        + f"- Prefer these action types: {', '.join(context.actions) or 'evidence-supported actions'}.\n"
+        + "- Keep authoritative measurements, decisions, citations, and confidence unchanged.\n"
+        + "- Do not infer a fact merely because this persona normally cares about it.\n"
+        + "- If a preferred detail is unavailable, state that it is unavailable rather than inventing it."
+    )
+
+
 def apply_persona_contract(payload: dict[str, Any],
                            context: PersonaContext) -> dict[str, Any]:
     """Attach rendering policy without changing evidence or decisions."""

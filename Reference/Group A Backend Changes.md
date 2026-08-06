@@ -49,6 +49,26 @@ domain, response depth, focus, details, actions, tags, and suppressed fields.
 Unknown persona identifiers fail validation instead of silently receiving
 another persona's response.
 
+The response boundary now applies the same context consistently across:
+
+- deterministic per-persona pipeline formatters;
+- optional pipeline LLM synthesis and conversational follow-ups;
+- governed RAG responses while preserving inline citations;
+- clarification and multi-asset plans;
+- Agent 8 history responses;
+- initial and resumed HITL responses;
+- frontend work-order-derived persona task cards.
+
+The former fixed "reliability engineer" chat system prompt was removed. LLM
+prompts now include the selected role, domain, response depth, preferred format,
+focus fields, preferred details/actions and suppressed fields. The prompt also
+forbids changing measurements, decisions, confidence or citations and requires
+missing preferred details to be reported as unavailable.
+
+Every API response path exposes the resolved `persona_context` for audit and UI
+inspection. Asset display labels in persona output are loaded from the
+configurable fleet map rather than a six-asset dictionary.
+
 ## A3 — Decision Support backend portion
 
 The recommendation API contract now includes:
@@ -153,6 +173,14 @@ The Group A certification suite is `tests/test_group_a_backend.py`. It covers:
 - exact timed Supervisor → Manager → VP Operations schedules, non-approver
   entry at Supervisor, final-authority behavior, and frontend escalation wiring;
 - 50 deterministic and 50 live-LLM chat QC scenarios with Excel evidence.
+- cross-persona comparison of identical evidence for all seven roles;
+- persona-specific pipeline and conversational LLM system prompts;
+- persona-framed RAG with unchanged inline citations;
+- persona context retention through clarification, multi-asset and HITL paths.
+
+The comparative response-context suite is
+`tests/test_persona_response_context.py`. The complete repository result is
+`905 passed`.
 
 Run:
 
