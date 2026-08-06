@@ -12,7 +12,7 @@
       "diagnosis": ["engineer"],
       "advisory": ["supervisor", "engineer"],
       "knowledge": ["engineer", "maintenance", "safety"],
-      "execution": ["supervisor", "maintenance", "manager", "engineer", "executive", "ot", "safety"]
+      "execution": ["supervisor", "maintenance", "manager"]
     }
   },
   "audit": {"jsonl_path": "logs/orchestrator_audit.jsonl", "include_payloads": false}
