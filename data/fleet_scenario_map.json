@@ -1,5 +1,5 @@
 {
-  "version": "2026.08.1",
+  "version": "2026.08.2",
   "assets": [
     {
       "display_asset_id": "M-104",
@@ -180,6 +180,217 @@
       "asset_id": "AST_SYN_CMP_501",
       "scenario": "fleet_k_501",
       "profile": "rolling_stage3"
+    }
+  ],
+  "complex_scenarios": [
+    {
+      "name": "complex_dual_race_signature",
+      "display_asset_id": "M-121",
+      "asset_id": "AST_SYN_MTR_121",
+      "profile": "outer_stage2",
+      "bearing_position": "drive_end",
+      "description": "Competing BPFO and BPFI stage-2 evidence; taxonomy priority must select outer race and retain inner race as a differential.",
+      "expected": {
+        "foundation_status": "VALID",
+        "monitoring_status": "anomaly",
+        "fault_mode": "outer_race_fault",
+        "iso_stage": 2,
+        "differential_fault_mode": "inner_race_fault"
+      }
+    },
+    {
+      "name": "complex_cage_rolling_tie",
+      "display_asset_id": "C-315",
+      "asset_id": "AST_SYN_CON_315",
+      "profile": "cage_stage3",
+      "bearing_position": "drive_end",
+      "description": "Equal dominant FTF and BSF stage-3 evidence; deterministic taxonomy priority selects cage fault and preserves rolling-element evidence.",
+      "expected": {
+        "foundation_status": "VALID",
+        "monitoring_status": "anomaly",
+        "fault_mode": "cage_fault",
+        "iso_stage": 3,
+        "differential_fault_mode": "rolling_element_fault"
+      }
+    },
+    {
+      "name": "complex_outer_stage3_boundary",
+      "display_asset_id": "M-121",
+      "asset_id": "AST_SYN_MTR_121",
+      "profile": "outer_stage2",
+      "bearing_position": "drive_end",
+      "description": "BPFO exactly equals the stage-3 threshold and must be classified in stage 3.",
+      "expected": {
+        "foundation_status": "VALID",
+        "monitoring_status": "anomaly",
+        "fault_mode": "outer_race_fault",
+        "iso_stage": 3
+      }
+    },
+    {
+      "name": "complex_outer_kurtosis_boundary",
+      "display_asset_id": "M-121",
+      "asset_id": "AST_SYN_MTR_121",
+      "profile": "outer_stage2",
+      "bearing_position": "drive_end",
+      "description": "BPFO is stage 3 but kurtosis exactly equals the strict fault gate; diagnosis must remain undetermined.",
+      "expected": {
+        "foundation_status": "VALID",
+        "monitoring_status": "anomaly",
+        "fault_mode": "undetermined",
+        "iso_stage": 0
+      }
+    },
+    {
+      "name": "complex_nde_rolling_fault",
+      "display_asset_id": "P-220",
+      "asset_id": "AST_SYN_PMP_220",
+      "profile": "rolling_stage2",
+      "bearing_position": "non_drive_end",
+      "description": "A fault on the non-drive-end bearing verifies alternate bearing/channel identity and context enrichment.",
+      "expected": {
+        "foundation_status": "VALID",
+        "monitoring_status": "anomaly",
+        "fault_mode": "rolling_element_fault",
+        "iso_stage": 2,
+        "bearing_position": "non_drive_end"
+      }
+    },
+    {
+      "name": "complex_running_low_speed_conflict",
+      "display_asset_id": "F-411",
+      "asset_id": "AST_SYN_FAN_411",
+      "profile": "inner_stage2",
+      "bearing_position": "drive_end",
+      "description": "Fault-like signals claim running at 49 RPM; Agent 1 must stop the physically inconsistent record before monitoring.",
+      "expected": {
+        "foundation_status": "FLAGGED",
+        "next_route": "data_review",
+        "pipeline_stop_after": "data_foundation"
+      }
+    },
+    {
+      "name": "complex_non_running_fault_signature",
+      "display_asset_id": "F-411",
+      "asset_id": "AST_SYN_FAN_411",
+      "profile": "inner_stage2",
+      "bearing_position": "drive_end",
+      "description": "Fault-like signals in an unrecognized maintenance regime pass data integrity but are suppressed by Monitoring.",
+      "expected": {
+        "foundation_status": "VALID",
+        "monitoring_status": "suppressed",
+        "pipeline_stop_after": "monitoring"
+      }
+    },
+    {
+      "name": "complex_complete_low_quality",
+      "display_asset_id": "F-411",
+      "asset_id": "AST_SYN_FAN_411",
+      "profile": "inner_stage2",
+      "bearing_position": "drive_end",
+      "description": "All critical values are present but historian quality is below the configured floor; the record must route to data review.",
+      "expected": {
+        "foundation_status": "FLAGGED",
+        "next_route": "data_review",
+        "pipeline_stop_after": "data_foundation"
+      }
+    },
+    {
+      "name": "complex_low_criticality_outer_stage2",
+      "display_asset_id": "P-225",
+      "asset_id": "AST_SYN_PMP_225",
+      "profile": "outer_stage2",
+      "bearing_position": "drive_end",
+      "description": "The same stage-2 fault on a low-criticality non-bottleneck asset verifies that business context changes severity without changing diagnosis.",
+      "expected": {
+        "foundation_status": "VALID",
+        "monitoring_status": "anomaly",
+        "fault_mode": "outer_race_fault",
+        "iso_stage": 2,
+        "severity": "medium"
+      }
+    },
+    {
+      "name": "complex_high_load_outer_fault",
+      "display_asset_id": "M-121",
+      "asset_id": "AST_SYN_MTR_121",
+      "profile": "outer_stage2",
+      "bearing_position": "drive_end",
+      "description": "A genuine outer-race fault under high load must remain diagnosable and carry a high-load operating regime.",
+      "expected": {
+        "foundation_status": "VALID",
+        "monitoring_status": "anomaly",
+        "regime_contains": "high_load",
+        "fault_mode": "outer_race_fault",
+        "iso_stage": 2
+      }
+    },
+    {
+      "name": "complex_low_load_outer_fault",
+      "display_asset_id": "P-225",
+      "asset_id": "AST_SYN_PMP_225",
+      "profile": "outer_stage2",
+      "bearing_position": "drive_end",
+      "description": "A genuine fault under low load remains eligible while its operating regime is explicitly recorded.",
+      "expected": {
+        "foundation_status": "VALID",
+        "monitoring_status": "anomaly",
+        "regime_contains": "low_load",
+        "fault_mode": "outer_race_fault",
+        "iso_stage": 2
+      }
+    },
+    {
+      "name": "complex_asset_channel_mismatch",
+      "display_asset_id": "M-126",
+      "asset_id": "AST_SYN_MTR_126",
+      "profile": "healthy",
+      "bearing_position": "drive_end",
+      "description": "A valid channel from another asset is injected; the identity relationship must be rejected rather than silently remapped.",
+      "expected": {
+        "foundation_status": "REJECTED",
+        "next_route": "stop",
+        "pipeline_stop_after": "data_foundation"
+      }
+    },
+    {
+      "name": "complex_temperature_at_limit",
+      "display_asset_id": "P-223",
+      "asset_id": "AST_SYN_PMP_223",
+      "profile": "thermal",
+      "bearing_position": "drive_end",
+      "description": "Temperature exactly at the configured bearing sensor maximum remains range-valid.",
+      "expected": {
+        "foundation_status": "VALID",
+        "ranges_valid": true
+      }
+    },
+    {
+      "name": "complex_temperature_over_limit",
+      "display_asset_id": "P-223",
+      "asset_id": "AST_SYN_PMP_223",
+      "profile": "thermal",
+      "bearing_position": "drive_end",
+      "description": "Temperature just above the bearing sensor maximum is retained for review and never reaches Monitoring.",
+      "expected": {
+        "foundation_status": "FLAGGED",
+        "ranges_valid": false,
+        "next_route": "data_review",
+        "pipeline_stop_after": "data_foundation"
+      }
+    },
+    {
+      "name": "complex_partial_critical_dropout",
+      "display_asset_id": "M-121",
+      "asset_id": "AST_SYN_MTR_121",
+      "profile": "outer_stage2",
+      "bearing_position": "drive_end",
+      "description": "Only BPFO is absent from an otherwise fault-like record; Agent 1 must request remediation rather than infer the fault from remaining signals.",
+      "expected": {
+        "foundation_status": "FLAGGED",
+        "next_route": "data_review",
+        "pipeline_stop_after": "data_foundation"
+      }
     }
   ]
 }

@@ -1,5 +1,5 @@
 {
-  "version": "2026.08.1",
+  "version": "2026.08.2",
   "history_points_per_asset": 12,
   "description": "Deterministic development fleet appended to the six original demo assets.",
   "generated_assets": [
@@ -31,5 +31,140 @@
     {"display_asset_id":"F-411","asset_id":"AST_SYN_FAN_411","asset_name":"Induced Draft Fan B","asset_type":"fan","oem":"Howden","model_number":"IDF-411","bearing_model":"SKF 22218-E","rated_rpm":1180,"power_kw":132,"production_line_id":"Boiler House","criticality":"high","is_bottleneck":false,"downtime_cost_per_hour":61000,"iso_10816_zone":"C","status":"running","scenario_profile":"inner_stage2"},
     {"display_asset_id":"F-412","asset_id":"AST_SYN_FAN_412","asset_name":"Cooling Tower Fan","asset_type":"fan","oem":"SPX","model_number":"CTF-412","bearing_model":"FAG 22212-E1","rated_rpm":890,"power_kw":55,"production_line_id":"Utilities","criticality":"medium","is_bottleneck":false,"downtime_cost_per_hour":33000,"iso_10816_zone":"A","status":"running","scenario_profile":"healthy"},
     {"display_asset_id":"K-501","asset_id":"AST_SYN_CMP_501","asset_name":"Instrument Air Compressor","asset_type":"compressor","oem":"Atlas Copco","model_number":"GA90-501","bearing_model":"SKF 7312-BECBP","rated_rpm":2980,"power_kw":90,"production_line_id":"Utilities","criticality":"high","is_bottleneck":true,"downtime_cost_per_hour":104000,"iso_10816_zone":"D","status":"running","scenario_profile":"rolling_stage3"}
+  ],
+  "complex_scenarios": [
+    {
+      "name": "complex_dual_race_signature",
+      "display_asset_id": "M-121",
+      "bearing_position": "drive_end",
+      "base_profile": "outer_stage2",
+      "description": "Competing BPFO and BPFI stage-2 evidence; taxonomy priority must select outer race and retain inner race as a differential.",
+      "final_overrides": {"bpfo_energy": 2.8, "bpfi_energy": 2.8, "kurtosis": 6.2},
+      "expected": {"foundation_status": "VALID", "monitoring_status": "anomaly", "fault_mode": "outer_race_fault", "iso_stage": 2, "differential_fault_mode": "inner_race_fault"}
+    },
+    {
+      "name": "complex_cage_rolling_tie",
+      "display_asset_id": "C-315",
+      "bearing_position": "drive_end",
+      "base_profile": "cage_stage3",
+      "description": "Equal dominant FTF and BSF stage-3 evidence; deterministic taxonomy priority selects cage fault and preserves rolling-element evidence.",
+      "final_overrides": {"ftf_energy": 3.5, "bsf_energy": 3.5, "kurtosis": 5.2},
+      "expected": {"foundation_status": "VALID", "monitoring_status": "anomaly", "fault_mode": "cage_fault", "iso_stage": 3, "differential_fault_mode": "rolling_element_fault"}
+    },
+    {
+      "name": "complex_outer_stage3_boundary",
+      "display_asset_id": "M-121",
+      "bearing_position": "drive_end",
+      "base_profile": "outer_stage2",
+      "description": "BPFO exactly equals the stage-3 threshold and must be classified in stage 3.",
+      "final_overrides": {"bpfo_energy": 3.5, "kurtosis": 5.01},
+      "expected": {"foundation_status": "VALID", "monitoring_status": "anomaly", "fault_mode": "outer_race_fault", "iso_stage": 3}
+    },
+    {
+      "name": "complex_outer_kurtosis_boundary",
+      "display_asset_id": "M-121",
+      "bearing_position": "drive_end",
+      "base_profile": "outer_stage2",
+      "description": "BPFO is stage 3 but kurtosis exactly equals the strict fault gate; diagnosis must remain undetermined.",
+      "final_overrides": {"bpfo_energy": 3.5, "kurtosis": 5.0},
+      "expected": {"foundation_status": "VALID", "monitoring_status": "anomaly", "fault_mode": "undetermined", "iso_stage": 0}
+    },
+    {
+      "name": "complex_nde_rolling_fault",
+      "display_asset_id": "P-220",
+      "bearing_position": "non_drive_end",
+      "base_profile": "rolling_stage2",
+      "description": "A fault on the non-drive-end bearing verifies alternate bearing/channel identity and context enrichment.",
+      "expected": {"foundation_status": "VALID", "monitoring_status": "anomaly", "fault_mode": "rolling_element_fault", "iso_stage": 2, "bearing_position": "non_drive_end"}
+    },
+    {
+      "name": "complex_running_low_speed_conflict",
+      "display_asset_id": "F-411",
+      "bearing_position": "drive_end",
+      "base_profile": "inner_stage2",
+      "description": "Fault-like signals claim running at 49 RPM; Agent 1 must stop the physically inconsistent record before monitoring.",
+      "all_overrides": {"rpm": 49.0, "machine_state": "running"},
+      "expected": {"foundation_status": "FLAGGED", "next_route": "data_review", "pipeline_stop_after": "data_foundation"}
+    },
+    {
+      "name": "complex_non_running_fault_signature",
+      "display_asset_id": "F-411",
+      "bearing_position": "drive_end",
+      "base_profile": "inner_stage2",
+      "description": "Fault-like signals in an unrecognized maintenance regime pass data integrity but are suppressed by Monitoring.",
+      "all_overrides": {"machine_state": "maintenance"},
+      "expected": {"foundation_status": "VALID", "monitoring_status": "suppressed", "pipeline_stop_after": "monitoring"}
+    },
+    {
+      "name": "complex_complete_low_quality",
+      "display_asset_id": "F-411",
+      "bearing_position": "drive_end",
+      "base_profile": "inner_stage2",
+      "description": "All critical values are present but historian quality is below the configured floor; the record must route to data review.",
+      "final_overrides": {"signal_quality_score": 0.49},
+      "expected": {"foundation_status": "FLAGGED", "next_route": "data_review", "pipeline_stop_after": "data_foundation"}
+    },
+    {
+      "name": "complex_low_criticality_outer_stage2",
+      "display_asset_id": "P-225",
+      "bearing_position": "drive_end",
+      "base_profile": "outer_stage2",
+      "description": "The same stage-2 fault on a low-criticality non-bottleneck asset verifies that business context changes severity without changing diagnosis.",
+      "expected": {"foundation_status": "VALID", "monitoring_status": "anomaly", "fault_mode": "outer_race_fault", "iso_stage": 2, "severity": "medium"}
+    },
+    {
+      "name": "complex_high_load_outer_fault",
+      "display_asset_id": "M-121",
+      "bearing_position": "drive_end",
+      "base_profile": "outer_stage2",
+      "description": "A genuine outer-race fault under high load must remain diagnosable and carry a high-load operating regime.",
+      "all_overrides": {"load_pct": 90.0},
+      "expected": {"foundation_status": "VALID", "monitoring_status": "anomaly", "regime_contains": "high_load", "fault_mode": "outer_race_fault", "iso_stage": 2}
+    },
+    {
+      "name": "complex_low_load_outer_fault",
+      "display_asset_id": "P-225",
+      "bearing_position": "drive_end",
+      "base_profile": "outer_stage2",
+      "description": "A genuine fault under low load remains eligible while its operating regime is explicitly recorded.",
+      "all_overrides": {"load_pct": 30.0},
+      "expected": {"foundation_status": "VALID", "monitoring_status": "anomaly", "regime_contains": "low_load", "fault_mode": "outer_race_fault", "iso_stage": 2}
+    },
+    {
+      "name": "complex_asset_channel_mismatch",
+      "display_asset_id": "M-126",
+      "bearing_position": "drive_end",
+      "base_profile": "healthy",
+      "description": "A valid channel from another asset is injected; the identity relationship must be rejected rather than silently remapped.",
+      "final_overrides": {"channel_id": "CH_SYN_P220_DE"},
+      "expected": {"foundation_status": "REJECTED", "next_route": "stop", "pipeline_stop_after": "data_foundation"}
+    },
+    {
+      "name": "complex_temperature_at_limit",
+      "display_asset_id": "P-223",
+      "bearing_position": "drive_end",
+      "base_profile": "thermal",
+      "description": "Temperature exactly at the configured bearing sensor maximum remains range-valid.",
+      "final_overrides": {"temp_c": 120.0},
+      "expected": {"foundation_status": "VALID", "ranges_valid": true}
+    },
+    {
+      "name": "complex_temperature_over_limit",
+      "display_asset_id": "P-223",
+      "bearing_position": "drive_end",
+      "base_profile": "thermal",
+      "description": "Temperature just above the bearing sensor maximum is retained for review and never reaches Monitoring.",
+      "final_overrides": {"temp_c": 120.001},
+      "expected": {"foundation_status": "FLAGGED", "ranges_valid": false, "next_route": "data_review", "pipeline_stop_after": "data_foundation"}
+    },
+    {
+      "name": "complex_partial_critical_dropout",
+      "display_asset_id": "M-121",
+      "bearing_position": "drive_end",
+      "base_profile": "outer_stage2",
+      "description": "Only BPFO is absent from an otherwise fault-like record; Agent 1 must request remediation rather than infer the fault from remaining signals.",
+      "final_overrides": {"bpfo_energy": null},
+      "expected": {"foundation_status": "FLAGGED", "next_route": "data_review", "pipeline_stop_after": "data_foundation"}
+    }
   ]
 }

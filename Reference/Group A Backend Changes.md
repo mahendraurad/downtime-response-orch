@@ -180,7 +180,7 @@ The Group A certification suite is `tests/test_group_a_backend.py`. It covers:
 
 The comparative response-context suite is
 `tests/test_persona_response_context.py`. The complete repository result is
-`905 passed`.
+`963 passed`.
 
 Run:
 

@@ -2,7 +2,7 @@
 
 The six original assets and their established scenarios are preserved. Assets
 whose IDs start with ``AST_SYN_`` and scenarios whose names start with
-``fleet_`` are regenerated, making this command safe to repeat.
+``fleet_`` or ``complex_`` are regenerated, making this command safe to repeat.
 """
 from __future__ import annotations
 
@@ -113,7 +113,13 @@ def _bearing_rows(asset: dict, index: int) -> list[dict]:
     return rows
 
 
-def _signal_rows(asset: dict, bearing: dict, points: int, index: int) -> list[dict]:
+def _signal_rows(
+    asset: dict,
+    bearing: dict,
+    points: int,
+    index: int,
+    telemetry_namespace: str = "",
+) -> list[dict]:
     profile = asset["scenario_profile"]
     target = PROFILE_TARGETS[profile]
     vib_mean = bearing["baseline_vib_rms_mean"]
@@ -132,8 +138,12 @@ def _signal_rows(asset: dict, bearing: dict, points: int, index: int) -> list[di
         machine_state = "startup" if profile == "startup" else "running"
         load = 108.0 if profile == "load_spike" and point == points - 1 else 68.0 + (index % 5) * 4
         current_deviation = 0.34 if profile == "electrical" and point == points - 1 else 0.05
+        namespace = telemetry_namespace or asset["display_asset_id"]
+        compact_namespace = "".join(
+            character for character in namespace.upper() if character.isalnum()
+        )
         row = {
-            "telemetry_id": f"TEL-SYN-{asset['display_asset_id'].replace('-', '')}-{point + 1:02d}",
+            "telemetry_id": f"TEL-SYN-{compact_namespace}-{point + 1:02d}",
             "timestamp_utc": (start + timedelta(days=point)).isoformat().replace("+00:00", "Z"),
             "asset_id": asset["asset_id"],
             "bearing_id": bearing["bearing_id"],
@@ -223,9 +233,25 @@ def main() -> int:
     if unknown_profiles:
         raise ValueError(f"unknown scenario profiles: {unknown_profiles}")
 
+    complex_specs = config.get("complex_scenarios", [])
+    complex_names = [str(row.get("name", "")).strip() for row in complex_specs]
+    if len(set(complex_names)) != len(complex_names) or any(not name for name in complex_names):
+        raise ValueError("complex scenario names must be populated and unique")
+    if any(not name.startswith("complex_") for name in complex_names):
+        raise ValueError("complex scenario names must start with 'complex_'")
+    unknown_complex_profiles = sorted(
+        {row.get("base_profile") for row in complex_specs} - PROFILE_TARGETS.keys()
+    )
+    if unknown_complex_profiles:
+        raise ValueError(f"unknown complex scenario profiles: {unknown_complex_profiles}")
+
     assets = [row for row in _read("asset_master.json") if not row["asset_id"].startswith("AST_SYN_")]
     bearings = [row for row in _read("bearing_master.json") if not row["bearing_id"].startswith("BRG_SYN_")]
-    telemetry = {key: value for key, value in _read("telemetry_scenarios.json").items() if not key.startswith("fleet_")}
+    telemetry = {
+        key: value
+        for key, value in _read("telemetry_scenarios.json").items()
+        if not key.startswith(("fleet_", "complex_"))
+    }
     mappings = deepcopy(BASE_MAPPINGS)
     work_orders = [
         {"id":"WO-2024-1847","priority":"CRITICAL","status":"Pending","title":"M-104 Drive-End Bearing Replacement","asset_id":"AST_MTR_001","asset_display":"M-104","type":"Condition Based","est_hours":4,"parts":"SKF 6310-2RS (Bin A-14)","assigned_to":"Pending","due":"Wednesday 06:00","created_by":"DRO synthetic fleet","rul":"5-8 days","risk":"Critical","cost":"$18,000","checklist":[{"text":"Validate LOTO EL-104-A","done":True,"tag":"Safety"},{"text":"Confirm SKF 6310-2RS stock","done":True,"tag":"Parts"},{"text":"Assign two LOTO-qualified technicians","done":False,"tag":"Crew"}],"timeline":[{"dot":"var(--rd)","ev":"Stage 3 outer-race fault confirmed","tm":"Current"}],"synthetic_data_version":"2026.08.1"},
@@ -258,12 +284,63 @@ def main() -> int:
     }
     telemetry["fleet_g_112_post_repair"] = _signal_rows(g112, base_bearing, points, 0)
 
+    # Supplemental cases deliberately exercise difficult decision boundaries
+    # without changing the one-current-scenario-per-dashboard-asset mapping.
+    # All signal changes and expected outcomes remain data-driven in config.
+    complex_mappings = []
+    mapping_by_display = {row["display_asset_id"]: row for row in mappings}
+    asset_by_id = {row["asset_id"]: row for row in assets}
+    for index, spec in enumerate(complex_specs, start=101):
+        display = str(spec.get("display_asset_id", "")).strip().upper()
+        if display not in mapping_by_display:
+            raise ValueError(f"complex scenario references unknown display asset: {display}")
+        asset_id = mapping_by_display[display]["asset_id"]
+        asset_row = asset_by_id[asset_id]
+        position = spec.get("bearing_position", "drive_end")
+        bearing = next(
+            (
+                row for row in bearings
+                if row["asset_id"] == asset_id
+                and row["bearing_position"] == position
+            ),
+            None,
+        )
+        if bearing is None:
+            raise ValueError(
+                f"complex scenario {spec['name']} has no {position} bearing for {display}"
+            )
+        signal_asset = {
+            **asset_row,
+            "display_asset_id": display,
+            "scenario_profile": spec["base_profile"],
+        }
+        rows = _signal_rows(
+            signal_asset, bearing, points, index,
+            telemetry_namespace=spec["name"],
+        )
+        for row in rows:
+            row.update(deepcopy(spec.get("all_overrides", {})))
+        rows[-1].update(deepcopy(spec.get("final_overrides", {})))
+        telemetry[spec["name"]] = rows
+        complex_mappings.append({
+            "name": spec["name"],
+            "display_asset_id": display,
+            "asset_id": asset_id,
+            "profile": spec["base_profile"],
+            "bearing_position": position,
+            "description": spec.get("description", ""),
+            "expected": deepcopy(spec.get("expected", {})),
+        })
+
     _write("asset_master.json", assets)
     _write("bearing_master.json", bearings)
     _write("telemetry_scenarios.json", telemetry)
     _write("fleet_scenario_map.json", {
-        "version": config["version"], "assets": mappings
+        "version": config["version"], "assets": mappings,
+        "complex_scenarios": complex_mappings,
     })
+    for order in work_orders:
+        order["synthetic_data_version"] = config["version"]
     _write("demo_work_orders.json", work_orders)
     print(f"Generated {len(assets)} assets, {len(bearings)} bearings, "
           f"{len([k for k in telemetry if not k.startswith('_')])} scenarios, "

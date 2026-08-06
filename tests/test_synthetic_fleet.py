@@ -224,8 +224,8 @@ def test_scenario_api_exposes_full_catalog():
     response = TestClient(app).get("/api/pipeline/scenarios")
     assert response.status_code == 200
     scenarios = response.json()["scenarios"]
-    assert len(scenarios) == 40
-    assert len({row["name"] for row in scenarios}) == 40
+    assert len(scenarios) == 55
+    assert len({row["name"] for row in scenarios}) == 55
     assert all({"name", "description", "record_count"} <= row.keys()
                for row in scenarios)
 
@@ -252,6 +252,10 @@ def test_demo_work_orders_cover_registered_assets_and_multiple_priorities():
     assert all(row["asset_id"] in assets for row in configured)
     assert {row["priority"] for row in configured} == {
         "CRITICAL", "HIGH", "MEDIUM",
+    }
+    fleet_version = _fleet_payload()["version"]
+    assert {row["synthetic_data_version"] for row in configured} == {
+        fleet_version,
     }
     response = TestClient(app).get("/api/workorders")
     assert response.status_code == 200

@@ -39,7 +39,7 @@
         "tm": "Current"
       }
     ],
-    "synthetic_data_version": "2026.08.1"
+    "synthetic_data_version": "2026.08.2"
   },
   {
     "id": "WO-DEMO-0207",
@@ -76,7 +76,7 @@
         "tm": "Current"
       }
     ],
-    "synthetic_data_version": "2026.08.1"
+    "synthetic_data_version": "2026.08.2"
   },
   {
     "id": "WO-DEMO-0301",
@@ -113,7 +113,7 @@
         "tm": "Current"
       }
     ],
-    "synthetic_data_version": "2026.08.1"
+    "synthetic_data_version": "2026.08.2"
   },
   {
     "id": "WO-DEMO-0401",
@@ -165,7 +165,7 @@
         "tm": "Current"
       }
     ],
-    "synthetic_data_version": "2026.08.1"
+    "synthetic_data_version": "2026.08.2"
   },
   {
     "id": "WO-DEMO-0403",
@@ -217,7 +217,7 @@
         "tm": "Current"
       }
     ],
-    "synthetic_data_version": "2026.08.1"
+    "synthetic_data_version": "2026.08.2"
   },
   {
     "id": "WO-DEMO-0404",
@@ -269,7 +269,7 @@
         "tm": "Current"
       }
     ],
-    "synthetic_data_version": "2026.08.1"
+    "synthetic_data_version": "2026.08.2"
   },
   {
     "id": "WO-DEMO-0407",
@@ -321,7 +321,7 @@
         "tm": "Current"
       }
     ],
-    "synthetic_data_version": "2026.08.1"
+    "synthetic_data_version": "2026.08.2"
   },
   {
     "id": "WO-DEMO-0409",
@@ -373,7 +373,7 @@
         "tm": "Current"
       }
     ],
-    "synthetic_data_version": "2026.08.1"
+    "synthetic_data_version": "2026.08.2"
   },
   {
     "id": "WO-DEMO-0410",
@@ -425,7 +425,7 @@
         "tm": "Current"
       }
     ],
-    "synthetic_data_version": "2026.08.1"
+    "synthetic_data_version": "2026.08.2"
   },
   {
     "id": "WO-DEMO-0411",
@@ -477,7 +477,7 @@
         "tm": "Current"
       }
     ],
-    "synthetic_data_version": "2026.08.1"
+    "synthetic_data_version": "2026.08.2"
   },
   {
     "id": "WO-DEMO-0413",
@@ -529,7 +529,7 @@
         "tm": "Current"
       }
     ],
-    "synthetic_data_version": "2026.08.1"
+    "synthetic_data_version": "2026.08.2"
   },
   {
     "id": "WO-DEMO-0415",
@@ -581,7 +581,7 @@
         "tm": "Current"
       }
     ],
-    "synthetic_data_version": "2026.08.1"
+    "synthetic_data_version": "2026.08.2"
   },
   {
     "id": "WO-DEMO-0416",
@@ -633,7 +633,7 @@
         "tm": "Current"
       }
     ],
-    "synthetic_data_version": "2026.08.1"
+    "synthetic_data_version": "2026.08.2"
   },
   {
     "id": "WO-DEMO-0417",
@@ -685,7 +685,7 @@
         "tm": "Current"
       }
     ],
-    "synthetic_data_version": "2026.08.1"
+    "synthetic_data_version": "2026.08.2"
   },
   {
     "id": "WO-DEMO-0418",
@@ -737,7 +737,7 @@
         "tm": "Current"
       }
     ],
-    "synthetic_data_version": "2026.08.1"
+    "synthetic_data_version": "2026.08.2"
   },
   {
     "id": "WO-DEMO-0420",
@@ -789,7 +789,7 @@
         "tm": "Current"
       }
     ],
-    "synthetic_data_version": "2026.08.1"
+    "synthetic_data_version": "2026.08.2"
   },
   {
     "id": "WO-DEMO-0422",
@@ -841,7 +841,7 @@
         "tm": "Current"
       }
     ],
-    "synthetic_data_version": "2026.08.1"
+    "synthetic_data_version": "2026.08.2"
   },
   {
     "id": "WO-DEMO-0424",
@@ -893,6 +893,6 @@
         "tm": "Current"
       }
     ],
-    "synthetic_data_version": "2026.08.1"
+    "synthetic_data_version": "2026.08.2"
   }
 ]

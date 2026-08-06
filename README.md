@@ -16,7 +16,7 @@ The repository is ready for frontend integration in deterministic local mode. Az
 | Reflexion and graceful error envelopes | Implemented |
 | Governed cited open-ended RAG | Implemented locally; Azure adapter ready |
 | Local persistence and mock connectors | Implemented |
-| Automated backend tests | `905 passed` |
+| Automated backend tests | `963 passed` |
 | React frontend from `feature/8agents_frontend` | Integrated on `dev` |
 | Real CMMS/ERP/historian and Azure services | Next phase |
 
@@ -64,7 +64,7 @@ all seven persona views without external plant systems:
 |---|---:|
 | Assets | 30 |
 | Bearings/channels | 60 / 60 |
-| Telemetry scenarios | 40 |
+| Telemetry scenarios | 55 (40 standard + 15 complex certification cases) |
 | Seeded work orders | 18 |
 | Equipment classes | Motors, pumps, conveyors, gearboxes, fans, compressor |
 
@@ -73,12 +73,18 @@ lubrication faults across stages 1–3, plus thermal rise, startup, electrical
 deviation, load spike, borderline quality and signal dropout cases. Original
 demo identities and scenarios remain available.
 
+The catalog also includes 15 supplemental replay cases for competing fault
+signatures, exact decision boundaries, non-drive-end identity, operating-regime
+suppression, low-quality complete data, cross-asset mapping rejection and
+sensor-limit behavior. They do not replace the configured current/dashboard
+scenario for any asset.
+
 Edit `config/synthetic_fleet_config.json`, then regenerate the derived master,
 telemetry, mapping and work-order fixtures deterministically:
 
 ```powershell
 python scripts\generate_synthetic_fleet.py
-python -m pytest tests\test_synthetic_fleet.py -q
+python -m pytest tests\test_synthetic_fleet.py tests\test_complex_synthetic_scenarios.py -q
 ```
 
 `GET /api/dashboard/assets`, `GET /api/pipeline/scenarios`, work-order APIs and
@@ -333,7 +339,7 @@ python -m pytest tests/test_agent1_to_agent8_integration.py -q
 Current certification:
 
 ```text
-905 passed
+963 passed
 0 failed
 ```
 

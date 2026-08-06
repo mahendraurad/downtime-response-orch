@@ -102,6 +102,9 @@ def list_telemetry_scenarios() -> List[Dict[str, Any]]:
     data = _load_json("telemetry_scenarios.json")
     fleet = _load_json("fleet_scenario_map.json")
     by_scenario = {row["scenario"]: row for row in fleet.get("assets", [])}
+    by_scenario.update({
+        row["name"]: row for row in fleet.get("complex_scenarios", [])
+    })
     descriptions = {
         "healthy": "Healthy motor — no active fault",
         "outer_race_fault": "Motor outer-race spall — Stage 1 to Stage 3",
@@ -127,7 +130,7 @@ def list_telemetry_scenarios() -> List[Dict[str, Any]]:
         mapping = by_scenario.get(name, {})
         display = mapping.get("display_asset_id", "")
         profile = mapping.get("profile", "")
-        description = descriptions.get(name)
+        description = mapping.get("description") or descriptions.get(name)
         if not description:
             description = (
                 f"{display} deterministic fleet history — "

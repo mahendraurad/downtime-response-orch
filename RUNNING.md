@@ -48,7 +48,7 @@ demo scenarios:
 
 ```powershell
 python scripts\generate_synthetic_fleet.py
-python -m pytest tests\test_synthetic_fleet.py -q
+python -m pytest tests\test_synthetic_fleet.py tests\test_complex_synthetic_scenarios.py -q
 ```
 
 ## Individual agent demos
