@@ -2,155 +2,234 @@ import React, { useContext, useState } from 'react';
 import { AppContext } from '../../context/AppContext';
 import { patchWorkOrder } from '../../api/workOrders';
 import { askChat } from '../../api/chat';
+import { authedFetch } from '../../api/http';
+import { API } from '../../config/api';
 
 const PR_COLOR = { URGENT: 'var(--rd)', MEDIUM: 'var(--am)', LOW: 'var(--gn)' };
-const PR_BG = { URGENT: 'var(--rdm)', MEDIUM: 'var(--adm)', LOW: 'var(--gd)' };
+const PR_BG    = { URGENT: 'var(--rdm)', MEDIUM: 'var(--adm)', LOW: 'var(--gd)' };
 
+// actions — real system actions (status transitions, export). Rendered as buttons.
+// chips   — suggested AI questions. Rendered as small query chips below.
 const WO_PERSONA_ACTS = {
   supervisor: {
-    pending: [
-      { l: '✓ Approve WO', cls: 'wpablu', newSt: 'Scheduled', q: 'Approve WO-2024-1847 — confirm Wednesday 06:00 crew deployment and release all logistics' },
-      { l: '🤖 Why this WO?', cls: 'wpagry', why: true, q: 'Why did DRO create this WO? Explain the fault evidence and urgency' },
-      { l: '✗ Reject', cls: 'wpared', q: 'Reject this WO — what further evidence or conditions are needed before resubmitting?' },
-    ],
-    scheduled: [
-      { l: '▶ Mark In Progress', cls: 'wpablu', newSt: 'In Progress', q: 'Mark this WO as in progress — confirm crew is on site and work has started' },
-      { l: '📅 Reschedule', cls: 'wpagry', q: 'Reschedule this WO — what is the next available window without increasing M-104 failure risk?' },
-    ],
-    closed: [
-      { l: '📋 Closure Report', cls: 'wpagry', q: 'Full closure report for this WO: fault found on teardown, repair performed, post-repair baseline, outcome' },
-      { l: '↻ Follow-up WO', cls: 'wpagrn', q: 'Create a follow-up 6-month inspection WO from the closure' },
-    ],
+    pending:     {
+      actions: [
+        { l: '✓ Approve WO',  cls: 'wpablu', newSt: 'Scheduled' },
+        { l: '✗ Reject WO',   cls: 'wpared', newSt: 'Rejected'  },
+      ],
+      chips:   ['Why did DRO create this WO? Explain the fault evidence and urgency rating', 'What further evidence or conditions are needed before approving?'],
+    },
+    scheduled:   {
+      actions: [{ l: '▶ Mark In Progress', cls: 'wpablu', newSt: 'In Progress' }],
+      chips:   ['What is the next available maintenance window without increasing failure risk?'],
+    },
+    in_progress: {
+      actions: [{ l: '✓ Mark Complete', cls: 'wpagry', newSt: 'Closed' }],
+      chips:   ['What is the current execution status of this work order?'],
+    },
+    closed:      {
+      actions: [],
+      chips:   ['Full closure report: fault found on teardown, repair performed, post-repair baseline', 'Should we create a follow-up 6-month inspection work order?'],
+    },
+    rejected:    { actions: [], chips: ['What conditions would need to be met to resubmit this work order?'] },
   },
   engineer: {
-    pending: [
-      { l: '🔬 Review Technical Evidence', cls: 'wpablu', q: 'What fault data confirms this WO is the right action? Show FFT evidence, kurtosis, crest factor, KB matches' },
-      { l: '📐 Set QA Baseline', cls: 'wpagrn', q: 'What post-repair vibration and temperature baselines should be set? Target for new SKF 6310-2RS' },
-    ],
-    scheduled: [
-      { l: '📊 Export Pre-Repair Data', cls: 'wpablu', q: 'Export pre-repair vibration and temperature data to compare against post-repair baseline' },
-      { l: '📋 Verify SOP Specs', cls: 'wpagry', q: 'SOP for this WO: confirm torque spec, press fit procedure, lubrication type and volume' },
-    ],
-    closed: [
-      { l: '📈 Compare Pre/Post Signature', cls: 'wpablu', q: 'Compare M-104 pre-repair (14.7 mm/s, BPFO 4.02×) vs post-repair baseline. Did it normalise as expected?' },
-      { l: '🔁 Update Model', cls: 'wpagrn', q: 'How should this WO outcome data update the RUL prediction model? What was actual vs predicted fault stage?' },
-    ],
+    pending:     {
+      actions: [{ l: '📊 Export Pre-Repair Data', cls: 'wpablu', export: true }],
+      chips:   ['What fault data confirms this WO is the right action? Show FFT evidence, kurtosis, crest factor', 'What post-repair vibration and temperature baselines should be set for this bearing?'],
+    },
+    scheduled:   {
+      actions: [{ l: '📊 Export Pre-Repair Data', cls: 'wpablu', export: true }],
+      chips:   ['SOP for this WO: torque spec, press fit procedure, lubrication type and volume'],
+    },
+    in_progress: {
+      actions: [],
+      chips:   ['What is the technical status of this repair? Any issues found on teardown?'],
+    },
+    closed:      {
+      actions: [],
+      chips:   ['Compare pre-repair vs post-repair baseline — did readings normalise as expected?', 'How should this WO outcome update the RUL prediction model?'],
+    },
+    rejected:    { actions: [], chips: ['What conditions would need to be met to resubmit this work order?'] },
   },
   maintenance: {
-    pending: [
-      { l: '📦 Confirm Parts Ready', cls: 'wpagrn', q: 'Confirm all parts and tools are staged: bearing, lube, seals, tools. Anything still to collect?' },
-      { l: '👥 Assign Crew', cls: 'wpablu', q: 'Assign T.Rodriguez + K.Mensah — confirm both available and LOTO-qualified for Wednesday 06:00' },
-    ],
-    scheduled: [
-      { l: '🖨 Print Job Pack', cls: 'wpablu', q: 'Complete job pack: SOP steps, parts with bin locations, tools, torque specs, LOTO reference' },
-      { l: '⏱ Check Duration', cls: 'wpagry', q: 'Is the time estimate accurate for this WO? Should we allow more buffer?' },
-    ],
-    closed: [
-      { l: '⏱ Log Actual Hours', cls: 'wpagry', q: 'Log actual hours and parts used vs estimate. Update duration benchmark for similar future jobs' },
-      { l: '📦 Reorder Parts', cls: 'wpagrn', q: 'Do any parts consumed need reordering? Check SKF 6310-2RS stock at Bin A-14 vs reorder threshold' },
-    ],
+    pending:     {
+      actions: [],
+      chips:   ['Confirm all parts and tools are staged for this WO — anything still to collect?', 'Crew availability and LOTO qualifications needed for this work order?'],
+    },
+    scheduled:   {
+      actions: [],
+      chips:   ['Complete job pack: SOP steps, parts with bin locations, tools, torque specs, LOTO reference', 'Is the time estimate accurate for this WO? Should we allow more buffer?'],
+    },
+    in_progress: {
+      actions: [{ l: '✓ Mark Complete', cls: 'wpagry', newSt: 'Closed' }],
+      chips:   ['Log actual hours and parts used vs estimate'],
+    },
+    closed:      {
+      actions: [],
+      chips:   ['Log actual hours and parts used vs estimate — update duration benchmark for similar jobs', 'Do any parts consumed need reordering? Check stock vs reorder threshold'],
+    },
+    rejected:    { actions: [], chips: ['What conditions would need to be met to resubmit this work order?'] },
   },
   manager: {
-    pending: [
-      { l: '✓ Approve from Ops Level', cls: 'wpablu', newSt: 'Scheduled', q: 'Approve this WO at Plant Manager level — confirm Wednesday window is authorised' },
-      { l: '💰 Cost-Benefit Model', cls: 'wpagrn', q: 'Full cost-benefit: planned $18K vs emergency $619K+ — detailed breakdown and net avoidance case' },
-    ],
-    scheduled: [
-      { l: '📊 Line Impact', cls: 'wpablu', q: 'How does the Wednesday window affect Line 4 throughput and daily OEE targets?' },
-      { l: '🔄 Contingency', cls: 'wpagry', q: 'Contingency if this WO overruns: backup crew, schedule recovery, production re-route' },
-    ],
-    closed: [
-      { l: '💵 Final Cost vs Budget', cls: 'wpagry', q: 'Final cost vs $18K estimate — any overruns? Update maintenance budget tracker' },
-      { l: '📈 OEE Impact Report', cls: 'wpablu', q: 'How did the planned window affect Line 4 monthly OEE vs an unplanned failure scenario?' },
-    ],
+    pending:     {
+      actions: [
+        { l: '✓ Approve from Ops Level', cls: 'wpablu', newSt: 'Scheduled' },
+        { l: '✗ Reject WO',             cls: 'wpared', newSt: 'Rejected'  },
+      ],
+      chips:   ['Full cost-benefit: planned vs emergency — detailed breakdown and net avoidance case'],
+    },
+    scheduled:   {
+      actions: [],
+      chips:   ['How does the maintenance window affect line throughput and daily OEE targets?', 'Contingency if this WO overruns: backup crew, schedule recovery, production re-route'],
+    },
+    in_progress: {
+      actions: [],
+      chips:   ['What is the current execution status and estimated completion time?'],
+    },
+    closed:      {
+      actions: [],
+      chips:   ['Final cost vs estimate — any overruns? Update maintenance budget tracker', 'How did the planned window affect monthly OEE vs an unplanned failure scenario?'],
+    },
+    rejected:    { actions: [], chips: ['What conditions would need to be met to resubmit this work order?'] },
   },
   executive: {
-    pending: [
-      { l: '💰 Financial Exposure', cls: 'wpared', q: 'Probability-weighted financial exposure if this WO is not approved today. Show expected value calculation' },
-      { l: '✓ Executive Approval', cls: 'wpablu', newSt: 'Scheduled', q: 'Approve at executive level — confirm strategic priority and resource commitment' },
-    ],
-    scheduled: [
-      { l: '📊 KPI Contribution', cls: 'wpablu', q: 'How does this WO contribute to Q3 reliability KPIs and DRO ROI metrics for executive scorecard?' },
-      { l: '📰 Add to Exec Report', cls: 'wpagry', q: 'Add this WO as a DRO value example in the next executive reliability report' },
-    ],
-    closed: [
-      { l: '💵 Avoidance Value', cls: 'wpagrn', q: 'Total downtime avoidance value from completing this WO as planned vs the emergency scenario' },
-      { l: '📊 Update YTD Metrics', cls: 'wpablu', q: 'Add this WO outcome to YTD DRO performance metrics and avoidance tracker' },
-    ],
+    pending:     {
+      actions: [{ l: '✓ Executive Approval', cls: 'wpablu', newSt: 'Scheduled' }],
+      chips:   ['Probability-weighted financial exposure if this WO is not approved today'],
+    },
+    scheduled:   {
+      actions: [],
+      chips:   ['How does this WO contribute to Q3 reliability KPIs and DRO ROI metrics?'],
+    },
+    in_progress: {
+      actions: [],
+      chips:   ['What is the execution timeline and any risks to on-time completion?'],
+    },
+    closed:      {
+      actions: [],
+      chips:   ['Total downtime avoidance value: planned completion vs emergency failure scenario', 'Add this WO outcome to YTD DRO performance metrics and avoidance tracker'],
+    },
+    rejected:    { actions: [], chips: ['What conditions would need to be met to resubmit this work order?'] },
   },
   ot: {
-    pending: [
-      { l: '📡 Sensor Readiness', cls: 'wpablu', q: 'All sensors on M-104 healthy and ready for Wednesday maintenance? Any calibration or data quality issues?' },
-      { l: '🔗 CMMS Pre-Check', cls: 'wpagrn', q: 'Is SAP PM ready to receive the approval update? Any integration issues?' },
-    ],
-    scheduled: [
-      { l: '📊 Data Continuity', cls: 'wpablu', q: 'Ensure data logging continuity on M-104 during the Wednesday maintenance window' },
-      { l: '📏 Configure Baselines', cls: 'wpagrn', q: 'Historian baselines and alert thresholds to configure after completion. Specify target values.' },
-    ],
-    closed: [
-      { l: '📈 Signals Normalised?', cls: 'wpagrn', q: 'Did M-104 readings normalise as expected after completion? Compare pre vs post across all 4 channels' },
-      { l: '📚 Archive Event', cls: 'wpagry', q: 'Archive the complete data record: vibration trend, fault event, post-repair baseline' },
-    ],
+    pending:     {
+      actions: [],
+      chips:   ['Are all sensors on this asset healthy and ready for maintenance? Any calibration issues?', 'Is CMMS ready to receive the approval update? Any integration issues?'],
+    },
+    scheduled:   {
+      actions: [],
+      chips:   ['Ensure data logging continuity on this asset during the maintenance window', 'Historian baselines and alert thresholds to configure after completion'],
+    },
+    in_progress: {
+      actions: [],
+      chips:   ['Are sensors logging correctly during the maintenance window?'],
+    },
+    closed:      {
+      actions: [],
+      chips:   ['Did readings normalise as expected after completion? Compare pre vs post across all channels', 'Archive the complete data record: vibration trend, fault event, post-repair baseline'],
+    },
+    rejected:    { actions: [], chips: ['What conditions would need to be met to resubmit this work order?'] },
   },
   safety: {
-    pending: [
-      { l: '🛡 Permit Validation', cls: 'wpablu', q: 'Validate all safety permits: LOTO EL-104-A current, full scope, crew LOTO-certified?' },
-      { l: '📋 Safety Brief', cls: 'wpagrn', q: 'Pre-task safety brief for crew: hazards, LOTO steps, PPE, isolation points, emergency contacts' },
-    ],
-    scheduled: [
-      { l: '✅ Pre-Task Sign-off', cls: 'wpablu', q: 'Safety sign-off: LOTO in place, crew briefed, PPE available, cleared to start?' },
-      { l: '🔒 Energy Isolation Check', cls: 'wpagry', q: 'Verify LOTO EL-104-A covers all energy sources: MCB-104A, MCB-104B, IL-104-M' },
-    ],
-    closed: [
-      { l: '✅ Compliance Record', cls: 'wpagrn', q: 'Log safety compliance record: all permits completed, LOTO de-issued, no incidents' },
-      { l: '⚠ Near-Miss Check', cls: 'wpagry', q: 'Any near-misses, LOTO deviations or safety observations during this WO to document?' },
-    ],
+    pending:     {
+      actions: [],
+      chips:   ['Validate all safety permits: LOTO current, full scope, crew LOTO-certified?', 'Pre-task safety brief for crew: hazards, LOTO steps, PPE, isolation points, emergency contacts'],
+    },
+    scheduled:   {
+      actions: [],
+      chips:   ['Safety sign-off checklist: LOTO in place, crew briefed, PPE available, cleared to start?', 'Verify LOTO covers all energy sources for this asset'],
+    },
+    in_progress: {
+      actions: [],
+      chips:   ['Is the work proceeding safely? Any LOTO deviations or safety concerns to flag?'],
+    },
+    closed:      {
+      actions: [],
+      chips:   ['Log safety compliance record: all permits completed, LOTO de-issued, no incidents', 'Any near-misses, LOTO deviations or safety observations during this WO to document?'],
+    },
+    rejected:    { actions: [], chips: ['What conditions would need to be met to resubmit this work order?'] },
   },
 };
 
 export default function WorkOrderDetail({ wo }) {
   const { persona, updateWOStatus } = useContext(AppContext);
-  const [checklist, setChecklist] = useState(() => wo ? wo.cl.map(item => ({ ...item })) : []);
-  const [whyAnswer, setWhyAnswer] = useState(null);
-  const [whyLoading, setWhyLoading] = useState(false);
-  const [whyBtnIdx, setWhyBtnIdx] = useState(null);
+  const [checklist, setChecklist]   = useState(() => wo ? wo.cl.map(item => ({ ...item })) : []);
+  const [chipAnswer, setChipAnswer] = useState(null);
+  const [chipLoading, setChipLoading] = useState(false);
+  const [activeChipIdx, setActiveChipIdx] = useState(null);
+  const [exporting, setExporting]   = useState(false);
 
-  // Sync checklist and reset why answer when wo changes
   React.useEffect(() => {
     if (wo) setChecklist(wo.cl.map(item => ({ ...item })));
-    setWhyAnswer(null);
+    setChipAnswer(null);
+    setActiveChipIdx(null);
   }, [wo && wo.id]);
 
-  async function handleWhyClick(q, btnIdx) {
-    if (whyLoading) return;
-    if (whyBtnIdx === btnIdx && whyAnswer !== null) { setWhyAnswer(null); setWhyBtnIdx(null); return; }
-    setWhyLoading(true);
-    setWhyBtnIdx(btnIdx);
-    setWhyAnswer(null);
+  async function handleChipClick(q, idx) {
+    if (chipLoading) return;
+    if (activeChipIdx === idx && chipAnswer !== null) {
+      setChipAnswer(null);
+      setActiveChipIdx(null);
+      return;
+    }
+    setChipLoading(true);
+    setActiveChipIdx(idx);
+    setChipAnswer(null);
     try {
-      const woPrefix = wo
-        ? `[Work Order: ${wo.id} | Title: ${wo.ti} | Asset: ${wo.as} | Status: ${wo.st} | Priority: ${wo.pr} | RUL: ${wo.rul} | Risk: ${wo.risk}]\n\n`
+      const prefix = wo
+        ? `[Work Order: ${wo.id} | Asset: ${wo.as} | Status: ${wo.st} | Priority: ${wo.pr} | RUL: ${wo.rul} | Risk: ${wo.risk}]\n\n`
         : '';
-      const data = await askChat({ message: woPrefix + q, persona });
-      setWhyAnswer(data.response || data.message || 'No answer returned.');
+      const data = await askChat({ message: prefix + q, persona });
+      setChipAnswer(data.response || data.message || 'No answer returned.');
     } catch {
-      setWhyAnswer('Could not fetch answer. Please try again.');
+      setChipAnswer('Could not fetch answer. Please try again.');
     } finally {
-      setWhyLoading(false);
+      setChipLoading(false);
+    }
+  }
+
+  async function handleExport(assetId) {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      const resp = await authedFetch(`${API}/api/assets/${encodeURIComponent(assetId)}/export/pre-repair`);
+      if (!resp.ok) { alert('Export failed — asset data not found.'); return; }
+      const blob = await resp.blob();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
+      a.download = `${assetId}_pre-repair_${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      alert('Export failed. Please try again.');
+    } finally {
+      setExporting(false);
     }
   }
 
   if (!wo) return <div className="wodhdr"><div style={{ padding: '16px', color: 'var(--t3)' }}>Select a work order</div></div>;
 
   const pc = PR_COLOR[wo.pr] || 'var(--t3)';
-  const pb = PR_BG[wo.pr] || 'rgba(255,255,255,.04)';
-  const sc = wo.st === 'Pending' ? 'var(--am)' : wo.st === 'Scheduled' ? 'var(--ac2)' : wo.st === 'Closed' ? 'var(--t3)' : 'var(--gn)';
-  const sb = wo.st === 'Pending' ? 'var(--adm)' : wo.st === 'Scheduled' ? 'var(--ag)' : 'rgba(255,255,255,.04)';
+  const pb = PR_BG[wo.pr]   || 'rgba(255,255,255,.04)';
+  const sc = wo.st === 'Pending'     ? 'var(--am)'  : wo.st === 'Scheduled'    ? 'var(--ac2)'
+           : wo.st === 'Rejected'   ? 'var(--rd)'  : wo.st === 'Closed'       ? 'var(--t3)'
+           : 'var(--gn)';
+  const sb = wo.st === 'Pending'     ? 'var(--adm)' : wo.st === 'Scheduled'    ? 'var(--ag)'
+           : wo.st === 'Rejected'   ? 'var(--rdm)' : 'rgba(255,255,255,.04)';
 
-  const STATUS_ORDER = { 'Pending': 0, 'Scheduled': 1, 'In Progress': 2, 'Closed': 3 };
-  const currentStatusOrder = STATUS_ORDER[wo.st] ?? 0;
-  const stateKey = wo.st === 'Closed' ? 'closed' : wo.st === 'Pending' ? 'pending' : 'scheduled';
-  const acts = ((WO_PERSONA_ACTS[persona] || WO_PERSONA_ACTS.supervisor)[stateKey] || WO_PERSONA_ACTS.supervisor.pending);
+  const STATUS_ORDER   = { Pending: 0, Scheduled: 1, 'In Progress': 2, Closed: 3, Rejected: 4 };
+  const currentOrder   = STATUS_ORDER[wo.st] ?? 0;
+  const stateKey       = wo.st === 'Closed'      ? 'closed'
+                       : wo.st === 'Rejected'    ? 'rejected'
+                       : wo.st === 'Pending'     ? 'pending'
+                       : wo.st === 'In Progress' ? 'in_progress'
+                       : 'scheduled';
+
+  const personaActs = (WO_PERSONA_ACTS[persona] || WO_PERSONA_ACTS.supervisor)[stateKey]
+                   || { actions: [], chips: [] };
+  const { actions, chips } = personaActs;
 
   function toggleChecklist(i) {
     const newDone = !checklist[i].ck;
@@ -168,41 +247,58 @@ export default function WorkOrderDetail({ wo }) {
         </div>
         <div className="wodtt">{wo.id} — {wo.ti}</div>
         <div className="wodsu">Created by {wo.by} · {wo.as} · Est. {wo.est}</div>
-        <div className="wod-pacts">
-          {acts.map((act, i) => {
-            const alreadyApplied = act.newSt && (STATUS_ORDER[act.newSt] ?? 0) <= currentStatusOrder;
-            const isLoading = whyLoading && whyBtnIdx === i;
-            const tooltip = act.newSt
-              ? `Updates status to "${act.newSt}" · ${act.q}`
-              : act.q;
-            return (
+
+        {/* Real action buttons */}
+        {actions.length > 0 && (
+          <div className="wod-pacts">
+            {actions.map((act, i) => {
+              const alreadyApplied = act.newSt && (STATUS_ORDER[act.newSt] ?? 0) <= currentOrder;
+              return (
+                <button
+                  key={i}
+                  className={`wpa ${act.cls}`}
+                  disabled={alreadyApplied || (act.export && exporting)}
+                  title={act.newSt ? `Move this work order to "${act.newSt}"` : act.export ? 'Download pre-repair sensor data as CSV' : act.l}
+                  style={alreadyApplied ? { opacity: 0.35, cursor: 'not-allowed' } : {}}
+                  onClick={() => {
+                    if (act.newSt)   updateWOStatus(wo.id, act.newSt);
+                    if (act.export)  handleExport(wo.as);
+                  }}
+                >
+                  {act.export && exporting ? 'Exporting…' : act.l}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {/* AI query chips */}
+        {chips.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', marginTop: actions.length ? '10px' : '10px' }}>
+            {chips.map((q, i) => (
               <button
                 key={i}
-                className={`wpa ${act.cls}`}
-                disabled={alreadyApplied || whyLoading}
-                title={tooltip}
-                style={alreadyApplied ? { opacity: 0.35, cursor: 'not-allowed' } : {}}
-                onClick={() => {
-                  if (act.newSt) updateWOStatus(wo.id, act.newSt);
-                  handleWhyClick(act.q, i);
-                }}
+                className="wo-chip"
+                disabled={chipLoading}
+                onClick={() => handleChipClick(q, i)}
               >
-                {isLoading ? '…' : act.l}
+                {chipLoading && activeChipIdx === i ? '…' : q}
               </button>
-            );
-          })}
-        </div>
-        {(whyLoading || whyAnswer) && (
+            ))}
+          </div>
+        )}
+
+        {/* Inline AI answer */}
+        {(chipLoading || chipAnswer) && (
           <div style={{ margin: '10px 0 0', padding: '12px 14px', borderRadius: '8px', background: 'var(--sf)', border: '1px solid var(--b)', borderLeft: '3px solid var(--ac2)', fontSize: '12px', color: 'var(--t2)', lineHeight: '1.7' }}>
-            {whyLoading
+            {chipLoading
               ? <span style={{ color: 'var(--t3)', fontStyle: 'italic' }}>Agent thinking…</span>
-              : whyAnswer}
+              : chipAnswer}
           </div>
         )}
       </div>
 
       <div className="wodbody">
-        {/* Summary */}
         <div className="dsec">
           <div className="sttl">Work Order Summary</div>
           <div className="dg3">
@@ -219,29 +315,24 @@ export default function WorkOrderDetail({ wo }) {
           </div>
         </div>
 
-        {/* Checklist */}
         <div className="dsec">
           <div className="sttl">Task Checklist</div>
           {checklist.map((item, i) => (
             <div key={i} className="clitem">
-              <div
-                className={`clcb${item.ck ? ' ck' : ''}`}
-                onClick={() => toggleChecklist(i)}
-              ></div>
+              <div className={`clcb${item.ck ? ' ck' : ''}`} onClick={() => toggleChecklist(i)} />
               <span className={`cltx${item.ck ? ' dk' : ''}`}>{item.tx}</span>
               <span className="cltg">{item.tg}</span>
             </div>
           ))}
         </div>
 
-        {/* Timeline */}
         <div className="dsec">
           <div className="sttl">Activity Timeline</div>
           {wo.tl.map((ev, i) => (
             <div key={i} className="tlrow">
               <div className="tldc">
-                <div className="tldot" style={{ background: ev.dot }}></div>
-                {i < wo.tl.length - 1 && <div className="tlline"></div>}
+                <div className="tldot" style={{ background: ev.dot }} />
+                {i < wo.tl.length - 1 && <div className="tlline" />}
               </div>
               <div className="tlct">
                 <div className="tlev">{ev.ev}</div>

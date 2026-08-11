@@ -110,5 +110,19 @@
     "fault_mode": "outer_race_fault",
     "decision": "approved",
     "decided_at": "2026-08-11T06:00:42.855978+00:00"
+  },
+  {
+    "case_id": "ANOM-BRG_SYN_P223_DE-2026-07-12T20:00:00Z",
+    "asset_id": "AST_SYN_PMP_223",
+    "fault_mode": "lubrication_issue",
+    "decision": "approved",
+    "decided_at": "2026-08-11T07:49:08.607517+00:00"
+  },
+  {
+    "case_id": "ANOM-BRG_SYN_F411_DE-2026-07-13T20:00:00Z",
+    "asset_id": "AST_SYN_FAN_411",
+    "fault_mode": "inner_race_fault",
+    "decision": "approved",
+    "decided_at": "2026-08-11T07:56:49.472877+00:00"
   }
 ]

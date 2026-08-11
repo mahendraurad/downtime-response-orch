@@ -13,6 +13,7 @@ Endpoints:
   POST /api/chat                 persona-aware chat (intent classification + pipeline or LLM routing)
   GET  /api/assets               all assets from asset_master.json
   GET  /api/assets/{asset_id}    single asset detail
+  GET  /api/assets/{asset_id}/export/pre-repair  pre-repair sensor CSV download
   GET  /api/notifications/counts unread notification counts for all personas
   GET  /api/notifications/{persona_id}         persona notification inbox
   POST /api/notifications/{persona_id}/read    mark all notifications read
@@ -26,6 +27,8 @@ CORS is open for local dev (frontend HTML served from any origin).
 from __future__ import annotations
 
 import asyncio
+import csv
+import io
 import json
 import math
 import os
@@ -36,13 +39,13 @@ import time
 import uuid
 from copy import deepcopy
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, date, timezone
 from typing import Any, Dict, List, Optional, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from langsmith import traceable
 
@@ -66,6 +69,7 @@ from src.api.persona_formatter import format_for_persona
 from src.tools.data_loader import (
     list_telemetry_scenarios,
     load_asset_master,
+    load_bearing_master,
     load_demo_work_orders,
     load_fleet_scenario_map,
     load_telemetry_rows,
@@ -1895,6 +1899,80 @@ def get_asset(asset_id: str):
         raise
     except Exception as exc:
         raise HTTPException(500, str(exc))
+
+
+@app.get("/api/assets/{asset_id}/export/pre-repair")
+def export_pre_repair_data(asset_id: str, user: Dict = Depends(get_current_user)):
+    """Export pre-repair sensor readings and bearing baselines for an asset as CSV."""
+    fleet_map = load_fleet_scenario_map()          # display_id (upper) -> (canonical_id, scenario)
+    upper = asset_id.strip().upper()
+    entry = fleet_map.get(upper)
+    if not entry:
+        # also accept canonical asset_id (e.g. AST_MTR_001)
+        for disp, (cid, sc) in fleet_map.items():
+            if cid.upper() == upper:
+                entry = (cid, sc)
+                upper = disp
+                break
+    if not entry:
+        raise HTTPException(404, f"Asset '{asset_id}' not found in fleet map.")
+    canonical_id, scenario = entry
+
+    rows        = load_telemetry_rows(scenario)
+    by_bearing, _ = load_bearing_master()
+    asset_master  = load_asset_master()
+    asset = asset_master.get(canonical_id) or asset_master.get(canonical_id.upper())
+
+    fieldnames = [
+        "timestamp_utc", "display_asset_id", "asset_id", "bearing_id", "channel_id",
+        "rpm", "load_pct", "machine_state",
+        "vib_rms_mm_s", "vib_peak_g", "kurtosis", "temp_c",
+        "bpfo_energy", "bpfi_energy", "bsf_energy", "ftf_energy",
+        "motor_current_a", "voltage_v", "signal_quality_score",
+        "baseline_vib_rms_mean", "baseline_vib_rms_std",
+        "baseline_kurtosis_mean", "baseline_temp_mean", "baseline_bpfo_mean",
+        "iso_10816_zone", "asset_criticality",
+    ]
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=fieldnames, extrasaction="ignore")
+    writer.writeheader()
+    for row in rows:
+        bm = by_bearing.get(row.get("bearing_id", ""))
+        writer.writerow({
+            "timestamp_utc":         row.get("timestamp_utc", ""),
+            "display_asset_id":      upper,
+            "asset_id":              canonical_id,
+            "bearing_id":            row.get("bearing_id", ""),
+            "channel_id":            row.get("channel_id", ""),
+            "rpm":                   row.get("rpm", ""),
+            "load_pct":              row.get("load_pct", ""),
+            "machine_state":         row.get("machine_state", ""),
+            "vib_rms_mm_s":          row.get("vib_rms_mm_s", ""),
+            "vib_peak_g":            row.get("vib_peak_g", ""),
+            "kurtosis":              row.get("kurtosis", ""),
+            "temp_c":                row.get("temp_c", ""),
+            "bpfo_energy":           row.get("bpfo_energy", ""),
+            "bpfi_energy":           row.get("bpfi_energy", ""),
+            "bsf_energy":            row.get("bsf_energy", ""),
+            "ftf_energy":            row.get("ftf_energy", ""),
+            "motor_current_a":       row.get("motor_current_a", ""),
+            "voltage_v":             row.get("voltage_v", ""),
+            "signal_quality_score":  row.get("signal_quality_score", ""),
+            "baseline_vib_rms_mean": bm.baseline_vib_rms_mean if bm else "",
+            "baseline_vib_rms_std":  bm.baseline_vib_rms_std  if bm else "",
+            "baseline_kurtosis_mean":bm.baseline_kurtosis_mean if bm else "",
+            "baseline_temp_mean":    bm.baseline_temp_mean     if bm else "",
+            "baseline_bpfo_mean":    bm.baseline_bpfo_mean     if bm else "",
+            "iso_10816_zone":        getattr(asset, "iso_10816_zone", ""),
+            "asset_criticality":     getattr(asset, "criticality", ""),
+        })
+
+    filename = f"{upper}_pre-repair_{date.today().isoformat()}.csv"
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.get("/api/dashboard/assets")
