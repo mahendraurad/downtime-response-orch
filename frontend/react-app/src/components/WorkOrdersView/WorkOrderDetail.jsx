@@ -113,6 +113,7 @@ export default function WorkOrderDetail({ wo }) {
   const [checklist, setChecklist] = useState(() => wo ? wo.cl.map(item => ({ ...item })) : []);
   const [whyAnswer, setWhyAnswer] = useState(null);
   const [whyLoading, setWhyLoading] = useState(false);
+  const [whyBtnIdx, setWhyBtnIdx] = useState(null);
 
   // Sync checklist and reset why answer when wo changes
   React.useEffect(() => {
@@ -120,10 +121,12 @@ export default function WorkOrderDetail({ wo }) {
     setWhyAnswer(null);
   }, [wo && wo.id]);
 
-  async function handleWhyClick(q) {
+  async function handleWhyClick(q, btnIdx) {
     if (whyLoading) return;
-    if (whyAnswer !== null) { setWhyAnswer(null); return; }
+    if (whyBtnIdx === btnIdx && whyAnswer !== null) { setWhyAnswer(null); setWhyBtnIdx(null); return; }
     setWhyLoading(true);
+    setWhyBtnIdx(btnIdx);
+    setWhyAnswer(null);
     try {
       const woPrefix = wo
         ? `[Work Order: ${wo.id} | Title: ${wo.ti} | Asset: ${wo.as} | Status: ${wo.st} | Priority: ${wo.pr} | RUL: ${wo.rul} | Risk: ${wo.risk}]\n\n`
@@ -168,18 +171,23 @@ export default function WorkOrderDetail({ wo }) {
         <div className="wod-pacts">
           {acts.map((act, i) => {
             const alreadyApplied = act.newSt && (STATUS_ORDER[act.newSt] ?? 0) <= currentStatusOrder;
+            const isLoading = whyLoading && whyBtnIdx === i;
+            const tooltip = act.newSt
+              ? `Updates status to "${act.newSt}" · ${act.q}`
+              : act.q;
             return (
               <button
                 key={i}
                 className={`wpa ${act.cls}`}
-                disabled={alreadyApplied || (act.why && whyLoading)}
+                disabled={alreadyApplied || whyLoading}
+                title={tooltip}
                 style={alreadyApplied ? { opacity: 0.35, cursor: 'not-allowed' } : {}}
                 onClick={() => {
                   if (act.newSt) updateWOStatus(wo.id, act.newSt);
-                  if (act.why) handleWhyClick(act.q);
+                  handleWhyClick(act.q, i);
                 }}
               >
-                {act.why && whyLoading ? '…' : act.l}
+                {isLoading ? '…' : act.l}
               </button>
             );
           })}

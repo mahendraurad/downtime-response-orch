@@ -103,9 +103,31 @@ import ChatSidebar from './ChatSidebar';
 
 function mkId() { return `m-${Date.now()}-${Math.floor(Math.random() * 1000)}`; }
 
+// Builds asset-aware default chips using real fleet asset IDs.
+// Framing is persona-specific so each role gets a relevant starting question.
+function buildDefaultChips(persona, assets = []) {
+  const top = [...assets]
+    .sort((a, b) => (a.st === 'critical' ? -1 : b.st === 'critical' ? 1 : 0))
+    .slice(0, 2);
+  const a = top[0]?.id;
+  const b = top[1]?.id;
+  if (!a) return [];
+  const frames = {
+    supervisor:  [`Analyse asset ${a} completely`, `What is the run/defer risk for ${a}?`,         b ? `How does ${a} compare in urgency to ${b}?`       : `What is the production impact if ${a} fails?`],
+    engineer:    [`Analyse asset ${a} completely`, `What is the RUL basis and confidence for ${a}?`, b ? `Full fault diagnosis for ${b}`                   : `What fault modes are active on ${a}?`],
+    maintenance: [`Analyse asset ${a} completely`, `What parts and crew are needed for ${a}?`,      b ? `Optimal maintenance window for ${a} and ${b}?`   : `Inspection schedule for ${a}`],
+    manager:     [`Analyse asset ${a} completely`, `Financial exposure if ${a} fails unplanned?`,   b ? `Production impact: ${a} vs ${b}`                 : `OEE impact of deferring ${a} maintenance`],
+    executive:   [`Analyse asset ${a} completely`, `Financial exposure from top critical assets`,   b ? `Portfolio risk: ${a} and ${b}`                   : `Top risk assets and strategic exposure`],
+    ot:          [`Analyse asset ${a} completely`, `Which sensors are out of range on ${a}?`,       b ? `Signal health check for ${b}`                    : `Are there historian data gaps for ${a}?`],
+    safety:      [`Analyse asset ${a} completely`, `What LOTO requirements apply to ${a}?`,         b ? `Safety permits needed for ${b}?`                 : `Personnel risk assessment for ${a}`],
+    md:          [`Analyse asset ${a} completely`, `Board-level risk summary for ${a}`,             b ? `Approval decisions needed for ${a} and ${b}`     : `What decisions require escalation for ${a}?`],
+  };
+  return frames[persona] || [`Analyse asset ${a} completely`];
+}
+
 // Derives chips from the actual API response — no hardcoded asset names.
 // Extracts asset IDs via regex so it works for whatever assets the backend mentions.
-// Falls back to the persona's own tested quick-prompts, not generic fleet questions.
+// Falls back to asset-aware default chips, not generic fleet questions.
 function generateChipsFromResponse(d, fallbackQp) {
   const fullText = [d.response || '', d.headline || '', ...(d.details || []), ...(d.actions || [])].join(' ');
   const assetIds = [...new Set(fullText.match(/\b[A-Z]{1,3}-\d{3,4}\b/g) || [])].slice(0, 2);
@@ -143,7 +165,7 @@ export default function ChatView() {
   const [inputVal, setInputVal] = useState('');
   const [thinking, setThinking] = useState(false);
   const [livePipelineLog, setLivePipelineLog] = useState([]);
-  const [contextChips, setContextChips] = useState(() => resolvePersonaData(persona, fleetSummary, workOrders)?.qp?.slice(0, 3) || []);
+  const [contextChips, setContextChips] = useState(() => buildDefaultChips(persona, assets || []));
   const msgsRef = useRef(null);
   const inpRef = useRef(null);
   const conversationIdRef = useRef(null);
@@ -158,7 +180,7 @@ export default function ChatView() {
   // On persona switch: reset conversation, restore stored history or show home
   useEffect(() => {
     conversationIdRef.current = null;
-    setContextChips(resolvePersonaData(persona, fleetSummary, workOrders)?.qp?.slice(0, 3) || []);
+    setContextChips(buildDefaultChips(persona, assets || []));
     if (!messages || messages.length === 0) {
       renderChatHome();
     }
@@ -173,7 +195,7 @@ export default function ChatView() {
   useEffect(() => {
     const onlyHome = !messages?.some(message => message.type !== 'home');
     if (onlyHome) {
-      setContextChips(resolvePersonaData(persona, fleetSummary, workOrders)?.qp?.slice(0, 3) || []);
+      setContextChips(buildDefaultChips(persona, assets || []));
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [persona, fleetSummary.total, fleetSummary.critical, fleetSummary.warning, workOrders]);
@@ -331,7 +353,7 @@ export default function ChatView() {
 
         // Normal response — update sidebar state and generate follow-up chips from response content
         setLivePipelineLog(pl);
-        const chips = generateChipsFromResponse(d, p.qp.slice(0, 3));
+        const chips = generateChipsFromResponse(d, buildDefaultChips(persona, assets || []));
         setContextChips(chips);
         const details = d.details && d.details.length ? '<br><br>' + d.details.map(x => '• ' + x).join('<br>') : '';
         const actions = d.actions && d.actions.length ? '<br><br><strong>Actions:</strong><br>' + d.actions.map(x => '→ ' + x).join('<br>') : '';
@@ -1346,14 +1368,21 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
             {!resolved ? (
               <>
                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                  <button onClick={() => resolve(true)}
+                  <button
+                    onClick={() => resolve(true)}
+                    title="Approve the recommendation and trigger automated execution steps"
                     style={{ padding: '7px 18px', borderRadius: '6px', border: 'none', background: '#10b981', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: '12px' }}>
                     Approve &amp; Execute
                   </button>
-                  <button onClick={() => { setShowRejectInput(s => !s); setRejectCode(''); setRejectReason(''); }}
+                  <button
+                    onClick={() => { setShowRejectInput(s => !s); setRejectCode(''); setRejectReason(''); }}
+                    title="Reject this recommendation and log the reason"
                     style={{ padding: '7px 18px', borderRadius: '6px', border: '1px solid #ef4444', background: 'transparent', color: '#ef4444', fontWeight: 700, cursor: 'pointer', fontSize: '12px' }}>
                     {showRejectInput ? 'Cancel' : 'Reject'}
                   </button>
+                </div>
+                <div style={{ marginTop: '8px', fontSize: '10px', color: 'var(--t3)', fontFamily: 'var(--m)', letterSpacing: '.3px' }}>
+                  Execution authority: Plant Supervisor · Plant Manager · Maintenance Planner
                 </div>
 
                 {showRejectInput && (

@@ -245,6 +245,16 @@ Persona = Literal["supervisor", "engineer", "maintenance", "manager",
                   "executive", "md", "ot", "safety"]
 _PERSONAS = {"supervisor", "engineer", "maintenance", "manager",
              "executive", "md", "ot", "safety"}
+_PERSONA_LABELS = {
+    "supervisor":  "Plant Supervisor",
+    "engineer":    "Reliability Engineer",
+    "maintenance": "Maintenance Planner",
+    "manager":     "Plant Manager",
+    "executive":   "VP Operations",
+    "md":          "Managing Director",
+    "ot":          "OT / Controls",
+    "safety":      "Safety Officer",
+}
 
 
 _GENERAL_RAG = None
@@ -630,8 +640,8 @@ def auth_me(user: Dict = Depends(get_current_user)):
 
 
 # ── In-memory work-order store ────────────────────────────────────────────────
-# Seeded from deterministic demo data; executor-created orders are appended.
-_WORKORDERS: List[Dict] = load_demo_work_orders()
+# Starts empty; work orders are created in real time by the executor pipeline.
+_WORKORDERS: List[Dict] = []
 
 _WO_INDEX = {wo["id"]: wo for wo in _WORKORDERS}
 
@@ -676,9 +686,12 @@ def _public_context(context: Optional[Dict]) -> dict:
 
 def _authorize_hitl(persona: str, gate: str) -> None:
     if persona not in _PERSONAS:
-        raise HTTPException(422,f"Unknown persona: {persona}")
-    if persona not in set(_HITL_PERMISSIONS.get(gate,[])):
-        raise HTTPException(403,f"Persona '{persona}' is not permitted to resolve the {gate} gate.")
+        raise HTTPException(422, f"Unknown persona: {persona}")
+    permitted = _HITL_PERMISSIONS.get(gate, [])
+    if persona not in set(permitted):
+        labels = [_PERSONA_LABELS.get(p, p) for p in permitted]
+        who = " and ".join(labels) if len(labels) <= 2 else ", ".join(labels[:-1]) + " and " + labels[-1]
+        raise HTTPException(403, f"Only the {who} can resolve this gate. Please contact them to get this action taken.")
 
 
 def _claim_hitl(run_id: str, gate: str, action: str, allowed_actions: set[str],
