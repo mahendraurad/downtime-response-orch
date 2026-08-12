@@ -103,6 +103,22 @@ import ChatSidebar from './ChatSidebar';
 
 function mkId() { return `m-${Date.now()}-${Math.floor(Math.random() * 1000)}`; }
 
+function canResolveHITL(access, persona) {
+  return Array.isArray(access?.allowed_personas)
+    && access.allowed_personas.includes(persona);
+}
+
+function HITLReadOnlyNotice({ access }) {
+  const names = access?.allowed_persona_names || [];
+  const assigned = names.length > 0 ? names.join(' · ') : 'configured decision owner';
+  return (
+    <div style={{ padding: '8px 11px', borderRadius: '6px', border: '1px solid rgba(100,116,139,.3)', background: 'rgba(100,116,139,.07)', color: 'var(--t3)', fontSize: '10.5px', lineHeight: 1.6 }}>
+      <strong style={{ color: 'var(--t2)' }}>Read-only for this persona.</strong><br />
+      Decision controls are available to: {assigned}.
+    </div>
+  );
+}
+
 // Builds asset-aware default chips using real fleet asset IDs.
 // Framing is persona-specific so each role gets a relevant starting question.
 function buildDefaultChips(persona, assets = []) {
@@ -648,6 +664,7 @@ function AgentMsg({ msg, onSq }) {
 function HITLRemediationMsg({ msg, doThink, appendA, addMessage, persona }) {
   const [resolved, setResolved] = useState(false);
   const h = msg.data.hitl_required;
+  const canResolve = canResolveHITL(h.access, persona);
   const rid = h.run_id;
   const qPct = h.quality_score != null ? Math.round(h.quality_score * 100) + '%' : 'Low';
   const canImpute = h.imputable_fields && h.imputable_fields.length > 0;
@@ -696,7 +713,7 @@ function HITLRemediationMsg({ msg, doThink, appendA, addMessage, persona }) {
               <span dangerouslySetInnerHTML={{ __html: impFields }} />
             </div>
             <div style={{ fontSize: '11px', color: 'var(--t3)', marginBottom: '12px' }}>Choose how to handle this signal before the pipeline continues:</div>
-            {!resolved ? (
+            {!resolved && canResolve ? (
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                 <button disabled={!canImpute} onClick={() => resolve('IMPUTE')}
                   style={{ padding: '7px 16px', borderRadius: '6px', border: 'none', background: canImpute ? '#22c55e' : '#374151', color: '#fff', fontWeight: 700, cursor: canImpute ? 'pointer' : 'not-allowed', fontSize: '12px', opacity: canImpute ? 1 : 0.4 }}>
@@ -711,8 +728,10 @@ function HITLRemediationMsg({ msg, doThink, appendA, addMessage, persona }) {
                   Drop this signal
                 </button>
               </div>
-            ) : (
+            ) : resolved ? (
               <div style={{ fontSize: '11px', color: '#22c55e', fontWeight: 700 }}>✓ Decision made — pipeline resuming…</div>
+            ) : (
+              <HITLReadOnlyNotice access={h.access} />
             )}
           </div>
         </div>
@@ -724,6 +743,7 @@ function HITLRemediationMsg({ msg, doThink, appendA, addMessage, persona }) {
 function HITLAdvisoryMsg({ msg, doThink, appendA, persona }) {
   const [decision, setDecision] = useState(null);
   const h = msg.data.hitl_advisory;
+  const canResolve = canResolveHITL(h.access, persona);
 
   function resolve(action) {
     setDecision(action.toLowerCase());
@@ -752,7 +772,7 @@ function HITLAdvisoryMsg({ msg, doThink, appendA, persona }) {
               &ldquo;{h.advisory_note}&rdquo;
             </div>
             <div style={{ fontSize: '11px', color: 'var(--t3)', marginBottom: '10px' }}>Accept to include in the assessment, or reject to use deterministic rules only.</div>
-            {!decision ? (
+            {!decision && canResolve ? (
               <div style={{ display: 'flex', gap: '8px' }}>
                 <button onClick={() => resolve('ACCEPT')}
                   style={{ padding: '7px 16px', borderRadius: '6px', border: 'none', background: '#8b5cf6', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: '12px' }}>
@@ -765,8 +785,10 @@ function HITLAdvisoryMsg({ msg, doThink, appendA, persona }) {
               </div>
             ) : decision === 'accept' ? (
               <div style={{ fontSize: '11px', color: '#22c55e', fontWeight: 700 }}>✓ Advisory accepted — included in risk assessment</div>
-            ) : (
+            ) : decision ? (
               <div style={{ fontSize: '11px', color: '#6b7280', fontWeight: 700 }}>✗ Advisory rejected — deterministic rules result retained</div>
+            ) : (
+              <HITLReadOnlyNotice access={h.access} />
             )}
           </div>
         </div>
@@ -778,6 +800,8 @@ function HITLAdvisoryMsg({ msg, doThink, appendA, persona }) {
 function HITLMonitoringMsg({ msg, doThink, appendA, addMessage, persona }) {
   const [resolved, setResolved] = useState(false);
   const h = msg.data.hitl_monitoring;
+  const canResolve = canResolveHITL(h.access, persona);
+  const resolverNames = (h.access?.allowed_persona_names || []).join(' / ');
   const rid = h.run_id;
   const scorePct = h.anomaly_score != null ? (h.anomaly_score * 100).toFixed(0) + '%' : '—';
   const ewmaSignals = (h.ewma_triggered && h.ewma_triggered.length > 0) ? h.ewma_triggered.join(', ') : 'multiple signals';
@@ -816,7 +840,7 @@ function HITLMonitoringMsg({ msg, doThink, appendA, addMessage, persona }) {
           <div style={{ border: '1.5px solid #f59e0b', borderRadius: '10px', padding: '14px', background: 'rgba(245,158,11,0.06)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
               <span style={{ fontSize: '9px', fontWeight: 700, color: '#f59e0b', fontFamily: 'var(--m)' }}>HITL · MONITORING AGENT · Borderline EWMA Alert</span>
-              <span style={{ fontSize: '9px', fontWeight: 600, color: '#64748b', marginLeft: 'auto' }}>FOR: OT Controls / Supervisor</span>
+              <span style={{ fontSize: '9px', fontWeight: 600, color: '#64748b', marginLeft: 'auto' }}>FOR: {resolverNames || 'Configured resolver'}</span>
             </div>
             <strong style={{ color: 'var(--t)' }}>Borderline anomaly — operator confirmation required before fault diagnosis proceeds</strong>
             <div style={{ margin: '10px 0', fontSize: '12px', color: 'var(--t2)', lineHeight: '1.9' }}>
@@ -828,7 +852,7 @@ function HITLMonitoringMsg({ msg, doThink, appendA, addMessage, persona }) {
             <div style={{ fontSize: '11px', color: 'var(--t3)', marginBottom: '12px', padding: '8px', background: 'rgba(245,158,11,0.06)', borderRadius: '6px', borderLeft: '2px solid #f59e0b' }}>
               {h.reason || 'EWMA fired on a single signal dimension but the joint multivariate detector did not trigger, which may indicate a startup transient or sensor noise rather than a real bearing defect.'}
             </div>
-            {!resolved ? (
+            {!resolved && canResolve ? (
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                 <button onClick={() => resolve('SUPPRESS')}
                   style={{ padding: '7px 18px', borderRadius: '6px', border: 'none', background: '#f59e0b', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: '12px' }}>
@@ -839,8 +863,10 @@ function HITLMonitoringMsg({ msg, doThink, appendA, addMessage, persona }) {
                   Confirm — proceed with diagnosis
                 </button>
               </div>
-            ) : (
+            ) : resolved ? (
               <div style={{ fontSize: '11px', color: '#22c55e', fontWeight: 700 }}>✓ Decision made — pipeline resuming…</div>
+            ) : (
+              <HITLReadOnlyNotice access={h.access} />
             )}
           </div>
         </div>
@@ -852,6 +878,8 @@ function HITLMonitoringMsg({ msg, doThink, appendA, addMessage, persona }) {
 function HITLDiagnosisMsg({ msg, doThink, appendA, addMessage, persona }) {
   const [resolved, setResolved] = useState(false);
   const h = msg.data.hitl_diagnosis;
+  const canResolve = canResolveHITL(h.access, persona);
+  const resolverNames = (h.access?.allowed_persona_names || []).join(' / ');
   const rid = h.run_id;
   const confPct = h.confidence != null ? (h.confidence * 100).toFixed(0) + '%' : '—';
   const faultLabel = (h.fault_mode || 'unknown').replace(/_/g, ' ');
@@ -886,7 +914,7 @@ function HITLDiagnosisMsg({ msg, doThink, appendA, addMessage, persona }) {
           <div style={{ border: '1.5px solid #f97316', borderRadius: '10px', padding: '14px', background: 'rgba(249,115,22,0.06)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
               <span style={{ fontSize: '9px', fontWeight: 700, color: '#f97316', fontFamily: 'var(--m)' }}>HITL · FAILURE INTELLIGENCE AGENT · Low Confidence Classification</span>
-              <span style={{ fontSize: '9px', fontWeight: 600, color: '#64748b', marginLeft: 'auto' }}>FOR: Reliability Engineer</span>
+              <span style={{ fontSize: '9px', fontWeight: 600, color: '#64748b', marginLeft: 'auto' }}>FOR: {resolverNames || 'Configured resolver'}</span>
             </div>
             <strong style={{ color: 'var(--t)' }}>Low-confidence fault classification — engineer confirmation required before risk proceeds</strong>
             <div style={{ margin: '10px 0', fontSize: '12px', color: 'var(--t2)', lineHeight: '1.9' }}>
@@ -898,7 +926,7 @@ function HITLDiagnosisMsg({ msg, doThink, appendA, addMessage, persona }) {
               {h.narrative || 'Insufficient signal evidence for a conclusive fault classification.'}
             </div>
             <div style={{ fontSize: '11px', color: 'var(--t3)', marginBottom: '12px' }}>Confirm to proceed with this classification, or override to undetermined to trigger manual inspection.</div>
-            {!resolved ? (
+            {!resolved && canResolve ? (
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                 <button onClick={() => resolve('CONFIRM')}
                   style={{ padding: '7px 18px', borderRadius: '6px', border: 'none', background: '#f97316', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: '12px' }}>
@@ -909,8 +937,10 @@ function HITLDiagnosisMsg({ msg, doThink, appendA, addMessage, persona }) {
                   Override — mark undetermined
                 </button>
               </div>
-            ) : (
+            ) : resolved ? (
               <div style={{ fontSize: '11px', color: '#22c55e', fontWeight: 700 }}>✓ Decision made — pipeline resuming…</div>
+            ) : (
+              <HITLReadOnlyNotice access={h.access} />
             )}
           </div>
         </div>
@@ -922,6 +952,8 @@ function HITLDiagnosisMsg({ msg, doThink, appendA, addMessage, persona }) {
 function HITLKnowledgeMsg({ msg, doThink, appendA, persona }) {
   const [resolved, setResolved] = useState(false);
   const h = msg.data.hitl_knowledge;
+  const canResolve = canResolveHITL(h.access, persona);
+  const resolverNames = (h.access?.allowed_persona_names || []).join(' / ');
   const rid = h.run_id;
   const faultLabel = (h.fault_mode || 'unknown').replace(/_/g, ' ');
   const assetId = h.asset_id || 'unknown';
@@ -953,7 +985,7 @@ function HITLKnowledgeMsg({ msg, doThink, appendA, persona }) {
           <div style={{ border: '1.5px solid #06b6d4', borderRadius: '10px', padding: '14px', background: 'rgba(6,182,212,0.06)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
               <span style={{ fontSize: '9px', fontWeight: 700, color: '#06b6d4', fontFamily: 'var(--m)' }}>HITL · KNOWLEDGE AGENT · No SOP Found</span>
-              <span style={{ fontSize: '9px', fontWeight: 600, color: '#64748b', marginLeft: 'auto' }}>FOR: Safety Officer / Maintenance</span>
+              <span style={{ fontSize: '9px', fontWeight: 600, color: '#64748b', marginLeft: 'auto' }}>FOR: {resolverNames || 'Configured resolver'}</span>
             </div>
             <strong style={{ color: 'var(--t)' }}>No standard operating procedure found — manual SOP lookup required</strong>
             <div style={{ margin: '10px 0', fontSize: '12px', color: 'var(--t2)', lineHeight: '1.9' }}>
@@ -964,7 +996,7 @@ function HITLKnowledgeMsg({ msg, doThink, appendA, persona }) {
             <div style={{ fontSize: '11px', color: 'var(--t3)', marginBottom: '12px' }}>
               A Safety Officer or Maintenance lead must confirm the correct procedure before any work begins. Alternatively, accept and apply general site maintenance guidelines.
             </div>
-            {!resolved ? (
+            {!resolved && canResolve ? (
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                 <button onClick={() => resolve('FLAG_MANUAL')}
                   style={{ padding: '7px 18px', borderRadius: '6px', border: 'none', background: '#ef4444', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: '12px' }}>
@@ -975,8 +1007,10 @@ function HITLKnowledgeMsg({ msg, doThink, appendA, persona }) {
                   Proceed without SOP
                 </button>
               </div>
-            ) : (
+            ) : resolved ? (
               <div style={{ fontSize: '11px', color: '#22c55e', fontWeight: 700 }}>✓ Decision made — pipeline resuming…</div>
+            ) : (
+              <HITLReadOnlyNotice access={h.access} />
             )}
           </div>
         </div>
@@ -1128,6 +1162,7 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
   const [rejectReason, setRejectReason] = useState('');
   const { refreshNotifCounts, pushNotification, patchMessage, refreshWorkOrders } = useContext(AppContext);
   const rec = msg.rec;
+  const canResolve = canResolveHITL(rec.hitl_access, persona);
   const decisionSupport = rec.decision_support || {};
   const escalation = decisionSupport.approval_escalation || {};
   const escalationStageIndex = Number(msg.escalationStageIndex || 0);
@@ -1365,7 +1400,7 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
             )}
 
             {/* Action buttons + A5 rejection form */}
-            {!resolved ? (
+            {!resolved && canResolve ? (
               <>
                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                   <button
@@ -1420,6 +1455,8 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
                   </div>
                 )}
               </>
+            ) : !resolved ? (
+              <HITLReadOnlyNotice access={rec.hitl_access} />
             ) : msg.escalationTriggered ? (
               <div style={{ fontSize: '11px', color: '#f97316', fontWeight: 700 }}>
                 Escalated automatically to {msg.escalatedTo || escalationStep?.to_persona_name}

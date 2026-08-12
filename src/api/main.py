@@ -698,6 +698,56 @@ def _authorize_hitl(persona: str, gate: str) -> None:
         raise HTTPException(403, f"Only the {who} can resolve this gate. Please contact them to get this action taken.")
 
 
+def _hitl_access(gate: str, persona: str) -> Dict[str, Any]:
+    """Return the UI authorization contract from the backend permission source."""
+    permitted = list(dict.fromkeys(_HITL_PERMISSIONS.get(gate, [])))
+    permitted_names = [_PERSONA_LABELS.get(item, item) for item in permitted]
+    can_resolve = persona in set(permitted)
+    return {
+        "gate": gate,
+        "can_resolve": can_resolve,
+        "mode": "actionable" if can_resolve else "read_only",
+        "selected_persona": persona,
+        "allowed_personas": permitted,
+        "allowed_persona_names": permitted_names,
+        "message": (
+            "You can resolve this decision."
+            if can_resolve
+            else "Decision controls are hidden because this persona is not "
+                 "authorized to resolve this gate."
+        ),
+    }
+
+
+def _with_hitl_access(payload: Optional[Dict], gate: str,
+                      persona: str) -> Optional[Dict]:
+    """Attach read/action authorization without changing the gate evidence."""
+    if payload is None:
+        return None
+    result = dict(payload)
+    result["access"] = _hitl_access(gate, persona)
+    return result
+
+
+def _recommendation_payload(recommendation, persona: str) -> Optional[Dict]:
+    """Serialize a recommendation and attach its execution-gate permissions."""
+    if recommendation is None:
+        return None
+    try:
+        if hasattr(recommendation, "model_dump"):
+            result = recommendation.model_dump()
+        elif hasattr(recommendation, "to_dict"):
+            result = recommendation.to_dict()
+        elif isinstance(recommendation, dict):
+            result = dict(recommendation)
+        else:
+            return None
+    except Exception:
+        return None
+    result["hitl_access"] = _hitl_access("execution", persona)
+    return result
+
+
 def _claim_hitl(run_id: str, gate: str, action: str, allowed_actions: set[str],
                 persona: str, rationale: str = "") -> dict:
     """Validate a decision before consuming its one-shot HITL session."""
@@ -764,7 +814,10 @@ def _create_advisory_gate(run_id: str, risk, persona: str, blocked: bool = False
         return None
     _HITL_STORE[run_id]={"type":"advisory","risk_assessment":risk,
         "persona":persona,"created_at":time.time()}
-    return {"type":"advisory","advisory_note":risk.advisory_note,"run_id":run_id}
+    return _with_hitl_access(
+        {"type":"advisory","advisory_note":risk.advisory_note,"run_id":run_id},
+        "advisory", persona,
+    )
 
 # Confidence threshold below which the FI HITL gate fires (Agent 3)
 _DIAGNOSIS_CONFIDENCE_THRESHOLD = 0.60
@@ -839,20 +892,13 @@ def _build_hitl_gates(state: Dict, run_id: str, persona: str, intent: str) -> Di
     hitl_advisory = _create_advisory_gate(run_id, _risk, persona,
                     blocked=any((hitl_required,hitl_monitoring,hitl_diagnosis,hitl_knowledge)))
 
-    rec = state.get("recommendation")
-    recommendation = None
-    if rec is not None:
-        try:
-            recommendation = (rec.model_dump() if hasattr(rec,"model_dump")
-                              else rec.to_dict() if hasattr(rec,"to_dict") else None)
-        except Exception:
-            recommendation = None
+    recommendation = _recommendation_payload(state.get("recommendation"), persona)
 
     return {
-        "hitl_required":  hitl_required,
-        "hitl_monitoring":hitl_monitoring,
-        "hitl_diagnosis": hitl_diagnosis,
-        "hitl_knowledge": hitl_knowledge,
+        "hitl_required":  _with_hitl_access(hitl_required,"remediation",persona),
+        "hitl_monitoring":_with_hitl_access(hitl_monitoring,"monitoring",persona),
+        "hitl_diagnosis": _with_hitl_access(hitl_diagnosis,"diagnosis",persona),
+        "hitl_knowledge": _with_hitl_access(hitl_knowledge,"knowledge",persona),
         "hitl_advisory":  hitl_advisory,
         "recommendation": recommendation,
     }
@@ -1263,14 +1309,24 @@ def pipeline_run(req: PipelineRunRequest, user: Dict = Depends(get_current_user)
         knowledge_guidance=(None if (_mon_paused or _diag_paused)
                             else _to_dict(state.get("knowledge_guidance"))),
         recommendation=(None if (_mon_paused or _diag_paused)
-                        else _to_dict(state.get("recommendation"))),
+                        else _recommendation_payload(
+                            state.get("recommendation"), req.persona
+                        )),
         execution_result=_to_dict(state.get("execution_result")),
         learned_case=_to_dict(state.get("learned_case")),
-        hitl_required=hitl_required,
+        hitl_required=_with_hitl_access(
+            hitl_required, "remediation", req.persona
+        ),
         hitl_advisory=hitl_advisory,
-        hitl_monitoring=hitl_monitoring,
-        hitl_diagnosis=hitl_diagnosis,
-        hitl_knowledge=hitl_knowledge,
+        hitl_monitoring=_with_hitl_access(
+            hitl_monitoring, "monitoring", req.persona
+        ),
+        hitl_diagnosis=_with_hitl_access(
+            hitl_diagnosis, "diagnosis", req.persona
+        ),
+        hitl_knowledge=_with_hitl_access(
+            hitl_knowledge, "knowledge", req.persona
+        ),
     )
 
 
@@ -1390,8 +1446,12 @@ def hitl_remediation(req: HITLRemediationRequest, user: Dict = Depends(get_curre
         risk_assessment=None if _diag_paused else _to_dict(risk),
         knowledge_guidance=None if _diag_paused else _to_dict(knowledge),
         hitl_advisory=hitl_advisory if not _diag_paused else None,
-        hitl_diagnosis=hitl_diagnosis,
-        hitl_knowledge=hitl_knowledge,
+        hitl_diagnosis=_with_hitl_access(
+            hitl_diagnosis, "diagnosis", persona
+        ),
+        hitl_knowledge=_with_hitl_access(
+            hitl_knowledge, "knowledge", persona
+        ),
     )
 
 
@@ -1524,8 +1584,12 @@ def hitl_monitoring_resolution(req: HITLMonitoringRequest, user: Dict = Depends(
         risk_assessment=None if _diag_paused else _to_dict(risk),
         knowledge_guidance=None if _diag_paused else _to_dict(knowledge),
         hitl_advisory=hitl_advisory if not _diag_paused else None,
-        hitl_diagnosis=hitl_diagnosis,
-        hitl_knowledge=hitl_knowledge,
+        hitl_diagnosis=_with_hitl_access(
+            hitl_diagnosis, "diagnosis", persona
+        ),
+        hitl_knowledge=_with_hitl_access(
+            hitl_knowledge, "knowledge", persona
+        ),
     )
 
 
@@ -1627,7 +1691,9 @@ def hitl_diagnosis_resolution(req: HITLDiagnosisRequest, user: Dict = Depends(ge
         risk_assessment=_to_dict(risk),
         knowledge_guidance=_to_dict(knowledge),
         hitl_advisory=hitl_advisory,
-        hitl_knowledge=hitl_knowledge,
+        hitl_knowledge=_with_hitl_access(
+            hitl_knowledge, "knowledge", persona
+        ),
     )
 
 
