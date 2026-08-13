@@ -257,19 +257,31 @@ export function AppProvider({ children }) {
     }).catch(() => {});
   }, []);
 
-  const updateWOStatus = useCallback((id, newStatus) => {
+  const _PERSONA_DISPLAY = {
+    supervisor:  'Plant Supervisor',
+    engineer:    'Reliability Engineer',
+    maintenance: 'Maintenance Planner',
+    manager:     'Plant Manager',
+    executive:   'Executive',
+    ot:          'OT Controls Operator',
+    safety:      'Safety Officer',
+    md:          'Managing Director',
+  };
+
+  const updateWOStatus = useCallback((id, newStatus, actingPersona) => {
     const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const personaLabel = _PERSONA_DISPLAY[actingPersona] || actingPersona || 'Unknown';
     const dotColor = newStatus === 'Scheduled' ? 'var(--gn)'
       : newStatus === 'In Progress' ? 'var(--ac2)'
       : newStatus === 'Closed' ? 'var(--t3)'
       : 'var(--am)';
-    const timeEntry = { dot: dotColor, ev: `Status updated to ${newStatus}`, tm: `Today ${now}` };
+    const timeEntry = { dot: dotColor, ev: `Status → ${newStatus}`, by: personaLabel, tm: `Today ${now}` };
     const applyUpdate = wo => wo.id === id
       ? { ...wo, st: newStatus, tl: [timeEntry, ...(wo.tl || [])] }
       : wo;
     setWorkOrders(prev => prev.map(applyUpdate));
     setSelectedWO(prev => prev?.id === id ? applyUpdate(prev) : prev);
-    patchWorkOrder(id, { status: newStatus }).catch(() => {});
+    patchWorkOrder(id, { status: newStatus, updated_by: personaLabel }).catch(() => {});
   }, []);
 
   return (

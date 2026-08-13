@@ -1031,6 +1031,7 @@ class WOUpdateRequest(BaseModel):
     assigned_to: Optional[str] = None
     checklist_index: Optional[int] = None
     checklist_done: Optional[bool] = None
+    updated_by: Optional[str] = None
 
 
 class ExecutorRunRequest(BaseModel):
@@ -2301,6 +2302,15 @@ def update_workorder(wo_id: str, req: WOUpdateRequest):
         raise HTTPException(404, f"Work order '{wo_id}' not found.")
     if req.status:
         wo["status"] = req.status
+        if req.updated_by:
+            from datetime import datetime, timezone
+            wo["updated_by"] = req.updated_by
+            wo["updated_at"] = datetime.now(timezone.utc).isoformat()
+            wo.setdefault("status_log", []).append({
+                "status": req.status,
+                "by": req.updated_by,
+                "at": wo["updated_at"],
+            })
     if req.assigned_to:
         wo["assigned_to"] = req.assigned_to
     if req.checklist_index is not None and req.checklist_done is not None:

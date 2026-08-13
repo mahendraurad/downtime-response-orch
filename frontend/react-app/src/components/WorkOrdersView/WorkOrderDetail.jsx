@@ -268,7 +268,7 @@ export default function WorkOrderDetail({ wo }) {
                   title={act.newSt ? `Move this work order to "${act.newSt}"` : act.export ? 'Download pre-repair sensor data as CSV' : act.l}
                   style={alreadyApplied ? { opacity: 0.35, cursor: 'not-allowed' } : {}}
                   onClick={() => {
-                    if (act.newSt)   updateWOStatus(wo.id, act.newSt);
+                    if (act.newSt)   updateWOStatus(wo.id, act.newSt, persona);
                     if (act.export)  handleExport(wo.as);
                   }}
                 >
@@ -342,7 +342,7 @@ export default function WorkOrderDetail({ wo }) {
                 {i < wo.tl.length - 1 && <div className="tlline" />}
               </div>
               <div className="tlct">
-                <div className="tlev">{ev.ev}</div>
+                <div className="tlev">{ev.ev}{ev.by && <span style={{ color: 'var(--t3)', fontWeight: 400, marginLeft: '6px' }}>— {ev.by}</span>}</div>
                 <div className="tltm">{ev.tm}</div>
               </div>
             </div>
