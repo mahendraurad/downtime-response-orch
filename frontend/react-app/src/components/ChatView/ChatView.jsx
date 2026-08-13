@@ -662,7 +662,8 @@ function AgentMsg({ msg, onSq }) {
 }
 
 function HITLRemediationMsg({ msg, doThink, appendA, addMessage, persona }) {
-  const [resolved, setResolved] = useState(false);
+  const { patchMessage } = useContext(AppContext);
+  const [resolved, setResolved] = useState(() => !!msg.resolved);
   const h = msg.data.hitl_required;
   const canResolve = canResolveHITL(h.access, persona);
   const rid = h.run_id;
@@ -675,6 +676,7 @@ function HITLRemediationMsg({ msg, doThink, appendA, addMessage, persona }) {
 
   async function resolve(action) {
     setResolved(true);
+    patchMessage(msg.id, { resolved: true });
     doThink(async () => {
       try {
         const data = await resolveHITLRemediation(rid, action, persona);
@@ -741,18 +743,21 @@ function HITLRemediationMsg({ msg, doThink, appendA, addMessage, persona }) {
 }
 
 function HITLAdvisoryMsg({ msg, doThink, appendA, persona }) {
-  const [decision, setDecision] = useState(null);
+  const { patchMessage } = useContext(AppContext);
+  const [decision, setDecision] = useState(() => msg.decision || null);
   const h = msg.data.hitl_advisory;
   const canResolve = canResolveHITL(h.access, persona);
 
   function resolve(action) {
     setDecision(action.toLowerCase());
+    patchMessage(msg.id, { decision: action.toLowerCase() });
     doThink(async () => {
       try {
         const data = await resolveHITLAdvisory(h.run_id, action, persona);
         appendA(`LLM advisory ${data.status}. Deterministic risk and RUL values were unchanged.`, ['predictive risk', 'HITL']);
       } catch (err) {
         setDecision(null);
+        patchMessage(msg.id, { decision: null });
         appendA('Advisory HITL resolution failed: ' + err.message, []);
       }
     });
@@ -798,7 +803,8 @@ function HITLAdvisoryMsg({ msg, doThink, appendA, persona }) {
 }
 
 function HITLMonitoringMsg({ msg, doThink, appendA, addMessage, persona }) {
-  const [resolved, setResolved] = useState(false);
+  const { patchMessage } = useContext(AppContext);
+  const [resolved, setResolved] = useState(() => !!msg.resolved);
   const h = msg.data.hitl_monitoring;
   const canResolve = canResolveHITL(h.access, persona);
   const resolverNames = (h.access?.allowed_persona_names || []).join(' / ');
@@ -808,6 +814,7 @@ function HITLMonitoringMsg({ msg, doThink, appendA, addMessage, persona }) {
 
   async function resolve(action) {
     setResolved(true);
+    patchMessage(msg.id, { resolved: true });
     doThink(async () => {
       try {
         const data = await resolveHITLMonitoring(rid, action, persona);
@@ -876,7 +883,8 @@ function HITLMonitoringMsg({ msg, doThink, appendA, addMessage, persona }) {
 }
 
 function HITLDiagnosisMsg({ msg, doThink, appendA, addMessage, persona }) {
-  const [resolved, setResolved] = useState(false);
+  const { patchMessage } = useContext(AppContext);
+  const [resolved, setResolved] = useState(() => !!msg.resolved);
   const h = msg.data.hitl_diagnosis;
   const canResolve = canResolveHITL(h.access, persona);
   const resolverNames = (h.access?.allowed_persona_names || []).join(' / ');
@@ -887,6 +895,7 @@ function HITLDiagnosisMsg({ msg, doThink, appendA, addMessage, persona }) {
 
   async function resolve(action) {
     setResolved(true);
+    patchMessage(msg.id, { resolved: true });
     doThink(async () => {
       try {
         const data = await resolveHITLDiagnosis(rid, action, persona);
@@ -950,7 +959,8 @@ function HITLDiagnosisMsg({ msg, doThink, appendA, addMessage, persona }) {
 }
 
 function HITLKnowledgeMsg({ msg, doThink, appendA, persona }) {
-  const [resolved, setResolved] = useState(false);
+  const { patchMessage } = useContext(AppContext);
+  const [resolved, setResolved] = useState(() => !!msg.resolved);
   const h = msg.data.hitl_knowledge;
   const canResolve = canResolveHITL(h.access, persona);
   const resolverNames = (h.access?.allowed_persona_names || []).join(' / ');
@@ -960,6 +970,7 @@ function HITLKnowledgeMsg({ msg, doThink, appendA, persona }) {
 
   async function resolve(action) {
     setResolved(true);
+    patchMessage(msg.id, { resolved: true });
     doThink(async () => {
       try {
         const data = await resolveHITLKnowledge(rid, action, persona);
