@@ -155,37 +155,44 @@ const WO_PERSONA_ACTS = {
 export default function WorkOrderDetail({ wo }) {
   const { persona, updateWOStatus } = useContext(AppContext);
   const [checklist, setChecklist]   = useState(() => wo ? wo.cl.map(item => ({ ...item })) : []);
-  const [chipAnswer, setChipAnswer] = useState(null);
+  const [chipAnswers, setChipAnswers] = useState({});
   const [chipLoading, setChipLoading] = useState(false);
-  const [activeChipIdx, setActiveChipIdx] = useState(null);
+  const [activeChipIdxs, setActiveChipIdxs] = useState({});
+  const [loadingForPersona, setLoadingForPersona] = useState(null);
+  const chipAnswer = chipAnswers[persona] ?? null;
+  const activeChipIdx = activeChipIdxs[persona] ?? null;
+  const isThinking = chipLoading && loadingForPersona === persona;
   const [exporting, setExporting]   = useState(false);
 
   React.useEffect(() => {
     if (wo) setChecklist(wo.cl.map(item => ({ ...item })));
-    setChipAnswer(null);
-    setActiveChipIdx(null);
+    setChipAnswers({});
+    setActiveChipIdxs({});
   }, [wo && wo.id]);
 
   async function handleChipClick(q, idx) {
     if (chipLoading) return;
     if (activeChipIdx === idx && chipAnswer !== null) {
-      setChipAnswer(null);
-      setActiveChipIdx(null);
+      setChipAnswers(prev => ({ ...prev, [persona]: null }));
+      setActiveChipIdxs(prev => ({ ...prev, [persona]: null }));
       return;
     }
+    const callingPersona = persona;
     setChipLoading(true);
-    setActiveChipIdx(idx);
-    setChipAnswer(null);
+    setLoadingForPersona(callingPersona);
+    setActiveChipIdxs(prev => ({ ...prev, [callingPersona]: idx }));
+    setChipAnswers(prev => ({ ...prev, [callingPersona]: null }));
     try {
       const prefix = wo
         ? `[Work Order: ${wo.id} | Asset: ${wo.as} | Status: ${wo.st} | Priority: ${wo.pr} | RUL: ${wo.rul} | Risk: ${wo.risk}]\n\n`
         : '';
-      const data = await askChat({ message: prefix + q, persona });
-      setChipAnswer(data.response || data.message || 'No answer returned.');
+      const data = await askChat({ message: prefix + q, persona: callingPersona });
+      setChipAnswers(prev => ({ ...prev, [callingPersona]: data.response || data.message || 'No answer returned.' }));
     } catch {
-      setChipAnswer('Could not fetch answer. Please try again.');
+      setChipAnswers(prev => ({ ...prev, [callingPersona]: 'Could not fetch answer. Please try again.' }));
     } finally {
       setChipLoading(false);
+      setLoadingForPersona(null);
     }
   }
 
@@ -282,16 +289,16 @@ export default function WorkOrderDetail({ wo }) {
                 disabled={chipLoading}
                 onClick={() => handleChipClick(q, i)}
               >
-                {chipLoading && activeChipIdx === i ? '…' : q}
+                {isThinking && activeChipIdx === i ? '…' : q}
               </button>
             ))}
           </div>
         )}
 
         {/* Inline AI answer */}
-        {(chipLoading || chipAnswer) && (
+        {(isThinking || chipAnswer) && (
           <div style={{ margin: '10px 0 0', padding: '12px 14px', borderRadius: '8px', background: 'var(--sf)', border: '1px solid var(--b)', borderLeft: '3px solid var(--ac2)', fontSize: '12px', color: 'var(--t2)', lineHeight: '1.7' }}>
-            {chipLoading
+            {isThinking
               ? <span style={{ color: 'var(--t3)', fontStyle: 'italic' }}>Agent thinking…</span>
               : chipAnswer}
           </div>
