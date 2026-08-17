@@ -238,7 +238,11 @@ function OverviewPanel({ asset, persona, states, selectedNode, node, state, pipe
   const nodeOut = liveOut || staticOut;
 
   const liveKPIs = buildLiveKPIs(selectedNode, pipelineResult, storedState);
-  const kpis = liveKPIs || node.kpis;
+  // Executor (6) and learning (7) have misleading hardcoded KPIs (WO-2024-1847 etc).
+  // Never show static fallback for those — only real live/stored data.
+  const kpis = liveKPIs || (state.s !== 'ni' && selectedNode < 6 ? node.kpis : null);
+  const kpisFromChat = !pipelineResult && liveKPIs != null && storedState?.status === 'approved';
+  const kpisLabel = (pipelineResult && liveKPIs) ? '· LIVE' : kpisFromChat ? '· CHAT APPROVAL' : kpis ? '· STATIC' : null;
   const nodeEntry = getLogEntry(pipelineResult, selectedNode);
 
   return (
@@ -343,17 +347,25 @@ function OverviewPanel({ asset, persona, states, selectedNode, node, state, pipe
         </div>
 
         {/* KPIs */}
-        <div style={{ fontSize: '10px', fontWeight: 600, color: 'var(--t3)', fontFamily: 'var(--m)', marginBottom: '6px' }}>
-          KPIs {pipelineResult && liveKPIs ? '· LIVE' : '· STATIC'}
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px', marginBottom: nodeOut ? '10px' : 0 }}>
-          {Object.entries(kpis).map(([k, v]) => (
-            <div key={k} className="dc">
-              <div className="dcl">{k}</div>
-              <div className="dcv" style={{ fontSize: '11px' }}>{v}</div>
+        {kpis ? (
+          <>
+            <div style={{ fontSize: '10px', fontWeight: 600, color: kpisFromChat ? '#10b981' : 'var(--t3)', fontFamily: 'var(--m)', marginBottom: '6px' }}>
+              KPIs {kpisLabel}
             </div>
-          ))}
-        </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5px', marginBottom: nodeOut ? '10px' : 0 }}>
+              {Object.entries(kpis).map(([k, v]) => (
+                <div key={k} className="dc">
+                  <div className="dcl">{k}</div>
+                  <div className="dcv" style={{ fontSize: '11px' }}>{v}</div>
+                </div>
+              ))}
+            </div>
+          </>
+        ) : (
+          <div style={{ fontSize: '11px', color: 'var(--t3)', fontStyle: 'italic', padding: '8px 10px', background: 'var(--sf)', borderRadius: '6px', marginBottom: nodeOut ? '10px' : 0 }}>
+            Agent is on standby — metrics will appear after execution.
+          </div>
+        )}
 
         {/* Node output */}
         {nodeOut && (

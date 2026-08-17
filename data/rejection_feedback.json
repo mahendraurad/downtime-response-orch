@@ -131,5 +131,12 @@
     "fault_mode": "outer_race_fault",
     "decision": "approved",
     "decided_at": "2026-08-13T12:27:16.597299+00:00"
+  },
+  {
+    "case_id": "ANOM-BRG_001-2026-05-20T12:00:00Z",
+    "asset_id": "AST_MTR_001",
+    "fault_mode": "outer_race_fault",
+    "decision": "approved",
+    "decided_at": "2026-08-17T11:57:15.439849+00:00"
   }
 ]

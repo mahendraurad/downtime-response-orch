@@ -36,13 +36,14 @@ const panelToggleBtn = {
 };
 
 export default function PersonaPanel() {
-  const { persona, setPersona, notifCounts, refreshNotifCounts, setShowLeftPanel } = useContext(AppContext);
+  const { persona, setPersona, notifCounts, refreshNotifCounts, localNotifCounts, clearLocalNotif, setShowLeftPanel } = useContext(AppContext);
   const { user, logout } = useAuth();
   const allowedPersonas = user?.allowed_personas || [];
 
   function handleSelect(pid) {
     setPersona(pid);
     window.dispatchEvent(new CustomEvent('dro-persona-change', { detail: pid }));
+    clearLocalNotif(pid);
     if (notifCounts[pid] > 0) {
       markNotifRead(pid).then(refreshNotifCounts).catch(() => {});
     }
@@ -89,7 +90,7 @@ export default function PersonaPanel() {
             {visibleItems.map(item => {
               const pd = PD[item.id];
               const isActive = persona === item.id;
-              const count = notifCounts[item.id] || 0;
+              const count = (notifCounts[item.id] || 0) + (localNotifCounts[item.id] || 0);
               return (
                 <div
                   key={item.id}

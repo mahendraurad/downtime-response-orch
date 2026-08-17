@@ -108,6 +108,13 @@ function canResolveHITL(access, persona) {
     && access.allowed_personas.includes(persona);
 }
 
+const PERSONA_DISPLAY_NAMES = {
+  supervisor: 'Plant Supervisor', engineer: 'Reliability Engineer',
+  maintenance: 'Maintenance Planner', manager: 'Plant Manager',
+  executive: 'Executive', ot: 'OT Controls Operator',
+  safety: 'Safety Officer', md: 'Managing Director',
+};
+
 function HITLReadOnlyNotice({ access }) {
   const names = access?.allowed_persona_names || [];
   const assigned = names.length > 0 ? names.join(' · ') : 'configured decision owner';
@@ -119,12 +126,41 @@ function HITLReadOnlyNotice({ access }) {
   );
 }
 
+function buildAssetSessionSummary(assetId, stored) {
+  const rows = [];
+  if (stored.remediationAction) {
+    const label = stored.remediationAction === 'IMPUTE' ? 'Imputed from baseline' : stored.remediationAction === 'DROP' ? 'Signal dropped' : 'Kept with quality flag';
+    rows.push(`Signal quality gate: <strong>${label}</strong>`);
+  }
+  if (stored.monitoringStatus) {
+    rows.push(`Anomaly review: <strong>${stored.monitoringStatus === 'suppressed' ? 'Suppressed — no fault analysis' : 'Confirmed — proceeded with diagnosis'}</strong>`);
+  }
+  if (stored.diagnosisStatus) {
+    const dl = stored.diagnosisStatus === 'confirmed' ? `Confirmed — ${stored.diagnosisFaultLabel || 'fault classified'}` : 'Overridden to undetermined';
+    rows.push(`Fault classification: <strong>${dl}</strong>`);
+  }
+  if (stored.status === 'approved') {
+    rows.push(`Execution: <strong style="color:#10b981">Approved — WO ${stored.woId || 'created'}</strong> by ${stored.approvedBy || 'approver'}`);
+  } else if (stored.status === 'rejected') {
+    rows.push(`Execution: <strong style="color:#ef4444">Rejected</strong> by ${stored.rejectedBy || 'approver'}`);
+  }
+  return `<div style="border:1.5px solid #3b82f6;border-radius:10px;padding:14px;background:rgba(59,130,246,0.04)">`
+    + `<div style="font-size:9px;font-weight:700;color:#3b82f6;font-family:var(--m);margin-bottom:8px">SESSION CACHE · ${assetId}</div>`
+    + `<strong style="color:var(--t)">This asset has already been processed in this session.</strong>`
+    + `<div style="margin-top:10px;font-size:12px;color:var(--t2);line-height:2">${rows.map(r => '• ' + r).join('<br>')}</div>`
+    + `<div style="margin-top:10px;font-size:11px;color:var(--t3)">Ask for a <strong>fresh analysis</strong> to re-run the pipeline, or ask a specific follow-up question.</div>`
+    + `</div>`;
+}
+
 // Builds asset-aware default chips using real fleet asset IDs.
 // Framing is persona-specific so each role gets a relevant starting question.
-function buildDefaultChips(persona, assets = []) {
-  const top = [...assets]
-    .sort((a, b) => (a.st === 'critical' ? -1 : b.st === 'critical' ? 1 : 0))
-    .slice(0, 2);
+function buildDefaultChips(persona, assets = [], priorityAssetId = null) {
+  let sorted = [...assets].sort((a, b) => (a.st === 'critical' ? -1 : b.st === 'critical' ? 1 : 0));
+  if (priorityAssetId) {
+    const pri = sorted.find(a => a.id === priorityAssetId);
+    if (pri) sorted = [pri, ...sorted.filter(a => a.id !== priorityAssetId)];
+  }
+  const top = sorted.slice(0, 2);
   const a = top[0]?.id;
   const b = top[1]?.id;
   if (!a) return [];
@@ -168,6 +204,39 @@ function generateChipsFromResponse(d, fallbackQp) {
 
   // No specific assets found — fall back to persona's own tested quick-prompts
   return fallbackQp;
+}
+
+function buildComparisonHtml(a1, a2, persona) {
+  const SP = { critical: 3, warning: 2, healthy: 1 };
+  const p1 = SP[a1.st] || 0, p2 = SP[a2.st] || 0;
+  const uColor = { critical: 'var(--rd)', warning: 'var(--am)', healthy: 'var(--gn)' };
+
+  const row = (label, v1, v2) => `<div style="display:grid;grid-template-columns:120px 1fr 1fr;gap:6px;padding:5px 0;border-bottom:1px solid var(--b);font-size:11.5px">` +
+    `<span style="color:var(--t3);font-weight:600">${label}</span>` +
+    `<span style="color:var(--t)">${v1 || '—'}</span>` +
+    `<span style="color:var(--t)">${v2 || '—'}</span></div>`;
+
+  let html = `<strong style="color:var(--t)">${a1.id} vs ${a2.id} — Fleet Comparison</strong><br><br>`;
+  html += `<div style="display:grid;grid-template-columns:120px 1fr 1fr;gap:6px;padding:4px 0;font-size:10px;font-weight:700;color:var(--t3);font-family:var(--m);border-bottom:2px solid var(--b)"><span></span><span>${a1.id}</span><span>${a2.id}</span></div>`;
+  html += row('Status', `<strong style="color:${uColor[a1.st]}">${(a1.st||'').toUpperCase()}</strong>`, `<strong style="color:${uColor[a2.st]}">${(a2.st||'').toUpperCase()}</strong>`);
+  html += row('RUL', a1.rul, a2.rul);
+  html += row('Vibration', a1.vib != null ? `${a1.vib} mm/s` : null, a2.vib != null ? `${a2.vib} mm/s` : null);
+  html += row('Temperature', a1.tmp != null ? `${a1.tmp}°C` : null, a2.tmp != null ? `${a2.tmp}°C` : null);
+  html += row('BPFO', a1.bpfo != null ? `${a1.bpfo}×` : null, a2.bpfo != null ? `${a2.bpfo}×` : null);
+
+  const f1 = a1.faults?.[0], f2 = a2.faults?.[0];
+  if (f1 || f2) html += row('Active fault', f1 ? `${f1.ty} (${f1.st})` : 'None', f2 ? `${f2.ty} (${f2.st})` : 'None');
+
+  html += `<br>`;
+  if (p1 !== p2) {
+    const primary = p1 > p2 ? a1 : a2;
+    html += `<strong>Verdict:</strong> <strong style="color:${uColor[primary.st]}">${primary.id}</strong> requires priority attention — ${primary.st} status`;
+    if (primary.rul) html += `, RUL ${primary.rul}`;
+    html += `. Run a full analysis to get an action plan.`;
+  } else {
+    html += `Both assets are at the same severity level. Run individual analyses for detailed recommendations.`;
+  }
+  return html;
 }
 
 export default function ChatView() {
@@ -342,6 +411,45 @@ export default function ChatView() {
 
     doThink(async () => {
       try {
+        // Intercept multi-asset comparison queries — answer from fleet state without backend
+        const queryAssetIds = [...new Set(t.match(/\b[A-Z]{1,3}-\d{3,4}\b/g) || [])];
+        if (queryAssetIds.length >= 2 && /\bcompare\b|\bvs\.?\b|\bversus\b|\bagainst\b|\bbetween\b/i.test(t)) {
+          const ca1 = (assets || []).find(a => a.id === queryAssetIds[0]);
+          const ca2 = (assets || []).find(a => a.id === queryAssetIds[1]);
+          if (ca1 && ca2) {
+            const cmpChips = buildDefaultChips(persona, assets || []);
+            setContextChips(cmpChips);
+            appendA(buildComparisonHtml(ca1, ca2, persona), ['fleet intelligence · comparison'], cmpChips, []);
+            return;
+          }
+        }
+
+        // Session cache — resolve BEFORE calling backend so we never re-fire HITL gates
+        // for assets that have already been actioned in this session.
+        const queriedAsset = queryAssetIds[0] || null;
+        const backendAssetId = queriedAsset ? (assets || []).find(a => a.id === queriedAsset)?.asset_id : null;
+        // Read from sessionStorage directly so we always get the latest value regardless of
+        // React closure staleness (state batch may not have committed to this render yet).
+        const rawPipelineStore = (() => {
+          try { const r = sessionStorage.getItem('dro-asset-pipeline'); return r ? JSON.parse(r) : {}; } catch { return {}; }
+        })();
+        const storedForAsset = (backendAssetId && rawPipelineStore[backendAssetId])
+          || (queriedAsset && rawPipelineStore[queriedAsset])
+          || null;
+        const isFreshRequest = /\bfresh\b|\bre-?run\b|\bre-?analys|\bre-?analyze\b|\boverride\b/i.test(t);
+        const hasSessionState = !isFreshRequest && storedForAsset && (
+          storedForAsset.status || storedForAsset.monitoringStatus
+          || storedForAsset.diagnosisStatus || storedForAsset.remediationAction
+        );
+        // If a pipeline query targets a processed asset, show session cache immediately
+        const isPipelineQuery = /\banalys|\binspect|\bcheck|\bdiagnos|\bassess|\brun\b|\bfull\b|\bpipeline\b|\bstatus\b/i.test(t);
+        if (hasSessionState && queriedAsset && isPipelineQuery) {
+          const chips = buildDefaultChips(persona, assets || [], queriedAsset);
+          setContextChips(chips);
+          appendA(buildAssetSessionSummary(queriedAsset, storedForAsset), ['session · cached'], chips, []);
+          return;
+        }
+
         const d = await askChat({
           message: t,
           persona: options.requestedPersona || persona,
@@ -353,17 +461,42 @@ export default function ChatView() {
         const pl = withFallbackTimings(d.pipeline_log || []);
         const routes = pl.map(n => n.node ? n.node.replace(/_/g, ' ') : '');
 
-        // HITL blocking gates — show card and stop rendering the response
+        // HITL blocking gates — also gate-block with session cache in case a non-pipeline
+        // query still triggers a HITL for an asset already processed this session.
         if (d.hitl_required?.type === 'remediation') {
-          addMessage({ id: mkId(), type: 'hitl_remediation', data: d, scenario: null, persona, time: ts() });
+          if (hasSessionState) {
+            const chips = buildDefaultChips(persona, assets || [], queriedAsset);
+            setContextChips(chips);
+            appendA(buildAssetSessionSummary(queriedAsset || backendAssetId, storedForAsset), ['session · cached'], chips, []);
+            return;
+          }
+          const chips = buildDefaultChips(persona, assets || [], queriedAsset);
+          setContextChips(chips);
+          addMessage({ id: mkId(), type: 'hitl_remediation', data: d, scenario: null, persona, queriedAsset, chips, time: ts() });
           return;
         }
         if (d.hitl_monitoring) {
-          addMessage({ id: mkId(), type: 'hitl_monitoring', data: d, scenario: null, persona, time: ts() });
+          if (hasSessionState) {
+            const chips = buildDefaultChips(persona, assets || [], queriedAsset);
+            setContextChips(chips);
+            appendA(buildAssetSessionSummary(queriedAsset || backendAssetId, storedForAsset), ['session · cached'], chips, []);
+            return;
+          }
+          const chips = buildDefaultChips(persona, assets || [], queriedAsset);
+          setContextChips(chips);
+          addMessage({ id: mkId(), type: 'hitl_monitoring', data: d, scenario: null, persona, queriedAsset, chips, time: ts() });
           return;
         }
         if (d.hitl_diagnosis) {
-          addMessage({ id: mkId(), type: 'hitl_diagnosis', data: d, scenario: null, persona, time: ts() });
+          if (hasSessionState) {
+            const chips = buildDefaultChips(persona, assets || [], queriedAsset);
+            setContextChips(chips);
+            appendA(buildAssetSessionSummary(queriedAsset || backendAssetId, storedForAsset), ['session · cached'], chips, []);
+            return;
+          }
+          const chips = buildDefaultChips(persona, assets || [], queriedAsset);
+          setContextChips(chips);
+          addMessage({ id: mkId(), type: 'hitl_diagnosis', data: d, scenario: null, persona, queriedAsset, chips, time: ts() });
           return;
         }
 
@@ -671,12 +804,29 @@ function AgentMsg({ msg, onSq }) {
   );
 }
 
-function HITLRemediationMsg({ msg, doThink, appendA, addMessage, persona }) {
-  const { patchMessage } = useContext(AppContext);
+function HITLRemediationMsg({ msg, onSq, doThink, appendA, addMessage, persona }) {
+  const { patchMessage, pushNotification, updateAssetPipelineState } = useContext(AppContext);
   const [resolved, setResolved] = useState(() => !!msg.resolved);
+  const [forwarded, setForwarded] = useState(() => !!msg.forwarded);
   const h = msg.data.hitl_required;
   const canResolve = canResolveHITL(h.access, persona);
   const rid = h.run_id;
+
+  function handleForward() {
+    const targetPersona = h.access?.allowed_personas?.[0];
+    const targetPersonaName = h.access?.allowed_persona_names?.[0] || targetPersona || 'Responsible Approver';
+    const senderName = PERSONA_DISPLAY_NAMES[persona] || persona;
+    setForwarded(true);
+    patchMessage(msg.id, { forwarded: true, forwardedTo: targetPersonaName });
+    if (targetPersona) {
+      pushNotification(targetPersona, {
+        id: mkId(), type: 'agent',
+        html: `<div style="border:1.5px solid #3b82f6;border-radius:8px;padding:10px 12px;background:rgba(59,130,246,0.05)"><div style="font-size:9px;font-weight:700;color:#3b82f6;font-family:var(--m);margin-bottom:5px">FORWARDED HITL — DATA FOUNDATION</div><strong style="color:var(--t)">${senderName} has forwarded a signal quality gate request to you.</strong><br><span style="font-size:11px;color:var(--t2)">A sensor signal requires your decision before analysis can continue. See the card below.</span></div>`,
+        routes: ['data foundation · forwarded request'], chips: [], time: ts(),
+      });
+      pushNotification(targetPersona, { id: mkId(), type: 'hitl_remediation', data: msg.data, scenario: msg.scenario, persona: targetPersona, requestingPersona: persona, time: ts() });
+    }
+  }
   const qPct = h.quality_score != null ? Math.round(h.quality_score * 100) + '%' : 'Low';
   const canImpute = h.imputable_fields && h.imputable_fields.length > 0;
   const impFields = canImpute
@@ -697,11 +847,23 @@ function HITLRemediationMsg({ msg, doThink, appendA, addMessage, persona }) {
           + data.details.map(d => '• ' + d).join('<br>')
           + (data.actions && data.actions.length ? '<br><br><strong>Recommended actions:</strong><br>' + data.actions.map(a => '→ ' + a).join('<br>') : '');
         appendA(html, data.pipeline_log ? data.pipeline_log.map(n => n.node ? n.node.replace(/_/g, ' ') : '') : []);
+        if (msg.queriedAsset) {
+          updateAssetPipelineState(msg.queriedAsset, { remediationAction: action, remediationResolvedBy: persona });
+        }
         if (data.hitl_advisory && data.hitl_advisory.advisory_note) {
           addMessage({ id: mkId(), type: 'hitl_advisory', data, time: ts() });
         }
         if (data.recommendation && data.recommendation.recommendation_status === 'ok') {
           addMessage({ id: mkId(), type: 'hitl_executor', rec: data.recommendation, time: ts() });
+        }
+        if (msg.requestingPersona) {
+          const actorName = PERSONA_DISPLAY_NAMES[persona] || persona;
+          const actionLabel = action === 'IMPUTE' ? 'Imputed from baseline' : action === 'DROP' ? 'Signal dropped' : 'Kept with quality flag';
+          pushNotification(msg.requestingPersona, {
+            id: mkId(), type: 'agent',
+            html: `<div style="border:1.5px solid #22c55e;border-radius:8px;padding:10px 12px;background:rgba(34,197,94,0.05)"><div style="font-size:9px;font-weight:700;color:#22c55e;font-family:var(--m);margin-bottom:5px">✓ FORWARDED REQUEST — RESOLVED</div><strong style="color:var(--t)">Your forwarded signal quality gate was resolved by ${actorName}.</strong><br><span style="font-size:11px;color:var(--t2)">Decision: <strong>${actionLabel}</strong> — pipeline has resumed. You can continue your analysis.</span></div>`,
+            routes: ['data foundation · forwarded result'], chips: [], time: ts(),
+          });
         }
       } catch (err) {
         appendA('HITL resolution failed: ' + err.message, []);
@@ -742,11 +904,31 @@ function HITLRemediationMsg({ msg, doThink, appendA, addMessage, persona }) {
               </div>
             ) : resolved ? (
               <div style={{ fontSize: '11px', color: '#22c55e', fontWeight: 700 }}>✓ Decision made — pipeline resuming…</div>
+            ) : forwarded || msg.forwarded ? (
+              <div style={{ fontSize: '11px', color: '#3b82f6', fontWeight: 700 }}>
+                ✓ Sent to {msg.forwardedTo || h.access?.allowed_persona_names?.[0] || 'Responsible Approver'} — awaiting their decision
+              </div>
             ) : (
-              <HITLReadOnlyNotice access={h.access} />
+              <div>
+                <HITLReadOnlyNotice access={h.access} />
+                <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+                  <button
+                    onClick={handleForward}
+                    style={{ padding: '7px 16px', borderRadius: '6px', border: 'none', background: '#3b82f6', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: '12px' }}>
+                    Send to {h.access?.allowed_persona_names?.[0] || 'Responsible Approver'}
+                  </button>
+                </div>
+              </div>
             )}
           </div>
         </div>
+        {msg.chips && msg.chips.length > 0 && (
+          <div className="qbrow">
+            {msg.chips.map((c, i) => (
+              <button key={i} className="qb b" onClick={() => onSq && onSq(c)}>{c}</button>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -812,15 +994,32 @@ function HITLAdvisoryMsg({ msg, doThink, appendA, persona }) {
   );
 }
 
-function HITLMonitoringMsg({ msg, doThink, appendA, addMessage, persona }) {
-  const { patchMessage } = useContext(AppContext);
+function HITLMonitoringMsg({ msg, onSq, doThink, appendA, addMessage, persona }) {
+  const { patchMessage, pushNotification, updateAssetPipelineState } = useContext(AppContext);
   const [resolved, setResolved] = useState(() => !!msg.resolved);
+  const [forwarded, setForwarded] = useState(() => !!msg.forwarded);
   const h = msg.data.hitl_monitoring;
   const canResolve = canResolveHITL(h.access, persona);
   const resolverNames = (h.access?.allowed_persona_names || []).join(' / ');
   const rid = h.run_id;
   const scorePct = h.anomaly_score != null ? (h.anomaly_score * 100).toFixed(0) + '%' : '—';
   const ewmaSignals = (h.ewma_triggered && h.ewma_triggered.length > 0) ? h.ewma_triggered.join(', ') : 'multiple signals';
+
+  function handleForward() {
+    const targetPersona = h.access?.allowed_personas?.[0];
+    const targetPersonaName = h.access?.allowed_persona_names?.[0] || targetPersona || 'Responsible Approver';
+    const senderName = PERSONA_DISPLAY_NAMES[persona] || persona;
+    setForwarded(true);
+    patchMessage(msg.id, { forwarded: true, forwardedTo: targetPersonaName });
+    if (targetPersona) {
+      pushNotification(targetPersona, {
+        id: mkId(), type: 'agent',
+        html: `<div style="border:1.5px solid #3b82f6;border-radius:8px;padding:10px 12px;background:rgba(59,130,246,0.05)"><div style="font-size:9px;font-weight:700;color:#3b82f6;font-family:var(--m);margin-bottom:5px">FORWARDED HITL — MONITORING</div><strong style="color:var(--t)">${senderName} has forwarded a borderline anomaly review to you.</strong><br><span style="font-size:11px;color:var(--t2)">Your confirmation is needed to proceed with or suppress fault diagnosis. See the card below.</span></div>`,
+        routes: ['monitoring · forwarded request'], chips: [], time: ts(),
+      });
+      pushNotification(targetPersona, { id: mkId(), type: 'hitl_monitoring', data: msg.data, scenario: msg.scenario, persona: targetPersona, requestingPersona: persona, time: ts() });
+    }
+  }
 
   async function resolve(action) {
     setResolved(true);
@@ -829,9 +1028,23 @@ function HITLMonitoringMsg({ msg, doThink, appendA, addMessage, persona }) {
       try {
         const data = await resolveHITLMonitoring(rid, action, persona);
         const label = action === 'SUPPRESS' ? '✓ Anomaly suppressed — no fault analysis' : '✓ Anomaly confirmed — proceeding with diagnosis';
+        if (msg.queriedAsset) {
+          updateAssetPipelineState(msg.queriedAsset, {
+            monitoringStatus: action === 'SUPPRESS' ? 'suppressed' : 'confirmed',
+            monitoringAction: action, monitoringResolvedBy: persona,
+          });
+        }
         if (data.hitl_diagnosis) {
           appendA(`<span style="font-size:10px;color:#22c55e;font-weight:700">✓ ${label}</span>`, []);
-          addMessage({ id: mkId(), type: 'hitl_diagnosis', data, scenario: msg.scenario, persona, time: ts() });
+          addMessage({ id: mkId(), type: 'hitl_diagnosis', data, scenario: msg.scenario, persona, queriedAsset: msg.queriedAsset, time: ts() });
+          if (msg.requestingPersona) {
+            const actorName = PERSONA_DISPLAY_NAMES[persona] || persona;
+            pushNotification(msg.requestingPersona, {
+              id: mkId(), type: 'agent',
+              html: `<div style="border:1.5px solid #22c55e;border-radius:8px;padding:10px 12px;background:rgba(34,197,94,0.05)"><div style="font-size:9px;font-weight:700;color:#22c55e;font-family:var(--m);margin-bottom:5px">✓ FORWARDED REQUEST — MONITORING RESOLVED</div><strong style="color:var(--t)">Your forwarded anomaly review was actioned by ${actorName}.</strong><br><span style="font-size:11px;color:var(--t2)">Decision: <strong>${action === 'SUPPRESS' ? 'Suppressed — no fault analysis' : 'Confirmed — proceeding with fault diagnosis'}</strong>. Diagnosis gate is next.</span></div>`,
+              routes: ['monitoring · forwarded result'], chips: [], time: ts(),
+            });
+          }
           return;
         }
         const ms = data.pipeline_log ? data.pipeline_log.reduce((s, n) => s + (n.latency_ms || 0), 0) : 0;
@@ -843,6 +1056,14 @@ function HITLMonitoringMsg({ msg, doThink, appendA, addMessage, persona }) {
         if (data.hitl_advisory && data.hitl_advisory.advisory_note) addMessage({ id: mkId(), type: 'hitl_advisory', data, time: ts() });
         if (data.hitl_knowledge) addMessage({ id: mkId(), type: 'hitl_knowledge', data, persona, time: ts() });
         if (data.recommendation && data.recommendation.recommendation_status === 'ok') addMessage({ id: mkId(), type: 'hitl_executor', rec: data.recommendation, time: ts() });
+        if (msg.requestingPersona) {
+          const actorName = PERSONA_DISPLAY_NAMES[persona] || persona;
+          pushNotification(msg.requestingPersona, {
+            id: mkId(), type: 'agent',
+            html: `<div style="border:1.5px solid #22c55e;border-radius:8px;padding:10px 12px;background:rgba(34,197,94,0.05)"><div style="font-size:9px;font-weight:700;color:#22c55e;font-family:var(--m);margin-bottom:5px">✓ FORWARDED REQUEST — MONITORING RESOLVED</div><strong style="color:var(--t)">Your forwarded anomaly review was actioned by ${actorName}.</strong><br><span style="font-size:11px;color:var(--t2)">Decision: <strong>${action === 'SUPPRESS' ? 'Suppressed — no fault analysis' : 'Confirmed — analysis proceeding'}</strong>. Pipeline has resumed.</span></div>`,
+            routes: ['monitoring · forwarded result'], chips: [], time: ts(),
+          });
+        }
       } catch (err) { appendA('Monitoring HITL resolution failed: ' + err.message, []); }
     });
   }
@@ -882,22 +1103,59 @@ function HITLMonitoringMsg({ msg, doThink, appendA, addMessage, persona }) {
               </div>
             ) : resolved ? (
               <div style={{ fontSize: '11px', color: '#22c55e', fontWeight: 700 }}>✓ Decision made — pipeline resuming…</div>
+            ) : forwarded || msg.forwarded ? (
+              <div style={{ fontSize: '11px', color: '#3b82f6', fontWeight: 700 }}>
+                ✓ Sent to {msg.forwardedTo || h.access?.allowed_persona_names?.[0] || 'Responsible Approver'} — awaiting their decision
+              </div>
             ) : (
-              <HITLReadOnlyNotice access={h.access} />
+              <div>
+                <HITLReadOnlyNotice access={h.access} />
+                <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+                  <button
+                    onClick={handleForward}
+                    style={{ padding: '7px 16px', borderRadius: '6px', border: 'none', background: '#3b82f6', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: '12px' }}>
+                    Send to {h.access?.allowed_persona_names?.[0] || 'Responsible Approver'}
+                  </button>
+                </div>
+              </div>
             )}
           </div>
         </div>
+        {msg.chips && msg.chips.length > 0 && (
+          <div className="qbrow">
+            {msg.chips.map((c, i) => (
+              <button key={i} className="qb b" onClick={() => onSq && onSq(c)}>{c}</button>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-function HITLDiagnosisMsg({ msg, doThink, appendA, addMessage, persona }) {
-  const { patchMessage } = useContext(AppContext);
+function HITLDiagnosisMsg({ msg, onSq, doThink, appendA, addMessage, persona }) {
+  const { patchMessage, pushNotification, updateAssetPipelineState } = useContext(AppContext);
   const [resolved, setResolved] = useState(() => !!msg.resolved);
+  const [forwarded, setForwarded] = useState(() => !!msg.forwarded);
   const h = msg.data.hitl_diagnosis;
   const canResolve = canResolveHITL(h.access, persona);
   const resolverNames = (h.access?.allowed_persona_names || []).join(' / ');
+
+  function handleForward() {
+    const targetPersona = h.access?.allowed_personas?.[0];
+    const targetPersonaName = h.access?.allowed_persona_names?.[0] || targetPersona || 'Responsible Approver';
+    const senderName = PERSONA_DISPLAY_NAMES[persona] || persona;
+    setForwarded(true);
+    patchMessage(msg.id, { forwarded: true, forwardedTo: targetPersonaName });
+    if (targetPersona) {
+      pushNotification(targetPersona, {
+        id: mkId(), type: 'agent',
+        html: `<div style="border:1.5px solid #3b82f6;border-radius:8px;padding:10px 12px;background:rgba(59,130,246,0.05)"><div style="font-size:9px;font-weight:700;color:#3b82f6;font-family:var(--m);margin-bottom:5px">FORWARDED HITL — FAILURE INTELLIGENCE</div><strong style="color:var(--t)">${senderName} has forwarded a fault classification review to you.</strong><br><span style="font-size:11px;color:var(--t2)">Low-confidence classification requires your expert confirmation before risk assessment proceeds. See the card below.</span></div>`,
+        routes: ['failure intelligence · forwarded request'], chips: [], time: ts(),
+      });
+      pushNotification(targetPersona, { id: mkId(), type: 'hitl_diagnosis', data: msg.data, scenario: msg.scenario, persona: targetPersona, requestingPersona: persona, time: ts() });
+    }
+  }
   const rid = h.run_id;
   const confPct = h.confidence != null ? (h.confidence * 100).toFixed(0) + '%' : '—';
   const faultLabel = (h.fault_mode || 'unknown').replace(/_/g, ' ');
@@ -916,9 +1174,24 @@ function HITLDiagnosisMsg({ msg, doThink, appendA, addMessage, persona }) {
           + data.details.map(d => '• ' + d).join('<br>')
           + (data.actions && data.actions.length ? '<br><br><strong>Recommended actions:</strong><br>' + data.actions.map(a => '→ ' + a).join('<br>') : '');
         appendA(html, data.pipeline_log ? data.pipeline_log.map(n => n.node ? n.node.replace(/_/g, ' ') : '') : []);
+        if (msg.queriedAsset) {
+          updateAssetPipelineState(msg.queriedAsset, {
+            diagnosisStatus: action === 'CONFIRM' ? 'confirmed' : 'overridden',
+            diagnosisAction: action, diagnosisFaultLabel: faultLabel, diagnosisResolvedBy: persona,
+          });
+        }
         if (data.hitl_advisory && data.hitl_advisory.advisory_note) addMessage({ id: mkId(), type: 'hitl_advisory', data, time: ts() });
         if (data.hitl_knowledge) addMessage({ id: mkId(), type: 'hitl_knowledge', data, persona, time: ts() });
         if (data.recommendation && data.recommendation.recommendation_status === 'ok') addMessage({ id: mkId(), type: 'hitl_executor', rec: data.recommendation, time: ts() });
+        if (msg.requestingPersona) {
+          const actorName = PERSONA_DISPLAY_NAMES[persona] || persona;
+          const faultDesc = action === 'CONFIRM' ? `Confirmed: ${faultLabel}` : 'Overridden to undetermined — manual inspection required';
+          pushNotification(msg.requestingPersona, {
+            id: mkId(), type: 'agent',
+            html: `<div style="border:1.5px solid #22c55e;border-radius:8px;padding:10px 12px;background:rgba(34,197,94,0.05)"><div style="font-size:9px;font-weight:700;color:#22c55e;font-family:var(--m);margin-bottom:5px">✓ FORWARDED REQUEST — DIAGNOSIS RESOLVED</div><strong style="color:var(--t)">Your forwarded fault classification review was actioned by ${actorName}.</strong><br><span style="font-size:11px;color:var(--t2)">Decision: <strong>${faultDesc}</strong>. Risk assessment is now proceeding.</span></div>`,
+            routes: ['failure intelligence · forwarded result'], chips: [], time: ts(),
+          });
+        }
       } catch (err) { appendA('Diagnosis HITL resolution failed: ' + err.message, []); }
     });
   }
@@ -958,11 +1231,31 @@ function HITLDiagnosisMsg({ msg, doThink, appendA, addMessage, persona }) {
               </div>
             ) : resolved ? (
               <div style={{ fontSize: '11px', color: '#22c55e', fontWeight: 700 }}>✓ Decision made — pipeline resuming…</div>
+            ) : forwarded || msg.forwarded ? (
+              <div style={{ fontSize: '11px', color: '#3b82f6', fontWeight: 700 }}>
+                ✓ Sent to {msg.forwardedTo || h.access?.allowed_persona_names?.[0] || 'Responsible Approver'} — awaiting their decision
+              </div>
             ) : (
-              <HITLReadOnlyNotice access={h.access} />
+              <div>
+                <HITLReadOnlyNotice access={h.access} />
+                <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+                  <button
+                    onClick={handleForward}
+                    style={{ padding: '7px 16px', borderRadius: '6px', border: 'none', background: '#3b82f6', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: '12px' }}>
+                    Send to {h.access?.allowed_persona_names?.[0] || 'Responsible Approver'}
+                  </button>
+                </div>
+              </div>
             )}
           </div>
         </div>
+        {msg.chips && msg.chips.length > 0 && (
+          <div className="qbrow">
+            {msg.chips.map((c, i) => (
+              <button key={i} className="qb b" onClick={() => onSq && onSq(c)}>{c}</button>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1176,8 +1469,16 @@ function buildLearningHtml(lr) {
     + `</div>`;
 }
 
+const _EXECUTOR_PERSONA_DISPLAY = {
+  supervisor: 'Plant Supervisor', engineer: 'Reliability Engineer',
+  maintenance: 'Maintenance Planner', manager: 'Plant Manager',
+  executive: 'Executive', ot: 'OT Controls Operator',
+  safety: 'Safety Officer', md: 'Managing Director',
+};
+
 function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
   const [resolved, setResolved] = useState(() => msg.resolved || false);
+  const [forwarded, setForwarded] = useState(() => !!msg.forwarded);
   const [showRejectInput, setShowRejectInput] = useState(false);
   const [rejectCode, setRejectCode] = useState('');
   const [rejectReason, setRejectReason] = useState('');
@@ -1211,6 +1512,33 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
     const interval = window.setInterval(updateCountdown, 1000);
     return () => window.clearInterval(interval);
   }, [escalationStep?.escalates_at_utc, resolved, msg.escalationTriggered]);
+
+  function handleForward() {
+    // Try hitl_access first, then escalation chain as fallback
+    const targetPersona = rec.hitl_access?.allowed_personas?.[0]
+      || escalation.steps?.[0]?.to_persona_id;
+    const targetPersonaName = rec.hitl_access?.allowed_persona_names?.[0]
+      || escalation.steps?.[0]?.to_persona_name
+      || rec.responsible_approver
+      || 'Responsible Approver';
+    const senderName = PERSONA_DISPLAY_NAMES[persona] || persona;
+    setForwarded(true);
+    patchMessage(msg.id, { forwarded: true, forwardedTo: targetPersonaName });
+    if (targetPersona) {
+      pushNotification(targetPersona, {
+        id: mkId(), type: 'agent',
+        html: `<div style="border:1.5px solid #3b82f6;border-radius:8px;padding:10px 12px;background:rgba(59,130,246,0.05)"><div style="font-size:9px;font-weight:700;color:#3b82f6;font-family:var(--m);margin-bottom:5px">FORWARDED HITL — EXECUTOR</div><strong style="color:var(--t)">${senderName} has forwarded an execution approval request to you.</strong><br><span style="font-size:11px;color:var(--t2)">Asset <strong>${rec.asset_id}</strong> — maintenance action requires your approval before execution. See the card below.</span></div>`,
+        routes: ['executor · forwarded request'], chips: [], time: ts(),
+      });
+      pushNotification(targetPersona, {
+        id: mkId(),
+        type: 'hitl_executor',
+        rec,
+        requestingPersona: persona,
+        time: ts(),
+      });
+    }
+  }
 
   async function resolve(approved, reason) {
     setResolved(true);
@@ -1296,6 +1624,14 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
           });
         }
 
+        // Notify requesting persona if this card was forwarded to us
+        if (msg.requestingPersona) {
+          const actorName = _EXECUTOR_PERSONA_DISPLAY[persona] || persona;
+          const notifHtml = approved
+            ? `<div style="border:1.5px solid #10b981;border-radius:8px;padding:10px 12px"><div style="font-size:9px;font-weight:700;color:#10b981;font-family:var(--m);margin-bottom:5px">✓ FORWARDED REQUEST — APPROVED</div><strong style="color:var(--t)">Your forwarded request for ${rec.asset_id} was approved.</strong><br><span style="font-size:11px;color:var(--t2)">Work order <strong style="color:#10b981">${data.work_order_id || 'created'}</strong> · actioned by ${actorName}</span></div>`
+            : `<div style="border:1.5px solid #ef4444;border-radius:8px;padding:10px 12px"><div style="font-size:9px;font-weight:700;color:#ef4444;font-family:var(--m);margin-bottom:5px">✗ FORWARDED REQUEST — REJECTED</div><strong style="color:var(--t)">Your forwarded request for ${rec.asset_id} was rejected by ${actorName}.</strong></div>`;
+          pushNotification(msg.requestingPersona, { id: mkId(), type: 'agent', html: notifHtml, routes: ['executor · forwarded result'], chips: [], time: ts() });
+        }
         appendA(html, approved ? ['executor · result'] : ['agent 8 · rejection learning']);
       } catch (err) {
         const msg403 = err.message?.includes('403')
@@ -1493,7 +1829,22 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
                 )}
               </>
             ) : !resolved ? (
-              <HITLReadOnlyNotice access={rec.hitl_access} />
+              forwarded || msg.forwarded ? (
+                <div style={{ fontSize: '11px', color: '#3b82f6', fontWeight: 700 }}>
+                  ✓ Sent to {msg.forwardedTo || rec.hitl_access?.allowed_persona_names?.[0]} — awaiting their decision
+                </div>
+              ) : (
+                <div>
+                  <HITLReadOnlyNotice access={rec.hitl_access} />
+                  <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+                    <button
+                      onClick={handleForward}
+                      style={{ padding: '7px 16px', borderRadius: '6px', border: 'none', background: '#3b82f6', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: '12px' }}>
+                      Send to {rec.hitl_access?.allowed_persona_names?.[0] || escalation.steps?.[0]?.to_persona_name || rec.responsible_approver || 'Responsible Approver'}
+                    </button>
+                  </div>
+                </div>
+              )
             ) : msg.escalationTriggered ? (
               <div style={{ fontSize: '11px', color: '#f97316', fontWeight: 700 }}>
                 Escalated automatically to {msg.escalatedTo || escalationStep?.to_persona_name}

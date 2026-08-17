@@ -253,9 +253,21 @@ export function AppProvider({ children }) {
     _update(persona, prev => prev.map(m => m.id === id ? { ...m, ...patch } : m));
   }, [persona, _update]);
 
+  // Local notification counts for cross-persona forwards (not polled from backend)
+  const [localNotifCounts, setLocalNotifCounts] = useState({});
+
+  const clearLocalNotif = useCallback((pid) => {
+    setLocalNotifCounts(prev => ({ ...prev, [pid]: 0 }));
+  }, []);
+
   // Push a message into a DIFFERENT persona's history (for cross-persona notifications)
   const pushNotification = useCallback((targetPersona, msg) => {
     _update(targetPersona, prev => [...prev, msg]);
+    // Only bump the badge if target is not already the active persona
+    setLocalNotifCounts(prev => ({
+      ...prev,
+      [targetPersona]: (prev[targetPersona] || 0) + 1,
+    }));
   }, [_update]);
 
   const setTheme = useCallback((t) => {
@@ -321,7 +333,7 @@ export function AppProvider({ children }) {
       refreshWorkOrders,
       pipelineRunning, setPipelineRunning,
       theme, setTheme,
-      notifCounts, refreshNotifCounts,
+      notifCounts, refreshNotifCounts, localNotifCounts, clearLocalNotif,
       showLeftPanel, setShowLeftPanel,
       updateWOStatus,
       assetPipelineState, updateAssetPipelineState,

@@ -41,7 +41,13 @@ export default function AgentGraphView() {
       }))
     : FALLBACK_ASSET_OPTIONS;
 
-  const storedState = assetPipelineState[agentAsset] || null;
+  // Backend uses asset_id (e.g. 'AST_MTR_001'); frontend uses id (e.g. 'M-104').
+  // Try backend key first, fall back to frontend id.
+  const selectedAssetData = assets.find(a => a.id === agentAsset);
+  const backendAssetId = selectedAssetData?.asset_id;
+  const storedState = (backendAssetId && assetPipelineState[backendAssetId])
+    || assetPipelineState[agentAsset]
+    || null;
 
   const [agPersona, setAgPersona] = useState(persona);
   const [replayKey, setReplayKey] = useState(0);
