@@ -427,6 +427,9 @@ export default function ChatView() {
         // Session cache — resolve BEFORE calling backend so we never re-fire HITL gates
         // for assets that have already been actioned in this session.
         const queriedAsset = queryAssetIds[0] || null;
+        // Persist the queried asset so HITL resolve callbacks can find it even on old messages
+        // that were created before the queriedAsset field was added.
+        if (queriedAsset) { try { sessionStorage.setItem('dro-last-queried-asset', queriedAsset); } catch {} }
         const backendAssetId = queriedAsset ? (assets || []).find(a => a.id === queriedAsset)?.asset_id : null;
         // Read from sessionStorage directly so we always get the latest value regardless of
         // React closure staleness (state batch may not have committed to this render yet).
@@ -847,8 +850,9 @@ function HITLRemediationMsg({ msg, onSq, doThink, appendA, addMessage, persona }
           + data.details.map(d => '• ' + d).join('<br>')
           + (data.actions && data.actions.length ? '<br><br><strong>Recommended actions:</strong><br>' + data.actions.map(a => '→ ' + a).join('<br>') : '');
         appendA(html, data.pipeline_log ? data.pipeline_log.map(n => n.node ? n.node.replace(/_/g, ' ') : '') : []);
-        if (msg.queriedAsset) {
-          updateAssetPipelineState(msg.queriedAsset, { remediationAction: action, remediationResolvedBy: persona });
+        const remAssetKey = msg.queriedAsset || (() => { try { return sessionStorage.getItem('dro-last-queried-asset'); } catch { return null; } })();
+        if (remAssetKey) {
+          updateAssetPipelineState(remAssetKey, { remediationAction: action, remediationResolvedBy: persona });
         }
         if (data.hitl_advisory && data.hitl_advisory.advisory_note) {
           addMessage({ id: mkId(), type: 'hitl_advisory', data, time: ts() });
@@ -1028,15 +1032,16 @@ function HITLMonitoringMsg({ msg, onSq, doThink, appendA, addMessage, persona })
       try {
         const data = await resolveHITLMonitoring(rid, action, persona);
         const label = action === 'SUPPRESS' ? '✓ Anomaly suppressed — no fault analysis' : '✓ Anomaly confirmed — proceeding with diagnosis';
-        if (msg.queriedAsset) {
-          updateAssetPipelineState(msg.queriedAsset, {
+        const monAssetKey = msg.queriedAsset || (() => { try { return sessionStorage.getItem('dro-last-queried-asset'); } catch { return null; } })();
+        if (monAssetKey) {
+          updateAssetPipelineState(monAssetKey, {
             monitoringStatus: action === 'SUPPRESS' ? 'suppressed' : 'confirmed',
             monitoringAction: action, monitoringResolvedBy: persona,
           });
         }
         if (data.hitl_diagnosis) {
           appendA(`<span style="font-size:10px;color:#22c55e;font-weight:700">✓ ${label}</span>`, []);
-          addMessage({ id: mkId(), type: 'hitl_diagnosis', data, scenario: msg.scenario, persona, queriedAsset: msg.queriedAsset, time: ts() });
+          addMessage({ id: mkId(), type: 'hitl_diagnosis', data, scenario: msg.scenario, persona, queriedAsset: monAssetKey, time: ts() });
           if (msg.requestingPersona) {
             const actorName = PERSONA_DISPLAY_NAMES[persona] || persona;
             pushNotification(msg.requestingPersona, {
@@ -1174,8 +1179,9 @@ function HITLDiagnosisMsg({ msg, onSq, doThink, appendA, addMessage, persona }) 
           + data.details.map(d => '• ' + d).join('<br>')
           + (data.actions && data.actions.length ? '<br><br><strong>Recommended actions:</strong><br>' + data.actions.map(a => '→ ' + a).join('<br>') : '');
         appendA(html, data.pipeline_log ? data.pipeline_log.map(n => n.node ? n.node.replace(/_/g, ' ') : '') : []);
-        if (msg.queriedAsset) {
-          updateAssetPipelineState(msg.queriedAsset, {
+        const diagAssetKey = msg.queriedAsset || (() => { try { return sessionStorage.getItem('dro-last-queried-asset'); } catch { return null; } })();
+        if (diagAssetKey) {
+          updateAssetPipelineState(diagAssetKey, {
             diagnosisStatus: action === 'CONFIRM' ? 'confirmed' : 'overridden',
             diagnosisAction: action, diagnosisFaultLabel: faultLabel, diagnosisResolvedBy: persona,
           });
