@@ -10,8 +10,22 @@ import { activeEscalationStep, remainingSeconds } from '../utils/escalationTimer
 export const AppContext = createContext(null);
 
 const SESSION_KEY = 'dro-chat';
+const ASSET_PIPELINE_KEY = 'dro-asset-pipeline';
 
 const WO_FALLBACK = Object.fromEntries(WOS.map(wo => [wo.id, wo]));
+
+function loadAssetPipeline() {
+  try {
+    const raw = sessionStorage.getItem(ASSET_PIPELINE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch { return {}; }
+}
+
+function saveAssetPipeline(map) {
+  try {
+    sessionStorage.setItem(ASSET_PIPELINE_KEY, JSON.stringify(map));
+  } catch {}
+}
 
 function mergeWOs(payload) {
   return (payload.workorders || []).map(wo => {
@@ -76,6 +90,15 @@ export function AppProvider({ children }) {
   const [theme, setThemeState] = useState(() => localStorage.getItem('dro-theme') || 'light');
   const [notifCounts, setNotifCounts] = useState({});
   const [showLeftPanel, setShowLeftPanel] = useState(true);
+  const [assetPipelineState, setAssetPipelineState] = useState(loadAssetPipeline);
+
+  const updateAssetPipelineState = useCallback((assetId, patch) => {
+    setAssetPipelineState(prev => {
+      const next = { ...prev, [assetId]: { ...(prev[assetId] || {}), ...patch } };
+      saveAssetPipeline(next);
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -301,6 +324,7 @@ export function AppProvider({ children }) {
       notifCounts, refreshNotifCounts,
       showLeftPanel, setShowLeftPanel,
       updateWOStatus,
+      assetPipelineState, updateAssetPipelineState,
     }}>
       {children}
     </AppContext.Provider>

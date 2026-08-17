@@ -171,7 +171,7 @@ function generateChipsFromResponse(d, fallbackQp) {
 }
 
 export default function ChatView() {
-  const { persona, messages, setMessages, addMessage, assets, workOrders } = useContext(AppContext);
+  const { persona, messages, setMessages, addMessage, assets, workOrders, assetPipelineState, updateAssetPipelineState } = useContext(AppContext);
   const fleetSummary = {
     total: assets?.length || 0,
     critical: assets?.filter(asset => asset.st === 'critical').length || 0,
@@ -399,6 +399,16 @@ export default function ChatView() {
   }
 
   function renderExecutorHITLCard(rec) {
+    const stored = assetPipelineState[rec.asset_id];
+    if (stored?.status === 'approved') {
+      appendA(
+        `<strong>${rec.asset_id} — Already Processed</strong><br>` +
+        `Work order <strong style="color:#10b981">${stored.woId || 'N/A'}</strong> was approved in this session. ` +
+        `No new execution required.`,
+        ['executor · already processed']
+      );
+      return;
+    }
     // Detect cross-asset correlation before showing the executor card
     const correlation = buildCorrelation(rec, shownExecRecsRef.current);
     // Track this rec for future correlation checks (add AFTER checking to avoid self-match)
@@ -1171,7 +1181,7 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
   const [showRejectInput, setShowRejectInput] = useState(false);
   const [rejectCode, setRejectCode] = useState('');
   const [rejectReason, setRejectReason] = useState('');
-  const { refreshNotifCounts, pushNotification, patchMessage, refreshWorkOrders } = useContext(AppContext);
+  const { refreshNotifCounts, pushNotification, patchMessage, refreshWorkOrders, updateAssetPipelineState } = useContext(AppContext);
   const rec = msg.rec;
   const canResolve = canResolveHITL(rec.hitl_access, persona);
   const decisionSupport = rec.decision_support || {};
@@ -1244,6 +1254,16 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
           });
           html += `</div></div>`;
 
+          updateAssetPipelineState(rec.asset_id, {
+            status: 'approved',
+            woId: data.work_order_id || null,
+            actionTaken: data.action_taken || null,
+            partsReserved: data.parts_reserved || null,
+            crewNotified: data.crew_notified || false,
+            executionStatus: data.status || null,
+            approvedBy: persona,
+            approvedAt: new Date().toISOString(),
+          });
           // Notify relevant personas (mirrors backend _URGENCY_ROUTING)
           const URGENCY_RECIPIENTS = {
             immediate: ['supervisor', 'engineer', 'maintenance', 'safety'],
@@ -1268,6 +1288,12 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
           html += `<div style="font-size:10.5px;color:var(--t2);margin-top:8px">Agent 8 feedback: <strong>${data.status}</strong> · stored: ${data.persistence_status} · consecutive rejections: ${data.consecutive_rejections}</div>`;
           if (data.reliability_review_required) html += `<div style="font-size:11px;color:#f97316;margin-top:6px;font-weight:700">Reliability Engineer review required — ${data.review_reason}</div>`;
           html += `</div>`;
+          updateAssetPipelineState(rec.asset_id, {
+            status: 'rejected',
+            rejectCode,
+            rejectedBy: persona,
+            rejectedAt: new Date().toISOString(),
+          });
         }
 
         appendA(html, approved ? ['executor · result'] : ['agent 8 · rejection learning']);

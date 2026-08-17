@@ -28,10 +28,20 @@ function buildLiveStates(pipelineResult) {
   });
 }
 
-function buildNodeSummary(idx, pipelineResult) {
-  if (!pipelineResult) return null;
-  const log = pipelineResult.pipeline_log || [];
+function buildNodeSummary(idx, pipelineResult, storedState) {
+  const log = pipelineResult?.pipeline_log || [];
   const entry = log.find(e => e.node === NODE_KEYS[idx]);
+
+  // Executor node: use stored chat approval when no live pipeline result
+  if (idx === 6 && !entry && storedState?.status === 'approved') {
+    return `WO ${storedState.woId || 'N/A'} · ${storedState.executionStatus || 'Approved'} · via chat`;
+  }
+  // Learning node: confirmed as complete if executor was approved
+  if (idx === 7 && !entry && storedState?.status === 'approved') {
+    return 'Case logged · from chat session';
+  }
+
+  if (!pipelineResult) return null;
   if (!entry || entry.status === 'skipped') return null;
 
   const ms = entry.latency_ms;
@@ -86,13 +96,16 @@ function buildNodeSummary(idx, pipelineResult) {
   }
 }
 
-export default function AgentPipeline({ asset, selectedNode, onNodeSelect, replayKey, pipelineResult, pipelineRunning }) {
+export default function AgentPipeline({ asset, selectedNode, onNodeSelect, replayKey, pipelineResult, pipelineRunning, storedState }) {
   const [animatedNodes, setAnimatedNodes] = useState([]);
   const timeoutsRef = useRef([]);
 
   const fallbackStates = ASSET_AG_STATE[asset] || ASSET_AG_STATE['M-104'];
   const liveStates = buildLiveStates(pipelineResult);
-  const states = liveStates || fallbackStates;
+  let states = liveStates || fallbackStates;
+  if (storedState?.status === 'approved') {
+    states = states.map((s, i) => (i === 6 || i === 7) ? { ...s, s: 'nd' } : s);
+  }
 
   // Clear all pending timeouts
   function clearTimeouts() {
@@ -165,7 +178,7 @@ export default function AgentPipeline({ asset, selectedNode, onNodeSelect, repla
       {AG_NODES.map((node, i) => {
         const state = states[i] || { s: 'ni' };
         const isVisible = animatedNodes.includes(i);
-        const summary = buildNodeSummary(i, pipelineResult);
+        const summary = buildNodeSummary(i, pipelineResult, storedState);
         const latMs = liveStates?.[i]?.latency_ms;
 
         return (

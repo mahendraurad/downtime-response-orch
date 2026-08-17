@@ -6,7 +6,7 @@ import { ASSET_SCENARIO } from '../../data/scenarios';
 import { runRealPipeline } from '../../api/pipeline';
 import { connectSensorWS } from '../../api/sensors';
 
-const ASSET_OPTIONS = [
+const FALLBACK_ASSET_OPTIONS = [
   { val: 'M-104', lbl: 'M-104 — Drive Motor Line 4 (CRITICAL)' },
   { val: 'P-207', lbl: 'P-207 — Feed Pump Station 2 (WARNING)' },
   { val: 'C-301', lbl: 'C-301 — Conveyor Drive Assembly (WARNING)' },
@@ -30,7 +30,18 @@ export default function AgentGraphView() {
     persona,
     selectedNode, setSelectedNode,
     currentAgTab, setCurrentAgTab,
+    assets,
+    assetPipelineState,
   } = useContext(AppContext);
+
+  const assetOptions = assets && assets.length > 0
+    ? assets.map(a => ({
+        val: a.id,
+        lbl: `${a.id} — ${a.nm} (${(a.st || 'unknown').toUpperCase()})`,
+      }))
+    : FALLBACK_ASSET_OPTIONS;
+
+  const storedState = assetPipelineState[agentAsset] || null;
 
   const [agPersona, setAgPersona] = useState(persona);
   const [replayKey, setReplayKey] = useState(0);
@@ -123,7 +134,7 @@ export default function AgentGraphView() {
             onChange={e => handleAssetChange(e.target.value)}
             disabled={agPipelineRunning}
           >
-            {ASSET_OPTIONS.map(o => (
+            {assetOptions.map(o => (
               <option key={o.val} value={o.val}>{o.lbl}</option>
             ))}
           </select>
@@ -158,6 +169,7 @@ export default function AgentGraphView() {
           replayKey={replayKey}
           pipelineResult={agPipelineResult}
           pipelineRunning={agPipelineRunning}
+          storedState={storedState}
         />
         <AgentDetail
           asset={agentAsset}
@@ -169,6 +181,7 @@ export default function AgentGraphView() {
           pipelineResult={agPipelineResult}
           pipelineRunning={agPipelineRunning}
           sensorData={sensorData}
+          storedState={storedState}
         />
       </div>
     </div>

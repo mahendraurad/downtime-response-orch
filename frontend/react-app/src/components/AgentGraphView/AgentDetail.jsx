@@ -29,7 +29,14 @@ function getLogEntry(pipelineResult, idx) {
   return (pipelineResult.pipeline_log || []).find(e => e.node === NODE_KEYS[idx]) || null;
 }
 
-function buildLiveOutput(idx, pipelineResult, asset, persona) {
+function buildLiveOutput(idx, pipelineResult, asset, persona, storedState) {
+  // Executor: use stored chat approval when no pipeline result
+  if (idx === 6 && (!pipelineResult || !pipelineResult.execution_result) && storedState?.status === 'approved') {
+    return `WO: ${storedState.woId || 'N/A'} · Status: ${storedState.executionStatus || 'Approved'} · via chat`;
+  }
+  if (idx === 7 && storedState?.status === 'approved' && (!pipelineResult || !pipelineResult.learned_case)) {
+    return 'Case logged from chat session approval';
+  }
   if (!pipelineResult) return null;
   const entry = getLogEntry(pipelineResult, idx);
   if (!entry || entry.status === 'skipped') return null;
@@ -80,7 +87,17 @@ function buildLiveOutput(idx, pipelineResult, asset, persona) {
   }
 }
 
-function buildLiveKPIs(idx, pipelineResult) {
+function buildLiveKPIs(idx, pipelineResult, storedState) {
+  // Executor: use stored chat approval data when no live pipeline result
+  if (idx === 6 && storedState?.status === 'approved' && (!pipelineResult || !pipelineResult.execution_result)) {
+    return {
+      'WO created': storedState.woId || '—',
+      'SAP PM status': storedState.executionStatus || 'Approved',
+      'Parts reserved': storedState.partsReserved || '—',
+      'Crew notified': storedState.crewNotified ? 'Yes' : 'Pending',
+      'Approved by': storedState.approvedBy || '—',
+    };
+  }
   if (!pipelineResult) return null;
   const entry = getLogEntry(pipelineResult, idx);
   const latStr = entry?.latency_ms != null ? `${(entry.latency_ms / 1000).toFixed(2)}s` : '—';
@@ -146,7 +163,7 @@ function buildLiveKPIs(idx, pipelineResult) {
   }
 }
 
-export default function AgentDetail({ asset, persona, selectedNode, currentTab, onTabChange, pipelineResult, pipelineRunning, sensorData }) {
+export default function AgentDetail({ asset, persona, selectedNode, currentTab, onTabChange, pipelineResult, pipelineRunning, sensorData, storedState }) {
   const node = AG_NODES[selectedNode] || AG_NODES[0];
   const fallbackStates = ASSET_AG_STATE[asset] || ASSET_AG_STATE['M-104'];
 
@@ -162,7 +179,10 @@ export default function AgentDetail({ asset, persona, selectedNode, currentTab, 
     });
   }
 
-  const states = liveStates || fallbackStates;
+  let states = liveStates || fallbackStates;
+  if (storedState?.status === 'approved') {
+    states = states.map((s, i) => (i === 6 || i === 7) ? { ...s, s: 'nd' } : s);
+  }
   const state = states[selectedNode] || { s: 'ni' };
   // Normalize any stale 'node' tab value to 'overview' after tab removal
   const activeTab = currentTab === 'node' ? 'overview' : currentTab;
@@ -192,6 +212,7 @@ export default function AgentDetail({ asset, persona, selectedNode, currentTab, 
             pipelineResult={pipelineResult}
             pipelineRunning={pipelineRunning}
             sensorData={sensorData}
+            storedState={storedState}
           />
         )}
         {activeTab === 'tasks' && (
@@ -204,7 +225,7 @@ export default function AgentDetail({ asset, persona, selectedNode, currentTab, 
 
 // ─── Overview Panel (merged with Node Detail) ────────────────────────────────
 
-function OverviewPanel({ asset, persona, states, selectedNode, node, state, pipelineResult, pipelineRunning, sensorData }) {
+function OverviewPanel({ asset, persona, states, selectedNode, node, state, pipelineResult, pipelineRunning, sensorData, storedState }) {
   const stateLabel = { nd: 'Complete', nr: 'Running', ni: 'Standby' };
   const stateColor = { nd: 'var(--gn)', nr: 'var(--am)', ni: 'var(--t3)' };
 
@@ -212,11 +233,11 @@ function OverviewPanel({ asset, persona, states, selectedNode, node, state, pipe
   const ra = pipelineResult?.risk_assessment;
   const rec = pipelineResult?.recommendation;
 
-  const liveOut = buildLiveOutput(selectedNode, pipelineResult, asset, persona);
+  const liveOut = buildLiveOutput(selectedNode, pipelineResult, asset, persona, storedState);
   const staticOut = node.assetOut?.[asset]?.[persona] || null;
   const nodeOut = liveOut || staticOut;
 
-  const liveKPIs = buildLiveKPIs(selectedNode, pipelineResult);
+  const liveKPIs = buildLiveKPIs(selectedNode, pipelineResult, storedState);
   const kpis = liveKPIs || node.kpis;
   const nodeEntry = getLogEntry(pipelineResult, selectedNode);
 
