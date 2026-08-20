@@ -6,13 +6,6 @@ import { ASSET_SCENARIO } from '../../data/scenarios';
 import { runRealPipeline } from '../../api/pipeline';
 import { connectSensorWS } from '../../api/sensors';
 
-const FALLBACK_ASSET_OPTIONS = [
-  { val: 'M-104', lbl: 'M-104 — Drive Motor Line 4 (CRITICAL)' },
-  { val: 'P-207', lbl: 'P-207 — Feed Pump Station 2 (WARNING)' },
-  { val: 'C-301', lbl: 'C-301 — Conveyor Drive Assembly (WARNING)' },
-  { val: 'M-089', lbl: 'M-089 — Drive Motor Line 2 (HEALTHY)' },
-  { val: 'G-112', lbl: 'G-112 — Gearbox Line 3 (HEALTHY)' },
-];
 
 const PERSONA_OPTIONS = [
   { val: 'supervisor', lbl: 'Plant Supervisor' },
@@ -27,19 +20,18 @@ const PERSONA_OPTIONS = [
 export default function AgentGraphView() {
   const {
     agentAsset, setAgentAsset,
-    persona,
+    persona, setPersona,
     selectedNode, setSelectedNode,
     currentAgTab, setCurrentAgTab,
     assets,
     assetPipelineState,
+    updateAssetSensorData,
   } = useContext(AppContext);
 
-  const assetOptions = assets && assets.length > 0
-    ? assets.map(a => ({
-        val: a.id,
-        lbl: `${a.id} — ${a.nm} (${(a.st || 'unknown').toUpperCase()})`,
-      }))
-    : FALLBACK_ASSET_OPTIONS;
+  const assetOptions = (assets || []).map(a => ({
+    val: a.id,
+    lbl: `${a.id} — ${a.nm} (${(a.st || 'unknown').toUpperCase()})`,
+  }));
 
   // Backend uses asset_id (e.g. 'AST_MTR_001'); frontend uses id (e.g. 'M-104').
   // Try backend key first, fall back to frontend id.
@@ -49,7 +41,13 @@ export default function AgentGraphView() {
     || assetPipelineState[agentAsset]
     || null;
 
-  const [agPersona, setAgPersona] = useState(persona);
+  // Once assets load from backend, default to the first available asset if current selection is invalid
+  useEffect(() => {
+    if (assets.length > 0 && !assets.find(a => a.id === agentAsset)) {
+      setAgentAsset(assets[0].id);
+    }
+  }, [assets, agentAsset, setAgentAsset]);
+
   const [replayKey, setReplayKey] = useState(0);
   const [agPipelineResult, setAgPipelineResult] = useState(null);
   const [agPipelineRunning, setAgPipelineRunning] = useState(false);
@@ -76,16 +74,43 @@ export default function AgentGraphView() {
     }
   }, []);
 
-  // Trigger pipeline whenever asset or persona changes
+  // Trigger pipeline whenever asset or persona changes (skip if no assets loaded yet)
   useEffect(() => {
-    triggerPipeline(agentAsset, agPersona);
-  }, [agentAsset, agPersona, replayKey, triggerPipeline]);
+    if (!agentAsset) return;
+    triggerPipeline(agentAsset, persona);
+  }, [agentAsset, persona, replayKey, triggerPipeline]);
 
-  // Connect sensor WebSocket whenever asset changes
+  // Connect sensor WebSocket whenever asset changes; reset EWMA ref on asset switch
+  const sensorSmoothedRef = useRef(null);
   useEffect(() => {
     setSensorData(null);
-    connectSensorWS(agentAsset, setSensorData);
+    sensorSmoothedRef.current = null;
+    if (agentAsset) connectSensorWS(agentAsset, setSensorData);
   }, [agentAsset]);
+
+  // Pipe smoothed sensor readings back into the global assets array so the fleet
+  // ribbon and asset registry stay current. Throttled to once per 5 s to prevent
+  // visible flickering in the overview tiles.
+  const lastGlobalUpdateRef = useRef(0);
+  useEffect(() => {
+    if (!sensorData || !agentAsset) return;
+    const ALPHA = 0.25;
+    const prev = sensorSmoothedRef.current;
+    const smooth = (key) =>
+      prev ? ALPHA * (sensorData[key] ?? prev[key]) + (1 - ALPHA) * (prev[key] ?? sensorData[key])
+           : sensorData[key];
+    const smoothed = {
+      vib_rms_mms: smooth('vib_rms_mms'),
+      temp_c:      smooth('temp_c'),
+      bpfo_ratio:  smooth('bpfo_ratio'),
+    };
+    sensorSmoothedRef.current = smoothed;
+    const now = Date.now();
+    if (now - lastGlobalUpdateRef.current >= 5000) {
+      lastGlobalUpdateRef.current = now;
+      updateAssetSensorData(agentAsset, smoothed);
+    }
+  }, [sensorData, agentAsset, updateAssetSensorData]);
 
   function handleReplay() {
     setReplayKey(k => k + 1);
@@ -98,7 +123,7 @@ export default function AgentGraphView() {
   }
 
   function handlePersonaChange(val) {
-    setAgPersona(val);
+    setPersona(val);
     setSelectedNode(0);
   }
 
@@ -140,6 +165,7 @@ export default function AgentGraphView() {
             onChange={e => handleAssetChange(e.target.value)}
             disabled={agPipelineRunning}
           >
+            {assetOptions.length === 0 && <option disabled>Loading assets…</option>}
             {assetOptions.map(o => (
               <option key={o.val} value={o.val}>{o.lbl}</option>
             ))}
@@ -147,7 +173,7 @@ export default function AgentGraphView() {
           <span className="ag-sel-lbl" style={{ marginLeft: '8px' }}>View as:</span>
           <select
             className="agsel"
-            value={agPersona}
+            value={persona}
             onChange={e => handlePersonaChange(e.target.value)}
             disabled={agPipelineRunning}
           >
@@ -179,7 +205,7 @@ export default function AgentGraphView() {
         />
         <AgentDetail
           asset={agentAsset}
-          persona={agPersona}
+          persona={persona}
           selectedNode={selectedNode}
           currentTab={currentAgTab}
           onTabChange={setCurrentAgTab}

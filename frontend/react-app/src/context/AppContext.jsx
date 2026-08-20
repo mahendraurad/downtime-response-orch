@@ -11,6 +11,8 @@ export const AppContext = createContext(null);
 
 const SESSION_KEY = 'dro-chat';
 const ASSET_PIPELINE_KEY = 'dro-asset-pipeline';
+const ASSET_STATUS_KEY = 'dro-asset-status';
+const WO_STATUS_KEY = 'dro-wo-status';
 
 const WO_FALLBACK = Object.fromEntries(WOS.map(wo => [wo.id, wo]));
 
@@ -27,25 +29,59 @@ function saveAssetPipeline(map) {
   } catch {}
 }
 
+// Persists asset status overrides (e.g. critical → healthy after WO closure) so they
+// survive a page refresh — the backend re-fetch would otherwise reset them.
+function loadAssetStatusOverrides() {
+  try { return JSON.parse(sessionStorage.getItem(ASSET_STATUS_KEY) || '{}'); } catch { return {}; }
+}
+function saveAssetStatusOverrides(map) {
+  try { sessionStorage.setItem(ASSET_STATUS_KEY, JSON.stringify(map)); } catch {}
+}
+
+// Persists WO status overrides as a safety net in case patchWorkOrder doesn't reach
+// the backend (or the backend doesn't persist between restarts).
+function loadWOStatusOverrides() {
+  try { return JSON.parse(sessionStorage.getItem(WO_STATUS_KEY) || '{}'); } catch { return {}; }
+}
+function saveWOStatusOverrides(map) {
+  try { sessionStorage.setItem(WO_STATUS_KEY, JSON.stringify(map)); } catch {}
+}
+
+// Enrichment data saved at executor HITL approval time — carries risk, cost, RUL,
+// duration and assignee from the recommendation rec into the WO display fields
+// (the backend WO record doesn't include these).
+const WO_ENRICH_KEY = 'dro-wo-enrichments';
+export function saveWOEnrichment(woId, fields) {
+  try {
+    const map = JSON.parse(sessionStorage.getItem(WO_ENRICH_KEY) || '{}');
+    sessionStorage.setItem(WO_ENRICH_KEY, JSON.stringify({ ...map, [woId]: fields }));
+  } catch {}
+}
+function loadWOEnrichments() {
+  try { return JSON.parse(sessionStorage.getItem(WO_ENRICH_KEY) || '{}'); } catch { return {}; }
+}
+
 function mergeWOs(payload) {
+  const enrichments = loadWOEnrichments();
   return (payload.workorders || []).map(wo => {
     const fb = WO_FALLBACK[wo.id] || {};
+    const en = enrichments[wo.id] || {};
     return {
       ...fb,
       id: wo.id,
-      pr: wo.priority || 'MEDIUM',
+      pr: wo.priority || en.pr || 'MEDIUM',
       st: wo.status || 'Pending',
       ti: wo.title || wo.description || wo.id,
       as: wo.asset_display || wo.asset_id || fb.as || '',
-      asgn: wo.assigned_to || 'Pending',
+      asgn: wo.assigned_to !== 'Pending' && wo.assigned_to ? wo.assigned_to : (en.asgn || 'Pending'),
       due: wo.due || 'Not scheduled',
       by: wo.created_by || 'DRO Agent',
       tp: wo.type || 'Maintenance',
-      est: wo.est_hours ? `${wo.est_hours}h` : (fb.est || ''),
-      parts: wo.parts || fb.parts || '',
-      rul: wo.rul ?? fb.rul ?? '—',
-      risk: wo.risk ?? fb.risk ?? '—',
-      cost: wo.cost ?? fb.cost ?? '—',
+      est: wo.est_hours ? `${wo.est_hours}h` : (en.est || fb.est || '—'),
+      parts: wo.parts || en.parts || fb.parts || '',
+      rul: wo.rul ?? en.rul ?? fb.rul ?? '—',
+      risk: wo.risk || en.risk || fb.risk || '—',
+      cost: wo.cost ?? en.cost ?? fb.cost ?? '—',
       cl: (wo.checklist || []).map(item => ({ ck: Boolean(item.done), tx: item.text, tg: item.tag || 'Task' })),
       tl: wo.timeline?.length
         ? wo.timeline.map(ev => ({ dot: ev.dot || 'var(--t3)', ev: ev.ev, tm: ev.tm }))
@@ -80,6 +116,7 @@ export function AppProvider({ children }) {
   const [currentView, setCurrentView] = useState('chat');
   const [agentAsset, setAgentAsset] = useState('M-104');
   const [assets, setAssets] = useState(ASSETS);
+  const [assetsLoaded, setAssetsLoaded] = useState(false);
   const [workOrders, setWorkOrders] = useState([]);
   const [selectedAsset, setSelectedAsset] = useState(ASSETS[0]);
   const [selectedWO, setSelectedWO] = useState(null);
@@ -98,6 +135,30 @@ export function AppProvider({ children }) {
       saveAssetPipeline(next);
       return next;
     });
+  }, []);
+
+  const updateAssetStatus = useCallback((assetId, newStatus) => {
+    const overrides = loadAssetStatusOverrides();
+    saveAssetStatusOverrides({ ...overrides, [assetId]: newStatus });
+    const applyStatus = a =>
+      (a.id === assetId || a.asset_id === assetId) ? { ...a, st: newStatus } : a;
+    setAssets(prev => prev.map(applyStatus));
+    setSelectedAsset(prev => prev ? applyStatus(prev) : prev);
+  }, []);
+
+  // Update live sensor readings on a specific asset so fleet ribbon + registry stay current
+  const updateAssetSensorData = useCallback((assetId, sensorFields) => {
+    const applySensor = a => {
+      if (a.id !== assetId && a.asset_id !== assetId) return a;
+      return {
+        ...a,
+        vib:  sensorFields.vib_rms_mms  != null ? +sensorFields.vib_rms_mms.toFixed(2)  : a.vib,
+        tmp:  sensorFields.temp_c        != null ? +sensorFields.temp_c.toFixed(1)        : a.tmp,
+        bpfo: sensorFields.bpfo_ratio    != null ? +sensorFields.bpfo_ratio.toFixed(3)    : a.bpfo,
+      };
+    };
+    setAssets(prev => prev.map(applySensor));
+    setSelectedAsset(prev => prev ? applySensor(prev) : prev);
   }, []);
 
   useEffect(() => {
@@ -121,18 +182,35 @@ export function AppProvider({ children }) {
         };
       });
       if (rows.length) {
-        setAssets(rows);
-        setSelectedAsset(current => rows.find(a => a.id === current?.id) || rows[0]);
+        // Re-apply any status changes made during the session (e.g. asset marked healthy
+        // after WO closure) that the backend doesn't know about yet.
+        const statusOverrides = loadAssetStatusOverrides();
+        const finalRows = rows.map(r => {
+          const override = statusOverrides[r.asset_id] || statusOverrides[r.id];
+          return override ? { ...r, st: override } : r;
+        });
+        setAssets(finalRows);
+        setSelectedAsset(current => finalRows.find(a => a.id === current?.id) || finalRows[0]);
         setDataStatus(current => ({ ...current, assets: payload.source || 'backend' }));
       }
-    }).catch(() => setDataStatus(current => ({ ...current, assets: 'fallback' })));
+      setAssetsLoaded(true);
+    }).catch(() => {
+      setDataStatus(current => ({ ...current, assets: 'fallback' }));
+      setAssetsLoaded(true);
+    });
 
     fetchWorkOrders().then(payload => {
       if (!active) return;
       const rows = mergeWOs(payload);
       if (rows.length) {
-        setWorkOrders(rows);
-        setSelectedWO(current => rows.find(wo => wo.id === current?.id) || rows[0]);
+        // Re-apply WO status changes in case the backend didn't persist them.
+        const woOverrides = loadWOStatusOverrides();
+        const finalRows = rows.map(wo => {
+          const override = woOverrides[wo.id];
+          return override ? { ...wo, st: override } : wo;
+        });
+        setWorkOrders(finalRows);
+        setSelectedWO(current => finalRows.find(wo => wo.id === current?.id) || finalRows[0]);
         setDataStatus(current => ({ ...current, workOrders: 'backend' }));
       }
     }).catch(() => setDataStatus(current => ({ ...current, workOrders: 'fallback' })));
@@ -144,14 +222,19 @@ export function AppProvider({ children }) {
         if (!active) return;
         const rows = mergeWOs(payload);
         if (rows.length) {
+          const woOverrides = loadWOStatusOverrides();
+          const finalRows = rows.map(wo => {
+            const override = woOverrides[wo.id];
+            return override ? { ...wo, st: override } : wo;
+          });
           setWorkOrders(prev => {
             // Only update if something actually changed (new WO count or status diff)
-            const hasNew = rows.length !== prev.length ||
-              rows.some(r => {
+            const hasNew = finalRows.length !== prev.length ||
+              finalRows.some(r => {
                 const existing = prev.find(p => p.id === r.id);
                 return !existing || existing.st !== r.st;
               });
-            return hasNew ? rows : prev;
+            return hasNew ? finalRows : prev;
           });
         }
       }).catch(() => {});
@@ -306,15 +389,50 @@ export function AppProvider({ children }) {
   const updateWOStatus = useCallback((id, newStatus, actingPersona) => {
     const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const personaLabel = _PERSONA_DISPLAY[actingPersona] || actingPersona || 'Unknown';
-    const dotColor = newStatus === 'Scheduled' ? 'var(--gn)'
+    const dotColor = newStatus === 'Scheduled'   ? 'var(--gn)'
       : newStatus === 'In Progress' ? 'var(--ac2)'
-      : newStatus === 'Closed' ? 'var(--t3)'
+      : newStatus === 'Closed'      ? 'var(--t3)'
       : 'var(--am)';
     const timeEntry = { dot: dotColor, ev: `Status → ${newStatus}`, by: personaLabel, tm: `Today ${now}` };
     const applyUpdate = wo => wo.id === id
       ? { ...wo, st: newStatus, tl: [timeEntry, ...(wo.tl || [])] }
       : wo;
-    setWorkOrders(prev => prev.map(applyUpdate));
+
+    // Persist WO status so it survives a page refresh
+    const woOverrides = loadWOStatusOverrides();
+    saveWOStatusOverrides({ ...woOverrides, [id]: newStatus });
+
+    setWorkOrders(prev => {
+      // When WO is closed, mark the associated asset as healthy (maintenance complete)
+      if (newStatus === 'Closed') {
+        const wo = prev.find(w => w.id === id);
+        if (wo?.as) {
+          // Persist asset status override so it survives a page refresh
+          const statusOverrides = loadAssetStatusOverrides();
+          saveAssetStatusOverrides({ ...statusOverrides, [wo.as]: 'healthy' });
+
+          const applyHealthy = a =>
+            (a.id === wo.as || a.asset_id === wo.as) ? { ...a, st: 'healthy' } : a;
+          setAssets(assets => assets.map(applyHealthy));
+          setSelectedAsset(sel => sel ? applyHealthy(sel) : sel);
+          // Mark the corresponding pipeline state entry as WO closed so AgentDetail shows "Completed"
+          setAssetPipelineState(prevPipe => {
+            let changed = false;
+            const next = { ...prevPipe };
+            Object.keys(next).forEach(key => {
+              if (next[key].woId === id) {
+                next[key] = { ...next[key], woClosed: true, woClosedBy: actingPersona };
+                changed = true;
+              }
+            });
+            if (!changed) return prevPipe;
+            saveAssetPipeline(next);
+            return next;
+          });
+        }
+      }
+      return prev.map(applyUpdate);
+    });
     setSelectedWO(prev => prev?.id === id ? applyUpdate(prev) : prev);
     patchWorkOrder(id, { status: newStatus, updated_by: personaLabel }).catch(() => {});
   }, []);
@@ -324,7 +442,8 @@ export function AppProvider({ children }) {
       persona, setPersona,
       currentView, setCurrentView,
       agentAsset, setAgentAsset,
-      assets, workOrders, dataStatus,
+      assets, assetsLoaded, workOrders, dataStatus,
+      updateAssetStatus, updateAssetSensorData,
       selectedAsset, setSelectedAsset,
       selectedWO, setSelectedWO,
       selectedNode, setSelectedNode,

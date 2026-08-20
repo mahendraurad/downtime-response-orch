@@ -10,11 +10,47 @@ import AssetRegistryView from './components/AssetRegistryView/AssetRegistryView'
 import WorkOrdersView from './components/WorkOrdersView/WorkOrdersView';
 
 function AppInner() {
-  const { currentView, theme, showLeftPanel, setShowLeftPanel } = React.useContext(AppContext);
+  const { currentView, theme, showLeftPanel, setShowLeftPanel, assetsLoaded, dataStatus } = React.useContext(AppContext);
 
   React.useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
+
+  if (!assetsLoaded) {
+    return (
+      <div style={{
+        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+        height: '100vh', background: 'var(--bg)', gap: '20px',
+      }}>
+        <div style={{
+          width: '36px', height: '36px', borderRadius: '50%',
+          border: '3px solid var(--b2)', borderTopColor: 'var(--ac)',
+          animation: 'spin 0.8s linear infinite',
+        }} />
+        <div style={{ fontFamily: 'var(--f)', fontSize: '13px', color: 'var(--t2)' }}>
+          Connecting to backend…
+        </div>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
+  }
+
+  if (assetsLoaded && dataStatus.assets === 'fallback') {
+    return (
+      <div style={{
+        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+        height: '100vh', background: 'var(--bg)', gap: '12px',
+      }}>
+        <div style={{ fontSize: '24px' }}>⚠</div>
+        <div style={{ fontFamily: 'var(--f)', fontSize: '14px', fontWeight: 600, color: 'var(--t)' }}>
+          Backend offline
+        </div>
+        <div style={{ fontFamily: 'var(--f)', fontSize: '12px', color: 'var(--t3)', textAlign: 'center', maxWidth: '300px' }}>
+          Could not connect to the DRO backend. Please check the service is running and refresh the page.
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>

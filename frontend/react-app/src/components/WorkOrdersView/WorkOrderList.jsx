@@ -3,6 +3,14 @@ import React, { useState } from 'react';
 const PR_COLOR = { URGENT: 'var(--rd)', MEDIUM: 'var(--am)', LOW: 'var(--gn)' };
 const PR_BG = { URGENT: 'var(--rdm)', MEDIUM: 'var(--adm)', LOW: 'var(--gd)' };
 
+// Personas who have real action buttons (approve / progress / complete) at each WO status.
+// Derived from WO_PERSONA_ACTS in WorkOrderDetail — must stay in sync if that map changes.
+const WO_ASSIGNEES = {
+  'Pending':     'Plant Supervisor / Plant Manager / VP Operations',
+  'Scheduled':   'Plant Supervisor',
+  'In Progress': 'Plant Supervisor / Maintenance Planner',
+};
+
 export default function WorkOrderList({ workOrders = [], selectedWO, onSelect }) {
   const [filter, setFilter] = useState('all');
 
@@ -15,14 +23,14 @@ export default function WorkOrderList({ workOrders = [], selectedWO, onSelect })
     <div className="wol">
       <div className="wolhdr">
         <span className="woltt">Work Orders</span>
-        <button className="chip grn" style={{ fontSize: '10px', padding: '3px 8px' }}>+ New WO</button>
       </div>
       <div className="woflt">
         {[
-          { id: 'all', lbl: `All (${workOrders.length})` },
-          { id: 'pending', lbl: `Pending (${workOrders.filter(x => x.st === 'Pending').length})` },
-          { id: 'scheduled', lbl: `Scheduled (${workOrders.filter(x => x.st === 'Scheduled').length})` },
-          { id: 'closed', lbl: `Closed (${workOrders.filter(x => x.st === 'Closed').length})` },
+          { id: 'all',         lbl: `All (${workOrders.length})` },
+          { id: 'pending',     lbl: `Pending (${workOrders.filter(x => x.st === 'Pending').length})` },
+          { id: 'scheduled',   lbl: `Scheduled (${workOrders.filter(x => x.st === 'Scheduled').length})` },
+          { id: 'in progress', lbl: `In Progress (${workOrders.filter(x => x.st === 'In Progress').length})` },
+          { id: 'closed',      lbl: `Closed (${workOrders.filter(x => x.st === 'Closed').length})` },
         ].map(f => (
           <button
             key={f.id}
@@ -50,9 +58,11 @@ export default function WorkOrderList({ workOrders = [], selectedWO, onSelect })
               <div className="wcti">{wo.ti}</div>
               <div className="wcas">{wo.as}</div>
               <div className="wcft">
-                <div className="wcag">👤 {wo.asgn}</div>
+                <div className="wcag">
+                  {wo.st === 'Closed' ? '✓ Completed' : `👤 ${WO_ASSIGNEES[wo.st] || wo.asgn || '—'}`}
+                </div>
                 <div className="wcdu" style={{ color: wo.st === 'Closed' ? 'var(--t3)' : 'var(--am)' }}>
-                  {wo.due}
+                  {wo.st === 'Closed' ? 'Closed' : wo.due}
                 </div>
               </div>
             </div>

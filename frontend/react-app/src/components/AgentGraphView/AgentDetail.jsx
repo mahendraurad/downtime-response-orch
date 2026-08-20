@@ -1,4 +1,4 @@
-import React, { useState, useContext, useRef } from 'react';
+import React, { useState, useContext, useRef, useEffect } from 'react';
 import { AG_NODES } from '../../data/agentNodes';
 import { PERSONA_TASKS } from '../../data/personaTasks';
 import { ASSET_AG_STATE } from '../../data/assetAgState';
@@ -6,6 +6,44 @@ import { ASSETS } from '../../data/assets';
 import { ASSET_SCENARIO } from '../../data/scenarios';
 import { askChat } from '../../api/chat';
 import { AppContext } from '../../context/AppContext';
+
+const ACTION_LABELS = {
+  stop_and_replace:          'Stop the asset and replace the bearing now',
+  immediate_replacement:     'Replace bearing immediately — emergency intervention required',
+  emergency_replacement:     'Emergency bearing replacement — stop asset now',
+  emergency_shutdown:        'Shut down asset immediately — safety intervention required',
+  defer_and_monitor:         'Defer repair — schedule maintenance and increase monitoring',
+  schedule_replacement:      'Schedule a planned bearing replacement',
+  planned_replacement:       'Schedule a planned bearing replacement',
+  schedule_maintenance:      'Schedule a planned maintenance window',
+  bearing_replacement:       'Replace the bearing during next maintenance window',
+  monitor_only:              'Continue running — monitor closely and reassess',
+  vibration_monitoring:      'Increase vibration monitoring frequency',
+  inspection_only:           'Physical inspection at next planned opportunity',
+  partial_load_operation:    'Reduce operating load — continue with caution',
+  reduce_load:               'Reduce operating load immediately',
+  lubrication_and_monitor:   'Re-lubricate bearing and monitor for improvement',
+  lubrication:               'Re-lubricate bearing',
+  run_to_failure:            'Accept risk — run to failure (not recommended)',
+};
+
+function friendlyActionLabel(name) {
+  if (!name) return '—';
+  const key = name.toLowerCase().replace(/[\s\-]+/g, '_');
+  if (ACTION_LABELS[key]) return ACTION_LABELS[key];
+  return name.replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase());
+}
+
+function cleanRationale(text) {
+  if (!text) return text;
+  let t = text
+    .replace(/^[\w\s,'-]+ ranks (first|above|highest|second|third)[,\s]+/i, '')
+    .replace(/\bthis ranks above alternatives? because\b/i, 'The alternatives are less suitable because')
+    .replace(/\bthis action ranks (first|above|highest)\b[,\s]*/i, '')
+    .trim();
+  if (t && !/[.!?]$/.test(t)) t += '…';
+  return t || text;
+}
 
 const TABS = [
   { id: 'overview', lbl: 'Overview' },
@@ -64,9 +102,9 @@ function buildLiveOutput(idx, pipelineResult, asset, persona, storedState) {
     case 5: { // Prescriptive
       const rec = pipelineResult.recommendation;
       if (!rec) return null;
-      const act = rec.recommended_action?.name || rec.recommended_action?.description || 'N/A';
+      const act = friendlyActionLabel(rec.recommended_action?.name) || rec.recommended_action?.description || 'N/A';
       const urg = rec.urgency ? rec.urgency.toUpperCase() : '';
-      return `Action: ${act} · Urgency: ${urg} · ${rec.rationale ? rec.rationale.substring(0, 80) + '…' : ''}`.replace(/ · $/, '');
+      return `Action: ${act} · Urgency: ${urg} · ${rec.rationale ? cleanRationale(rec.rationale) : ''}`.replace(/ · $/, '');
     }
     case 6: { // Executor
       const ex = pipelineResult.execution_result;
@@ -91,8 +129,8 @@ function buildLiveKPIs(idx, pipelineResult, storedState) {
   // Executor: use stored chat approval data when no live pipeline result
   if (idx === 6 && storedState?.status === 'approved' && (!pipelineResult || !pipelineResult.execution_result)) {
     return {
-      'WO created': storedState.woId || '—',
-      'SAP PM status': storedState.executionStatus || 'Approved',
+      'WO': storedState.woId || '—',
+      'Status': storedState.woClosed ? 'Closed — work complete' : (storedState.executionStatus || 'Open'),
       'Parts reserved': storedState.partsReserved || '—',
       'Crew notified': storedState.crewNotified ? 'Yes' : 'Pending',
       'Approved by': storedState.approvedBy || '—',
@@ -141,7 +179,7 @@ function buildLiveKPIs(idx, pipelineResult, storedState) {
       if (!rec) return null;
       return {
         Latency: latStr,
-        'Recommended action': rec.recommended_action?.name || rec.recommended_action?.description || '—',
+        'Recommended action': friendlyActionLabel(rec.recommended_action?.name) || rec.recommended_action?.description || '—',
         Urgency: rec.urgency || '—',
         Window: rec.window_chosen || '—',
         'Net avoidance': rec.net_avoidance_value ? `$${rec.net_avoidance_value.toLocaleString()}` : '—',
@@ -166,6 +204,30 @@ function buildLiveKPIs(idx, pipelineResult, storedState) {
 export default function AgentDetail({ asset, persona, selectedNode, currentTab, onTabChange, pipelineResult, pipelineRunning, sensorData, storedState }) {
   const node = AG_NODES[selectedNode] || AG_NODES[0];
   const fallbackStates = ASSET_AG_STATE[asset] || ASSET_AG_STATE['M-104'];
+
+  // Smooth sensor readings with EWMA (α=0.25) to reduce visual jitter from backend noise
+  const [smoothedSensor, setSmoothedSensor] = useState(null);
+  const prevSmoothedRef = useRef(null);
+  useEffect(() => {
+    if (!sensorData) return;
+    const ALPHA = 0.25;
+    const prev = prevSmoothedRef.current;
+    if (!prev) {
+      prevSmoothedRef.current = { ...sensorData };
+      setSmoothedSensor({ ...sensorData });
+      return;
+    }
+    const smooth = (key) => ALPHA * (sensorData[key] ?? prev[key]) + (1 - ALPHA) * (prev[key] ?? sensorData[key]);
+    const next = {
+      ...sensorData,
+      vib_rms_mms: smooth('vib_rms_mms'),
+      temp_c: smooth('temp_c'),
+      bpfo_ratio: smooth('bpfo_ratio'),
+      rpm: smooth('rpm'),
+    };
+    prevSmoothedRef.current = next;
+    setSmoothedSensor(next);
+  }, [sensorData]);
 
   let liveStates = null;
   if (pipelineResult?.pipeline_log) {
@@ -212,6 +274,7 @@ export default function AgentDetail({ asset, persona, selectedNode, currentTab, 
             pipelineResult={pipelineResult}
             pipelineRunning={pipelineRunning}
             sensorData={sensorData}
+            smoothedSensor={smoothedSensor}
             storedState={storedState}
           />
         )}
@@ -225,13 +288,24 @@ export default function AgentDetail({ asset, persona, selectedNode, currentTab, 
 
 // ─── Overview Panel (merged with Node Detail) ────────────────────────────────
 
-function OverviewPanel({ asset, persona, states, selectedNode, node, state, pipelineResult, pipelineRunning, sensorData, storedState }) {
+function OverviewPanel({ asset, persona, states, selectedNode, node, state, pipelineResult, pipelineRunning, sensorData, smoothedSensor, storedState }) {
+  const { assets } = useContext(AppContext);
+  const assetObj = (assets || []).find(a => a.id === asset);
   const stateLabel = { nd: 'Complete', nr: 'Running', ni: 'Standby' };
   const stateColor = { nd: 'var(--gn)', nr: 'var(--am)', ni: 'var(--t3)' };
 
   const fd = pipelineResult?.fault_diagnosis;
   const ra = pipelineResult?.risk_assessment;
   const rec = pipelineResult?.recommendation;
+
+  // Use dashboard-fetched asset values for stable sensor display.
+  // Fall back to EWMA-smoothed WS data only when dashboard values are absent.
+  const displaySensor = (assetObj?.vib != null || assetObj?.tmp != null) ? {
+    vib_rms_mms: assetObj?.vib,
+    temp_c:      assetObj?.tmp,
+    bpfo_ratio:  assetObj?.bpfo,
+    rpm:         smoothedSensor?.rpm,
+  } : smoothedSensor;
 
   const liveOut = buildLiveOutput(selectedNode, pipelineResult, asset, persona, storedState);
   const staticOut = node.assetOut?.[asset]?.[persona] || null;
@@ -245,19 +319,21 @@ function OverviewPanel({ asset, persona, states, selectedNode, node, state, pipe
   const kpisLabel = (pipelineResult && liveKPIs) ? '· LIVE' : kpisFromChat ? '· CHAT APPROVAL' : kpis ? '· STATIC' : null;
   const nodeEntry = getLogEntry(pipelineResult, selectedNode);
 
+  const stColor = { critical: 'var(--rd)', warning: 'var(--am)', healthy: 'var(--gn)' };
+
   return (
     <div className="ag-tab-panel on" style={{ padding: '16px', overflow: 'auto' }}>
 
-      {/* Live sensor tiles */}
-      {sensorData && (
+      {/* Sensor tiles — sourced from backend dataset values, updated every 5 s via EWMA throttle */}
+      {displaySensor && (
         <div style={{ marginBottom: '14px' }}>
-          <div className="sttl" style={{ marginBottom: '6px' }}>Live Sensors · {asset}</div>
+          <div className="sttl" style={{ marginBottom: '6px' }}>Sensor Readings · {asset}</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px' }}>
             {[
-              { lbl: 'VIB', val: sensorData.vib_rms_mms?.toFixed(2), unit: 'mm/s' },
-              { lbl: 'TEMP', val: sensorData.temp_c?.toFixed(1), unit: '°C' },
-              { lbl: 'BPFO', val: sensorData.bpfo_ratio?.toFixed(2), unit: '×' },
-              { lbl: 'RPM', val: sensorData.rpm != null ? Math.round(sensorData.rpm) : null, unit: '' },
+              { lbl: 'VIB', val: displaySensor.vib_rms_mms != null ? (+displaySensor.vib_rms_mms).toFixed(2) : null, unit: 'mm/s' },
+              { lbl: 'TEMP', val: displaySensor.temp_c != null ? (+displaySensor.temp_c).toFixed(1) : null, unit: '°C' },
+              { lbl: 'BPFO', val: displaySensor.bpfo_ratio != null ? (+displaySensor.bpfo_ratio).toFixed(2) : null, unit: '×' },
+              { lbl: 'RPM', val: displaySensor.rpm != null ? Math.round(displaySensor.rpm) : null, unit: '' },
             ].map(({ lbl, val, unit }) => (
               <div key={lbl} className="dc" style={{ textAlign: 'center', padding: '8px 4px' }}>
                 <div className="dcl" style={{ marginBottom: '4px' }}>{lbl}</div>
@@ -270,11 +346,30 @@ function OverviewPanel({ asset, persona, states, selectedNode, node, state, pipe
         </div>
       )}
 
-      {/* Pipeline-level summary metrics */}
-      {pipelineResult && (fd || ra || rec) && (
+      {/* Pipeline-level summary — always shows asset status + any live/chat/WO actions */}
+      {(assetObj || (pipelineResult && (fd || ra || rec)) || storedState) && (
         <div style={{ marginBottom: '14px' }}>
-          <div className="sttl" style={{ marginBottom: '6px' }}>Pipeline Summary</div>
+          <div className="sttl" style={{ marginBottom: '6px' }}>
+            Asset Summary
+            {!pipelineResult && storedState && <span style={{ fontSize: '9px', color: 'var(--t3)', fontFamily: 'var(--m)', marginLeft: '6px' }}>· includes chat session actions</span>}
+          </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+            {/* Current asset status — reactive to all changes (chat approvals, WO closures) */}
+            {assetObj && (
+              <div className="dc">
+                <div className="dcl">Current Status</div>
+                <div className="dcv" style={{ fontSize: '11px', textTransform: 'capitalize', color: stColor[assetObj.st] || 'var(--t3)' }}>
+                  {assetObj.st || '—'}
+                </div>
+              </div>
+            )}
+            {assetObj?.rul && (
+              <div className="dc">
+                <div className="dcl">RUL</div>
+                <div className="dcv" style={{ fontSize: '11px' }}>{assetObj.rul}</div>
+              </div>
+            )}
+            {/* Live pipeline result tiles */}
             {fd && <div className="dc"><div className="dcl">Fault Type</div><div className="dcv" style={{ fontSize: '11px' }}>{fd.fault_type || '—'}</div></div>}
             {fd?.confidence != null && (
               <div className="dc">
@@ -293,15 +388,51 @@ function OverviewPanel({ asset, persona, states, selectedNode, node, state, pipe
               </div>
             )}
             {ra?.rul_days_estimated != null && <div className="dc"><div className="dcl">RUL Estimate</div><div className="dcv" style={{ fontSize: '12px' }}>{ra.rul_days_estimated} days</div></div>}
-            {rec?.urgency && (
-              <div className="dc">
-                <div className="dcl">Urgency</div>
-                <div className="dcv" style={{ fontSize: '11px', textTransform: 'uppercase', color: rec.urgency === 'immediate' ? 'var(--rd)' : rec.urgency === 'urgent' ? 'var(--am)' : 'var(--t2)' }}>
-                  {rec.urgency}
+            {rec?.urgency && (() => {
+              // Downgrade urgency once action has been taken — no point showing IMMEDIATE
+              // after the WO has been approved or closed.
+              const effUrgency = storedState?.woClosed ? 'resolved'
+                : storedState?.status === 'approved' ? 'planned'
+                : rec.urgency;
+              const urgColor = effUrgency === 'resolved' ? 'var(--gn)'
+                : effUrgency === 'planned' ? 'var(--ac2)'
+                : effUrgency === 'immediate' ? 'var(--rd)'
+                : effUrgency === 'urgent' ? 'var(--am)'
+                : 'var(--t2)';
+              return (
+                <div className="dc">
+                  <div className="dcl">Urgency</div>
+                  <div className="dcv" style={{ fontSize: '11px', textTransform: 'uppercase', color: urgColor }}>
+                    {effUrgency}
+                  </div>
+                </div>
+              );
+            })()}
+            {rec?.recommended_action && <div className="dc"><div className="dcl">Recommendation</div><div className="dcv" style={{ fontSize: '11px' }}>{friendlyActionLabel(rec.recommended_action.name) || rec.recommended_action.description || '—'}</div></div>}
+            {/* Chat session action tiles (shown when no live pipeline run for this asset) */}
+            {!pipelineResult && storedState?.monitoringStatus && (
+              <div className="dc"><div className="dcl">Anomaly Review</div><div className="dcv" style={{ fontSize: '11px', textTransform: 'capitalize', color: storedState.monitoringStatus === 'confirmed' ? 'var(--am)' : 'var(--t3)' }}>{storedState.monitoringStatus}</div></div>
+            )}
+            {!pipelineResult && storedState?.diagnosisFaultLabel && (
+              <div className="dc"><div className="dcl">Fault Identified</div><div className="dcv" style={{ fontSize: '11px' }}>{storedState.diagnosisFaultLabel}</div></div>
+            )}
+            {!pipelineResult && storedState?.diagnosisStatus && (
+              <div className="dc"><div className="dcl">Diagnosis</div><div className="dcv" style={{ fontSize: '11px', textTransform: 'capitalize', color: storedState.diagnosisStatus === 'confirmed' ? 'var(--gn)' : 'var(--am)' }}>{storedState.diagnosisStatus}</div></div>
+            )}
+            {!pipelineResult && storedState?.status === 'approved' && (
+              <div className="dc"><div className="dcl">Execution</div><div className="dcv" style={{ fontSize: '11px', color: 'var(--gn)' }}>Approved · WO {storedState.woId || 'created'}</div></div>
+            )}
+            {!pipelineResult && storedState?.status === 'rejected' && (
+              <div className="dc"><div className="dcl">Execution</div><div className="dcv" style={{ fontSize: '11px', color: 'var(--rd)' }}>Rejected</div></div>
+            )}
+            {storedState?.woClosed && (
+              <div className="dc" style={{ gridColumn: '1 / -1' }}>
+                <div className="dcl">Work Order</div>
+                <div className="dcv" style={{ fontSize: '11px', color: 'var(--gn)' }}>
+                  ✓ Closed — maintenance complete{storedState.woClosedBy ? ` · by ${storedState.woClosedBy}` : ''}
                 </div>
               </div>
             )}
-            {rec?.recommended_action && <div className="dc"><div className="dcl">Recommendation</div><div className="dcv" style={{ fontSize: '11px' }}>{rec.recommended_action.name || rec.recommended_action.description || '—'}</div></div>}
           </div>
         </div>
       )}
@@ -389,20 +520,29 @@ function OverviewPanel({ asset, persona, states, selectedNode, node, state, pipe
 
 // ─── Persona Tasks Panel ─────────────────────────────────────────────────────
 
+const PERSONA_LABELS = {
+  supervisor: 'Plant Supervisor', engineer: 'Reliability Engineer',
+  maintenance: 'Maintenance Planner', manager: 'Plant Manager',
+  executive: 'Executive', ot: 'OT Controls Operator',
+  safety: 'Safety Officer', md: 'Managing Director',
+};
+
 function PersonaTasksPanel({ persona, asset, selectedNode }) {
-  const tasks = (PERSONA_TASKS[persona] && PERSONA_TASKS[persona][asset]) || [];
+  const rawTasks = PERSONA_TASKS[persona] || [];
+  // Inject the actual asset ID wherever {ASSET} appears in the description
+  const tasks = rawTasks.map(([label, desc]) => [label, desc.replace(/\{ASSET\}/g, asset)]);
 
   return (
     <div className="ag-tab-panel on" style={{ padding: '16px', overflow: 'auto' }}>
-      <div className="sttl" style={{ marginBottom: '4px' }}>
-        {persona.charAt(0).toUpperCase() + persona.slice(1)} Tasks · {asset}
+      <div className="sttl" style={{ marginBottom: '2px' }}>
+        {PERSONA_LABELS[persona] || persona} — Role Tasks
       </div>
       <div style={{ fontSize: '11px', color: 'var(--t3)', marginBottom: '14px' }}>
-        Actions for this asset in your role
+        What this role should do in DRO for <strong style={{ color: 'var(--t2)' }}>{asset}</strong>
       </div>
       {tasks.length === 0 ? (
         <div style={{ fontSize: '12px', color: 'var(--t3)', fontStyle: 'italic' }}>
-          No specific tasks defined for this persona / asset combination.
+          No tasks defined for this persona.
         </div>
       ) : (
         tasks.map(([label, desc], i) => (
@@ -425,7 +565,7 @@ function PersonaTasksPanel({ persona, asset, selectedNode }) {
               </span>
               <span style={{ fontWeight: 600, fontSize: '12px', color: 'var(--t)' }}>{label}</span>
             </div>
-            <div style={{ fontSize: '11px', color: 'var(--t2)', lineHeight: '1.55', paddingLeft: '28px' }}>
+            <div style={{ fontSize: '11px', color: 'var(--t2)', lineHeight: '1.6', paddingLeft: '28px' }}>
               {desc}
             </div>
           </div>
@@ -523,11 +663,12 @@ function ActionsPanel({ asset, persona, selectedNode, pipelineResult, pipelineRu
             </span>
           </div>
           <div style={{ fontWeight: 600, fontSize: '12px', color: 'var(--t)', marginBottom: '4px' }}>
-            {rec.recommended_action?.name || rec.recommended_action?.description || 'See recommendation'}
+            {friendlyActionLabel(rec.recommended_action?.name) || rec.recommended_action?.description || 'See recommendation'}
           </div>
           {rec.rationale && (
             <div style={{ fontSize: '11px', color: 'var(--t2)', lineHeight: '1.5' }}>
-              {rec.rationale.length > 160 ? rec.rationale.substring(0, 160) + '…' : rec.rationale}
+              <span style={{ fontSize: '10px', fontWeight: 600, color: 'var(--t3)', fontFamily: 'var(--m)', textTransform: 'uppercase', display: 'block', marginBottom: '3px' }}>Why this action was recommended</span>
+              {cleanRationale(rec.rationale)}
             </div>
           )}
         </div>

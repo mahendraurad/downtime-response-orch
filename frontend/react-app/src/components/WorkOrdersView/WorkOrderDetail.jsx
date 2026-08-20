@@ -8,6 +8,12 @@ import { API } from '../../config/api';
 const PR_COLOR = { URGENT: 'var(--rd)', MEDIUM: 'var(--am)', LOW: 'var(--gn)' };
 const PR_BG    = { URGENT: 'var(--rdm)', MEDIUM: 'var(--adm)', LOW: 'var(--gd)' };
 
+const WO_ASSIGNEES = {
+  'Pending':     'Plant Supervisor / Plant Manager / VP Operations',
+  'Scheduled':   'Plant Supervisor',
+  'In Progress': 'Plant Supervisor / Maintenance Planner',
+};
+
 // actions — real system actions (status transitions, export). Rendered as buttons.
 // chips   — suggested AI questions. Rendered as small query chips below.
 const WO_PERSONA_ACTS = {
@@ -317,7 +323,7 @@ export default function WorkOrderDetail({ wo }) {
             </div>
             <div className="dc"><div className="dcl">Duration Est.</div><div className="dcv">{wo.est}</div></div>
             <div className="dc"><div className="dcl">Parts</div><div className="dcv" style={{ fontSize: '11px' }}>{wo.parts}</div></div>
-            <div className="dc"><div className="dcl">Assigned To</div><div className="dcv" style={{ fontSize: '11px' }}>{wo.asgn}</div></div>
+            <div className="dc"><div className="dcl">Assigned To</div><div className="dcv" style={{ fontSize: '11px' }}>{WO_ASSIGNEES[wo.st] || (wo.st === 'Closed' ? '✓ Completed' : wo.asgn || '—')}</div></div>
             <div className="dc"><div className="dcl">Cost</div><div className="dcv" style={{ fontSize: '11px' }}>{wo.cost}</div></div>
           </div>
         </div>

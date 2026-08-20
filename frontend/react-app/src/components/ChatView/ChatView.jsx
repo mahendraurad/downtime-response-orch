@@ -1,5 +1,5 @@
 import React, { useContext, useEffect, useRef, useState, useCallback } from 'react';
-import { AppContext } from '../../context/AppContext';
+import { AppContext, saveWOEnrichment } from '../../context/AppContext';
 import { PD, resolvePersonaData } from '../../data/personas';
 import { ts } from '../../utils/helpers';
 import {
@@ -8,6 +8,35 @@ import {
 } from '../../utils/escalationTimer';
 
 // ── Cross-asset correlation helpers ──────────────────────────────────────────
+
+// Maps backend action codes (snake_case) to plain-English labels shown in HITL cards.
+// Falls back to capitalising and spacing the raw code for unknown values.
+const ACTION_LABELS = {
+  stop_and_replace:          'Stop the asset and replace the bearing now',
+  immediate_replacement:     'Replace bearing immediately — emergency intervention required',
+  emergency_replacement:     'Emergency bearing replacement — stop asset now',
+  emergency_shutdown:        'Shut down asset immediately — safety intervention required',
+  defer_and_monitor:         'Defer repair — schedule maintenance and increase monitoring',
+  schedule_replacement:      'Schedule a planned bearing replacement',
+  planned_replacement:       'Schedule a planned bearing replacement',
+  schedule_maintenance:      'Schedule a planned maintenance window',
+  bearing_replacement:       'Replace the bearing during next maintenance window',
+  monitor_only:              'Continue running — monitor closely and reassess',
+  vibration_monitoring:      'Increase vibration monitoring frequency',
+  inspection_only:           'Physical inspection at next planned opportunity',
+  partial_load_operation:    'Reduce operating load — continue with caution',
+  reduce_load:               'Reduce operating load immediately',
+  lubrication_and_monitor:   'Re-lubricate bearing and monitor for improvement',
+  lubrication:               'Re-lubricate bearing',
+  run_to_failure:            'Accept risk — run to failure (not recommended)',
+};
+
+function friendlyActionLabel(name) {
+  if (!name) return '—';
+  const key = name.toLowerCase().replace(/[\s\-]+/g, '_');
+  if (ACTION_LABELS[key]) return ACTION_LABELS[key];
+  return name.replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase());
+}
 
 function formatMoney(amount) {
   if (amount >= 1000000) return `$${(amount / 1000000).toFixed(1)}M`;
@@ -32,6 +61,17 @@ function extractFaultStage(rec) {
   const text = [rec.recommended_action?.description || '', rec.rationale || ''].join(' ');
   const m = text.match(/[Ss]tage\s*(\d)/);
   return m ? parseInt(m[1]) : null;
+}
+
+function cleanRationale(text) {
+  if (!text) return text;
+  let t = text
+    .replace(/^[\w\s,'-]+ ranks (first|above|highest|second|third)[,\s]+/i, '')
+    .replace(/\bthis ranks above alternatives? because\b/i, 'The alternatives are less suitable because')
+    .replace(/\bthis action ranks (first|above|highest)\b[,\s]*/i, '')
+    .trim();
+  if (t && !/[.!?]$/.test(t)) t += '…';
+  return t || text;
 }
 
 function getFaultClassLabel(rec) {
@@ -126,8 +166,19 @@ function HITLReadOnlyNotice({ access }) {
   );
 }
 
-function buildAssetSessionSummary(assetId, stored) {
+function sanitizeResponse(text) {
+  if (!text) return text;
+  const cleaned = text.replace(/^(YES|NO)[,.:;!?\s—\-]+\s*/i, '').replace(/^\s+/, '');
+  if (!cleaned || cleaned === text) return text;
+  return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+}
+
+function buildAssetSessionSummary(assetId, stored, currentHealth) {
   const rows = [];
+  if (currentHealth && currentHealth !== 'unknown') {
+    const hColor = { healthy: '#10b981', warning: '#f97316', critical: '#ef4444' }[currentHealth] || 'var(--t2)';
+    rows.push(`Current health: <strong style="color:${hColor}">${currentHealth.charAt(0).toUpperCase() + currentHealth.slice(1)}</strong>`);
+  }
   if (stored.remediationAction) {
     const label = stored.remediationAction === 'IMPUTE' ? 'Imputed from baseline' : stored.remediationAction === 'DROP' ? 'Signal dropped' : 'Kept with quality flag';
     rows.push(`Signal quality gate: <strong>${label}</strong>`);
@@ -139,16 +190,22 @@ function buildAssetSessionSummary(assetId, stored) {
     const dl = stored.diagnosisStatus === 'confirmed' ? `Confirmed — ${stored.diagnosisFaultLabel || 'fault classified'}` : 'Overridden to undetermined';
     rows.push(`Fault classification: <strong>${dl}</strong>`);
   }
-  if (stored.status === 'approved') {
-    rows.push(`Execution: <strong style="color:#10b981">Approved — WO ${stored.woId || 'created'}</strong> by ${stored.approvedBy || 'approver'}`);
+  if (stored.woClosed) {
+    rows.push(`Execution: <strong style="color:#10b981">Work order closed</strong> — repair complete`);
+  } else if (stored.status === 'approved') {
+    rows.push(`Execution: <strong style="color:#10b981">Approved — WO ${stored.woId || 'created'}</strong> by ${stored.approvedBy || 'approver'} · maintenance scheduled`);
   } else if (stored.status === 'rejected') {
     rows.push(`Execution: <strong style="color:#ef4444">Rejected</strong> by ${stored.rejectedBy || 'approver'}`);
   }
-  return `<div style="border:1.5px solid #3b82f6;border-radius:10px;padding:14px;background:rgba(59,130,246,0.04)">`
-    + `<div style="font-size:9px;font-weight:700;color:#3b82f6;font-family:var(--m);margin-bottom:8px">SESSION CACHE · ${assetId}</div>`
-    + `<strong style="color:var(--t)">This asset has already been processed in this session.</strong>`
+  if (stored.actionTaken) {
+    rows.push(`Action: <strong>${friendlyActionLabel(stored.actionTaken)}</strong>`);
+  }
+  const accentColor = stored.woClosed ? '#10b981' : stored.status === 'approved' ? '#10b981' : stored.status === 'rejected' ? '#ef4444' : '#3b82f6';
+  return `<div style="border:1.5px solid ${accentColor};border-radius:10px;padding:14px;background:rgba(0,0,0,0.02)">`
+    + `<div style="font-size:9px;font-weight:700;color:${accentColor};font-family:var(--m);margin-bottom:8px">SESSION STATUS · ${assetId}</div>`
+    + `<strong style="color:var(--t)">This asset has been actioned in this session.</strong>`
     + `<div style="margin-top:10px;font-size:12px;color:var(--t2);line-height:2">${rows.map(r => '• ' + r).join('<br>')}</div>`
-    + `<div style="margin-top:10px;font-size:11px;color:var(--t3)">Ask for a <strong>fresh analysis</strong> to re-run the pipeline, or ask a specific follow-up question.</div>`
+    + `<div style="margin-top:10px;font-size:11px;color:var(--t3)">Ask for a <strong>fresh analysis</strong> to re-run the pipeline against current backend data.</div>`
     + `</div>`;
 }
 
@@ -240,7 +297,7 @@ function buildComparisonHtml(a1, a2, persona) {
 }
 
 export default function ChatView() {
-  const { persona, messages, setMessages, addMessage, assets, workOrders, assetPipelineState, updateAssetPipelineState } = useContext(AppContext);
+  const { persona, messages, setMessages, addMessage, assets, workOrders, assetPipelineState, updateAssetPipelineState, updateAssetStatus } = useContext(AppContext);
   const fleetSummary = {
     total: assets?.length || 0,
     critical: assets?.filter(asset => asset.st === 'critical').length || 0,
@@ -255,6 +312,8 @@ export default function ChatView() {
   const inpRef = useRef(null);
   const conversationIdRef = useRef(null);
   const shownExecRecsRef = useRef([]);
+  // Caches the latest knowledge_guidance so document names survive across follow-up queries
+  const lastKnowledgeRef = useRef(null);
   const p = resolvePersonaData(persona, fleetSummary, workOrders);
 
   // Scroll to bottom whenever messages change
@@ -370,10 +429,16 @@ export default function ChatView() {
     setLivePipelineLog(pl);
     const ms = pl.reduce((s, n) => s + (n.latency_ms || 0), 0);
     const nodes = pl.length;
+    const kg = data.knowledge_guidance;
+    if (kg) lastKnowledgeRef.current = kg;
+    const sopLine = kg?.sop_id
+      ? `<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--b);font-size:10px;color:var(--t3)">📄 <strong style="color:var(--t2)">Referenced document:</strong> ${kg.sop_id}${kg.matching_cases?.length ? ` · ${kg.matching_cases.length} case${kg.matching_cases.length !== 1 ? 's' : ''} matched` : ''}${kg.parts_availability ? ` · Parts: ${kg.parts_availability}` : ''}</div>`
+      : '';
     const html = `<div style="margin-bottom:4px"><span style="font-size:9px;font-weight:600;color:var(--ac2);font-family:var(--m)">▶ REAL PIPELINE · ${nodes} agents · ${ms}ms</span></div>`
       + `<strong style="color:var(--t)">${data.headline}</strong><br><br>`
       + data.details.map(d => '• ' + d).join('<br>')
-      + (data.actions && data.actions.length ? '<br><br><strong>Recommended actions:</strong><br>' + data.actions.map(a => '→ ' + a).join('<br>') : '');
+      + (data.actions && data.actions.length ? '<br><br><strong>Recommended actions:</strong><br>' + data.actions.map(a => '→ ' + a).join('<br>') : '')
+      + sopLine;
     const routes = pl.map(n => n.node ? n.node.replace(/_/g, ' ') : '');
     appendA(html, routes, [], pl);
     if (data.hitl_advisory && data.hitl_advisory.advisory_note) {
@@ -398,9 +463,15 @@ export default function ChatView() {
     // this is a new pipeline request, a conversational follow-up, or general knowledge.
     // Conversation history is included so the classifier understands follow-up context.
     // (Future: swap this history source for a Cosmos DB episode fetch.)
+    // For asset-specific queries keep 8 turns of history for full context.
+    // For general/fleet questions keep only 2 turns — otherwise prior asset analysis
+    // bleeds into unrelated answers (e.g. "what do 16 alerts mean?" getting answered
+    // in terms of the last analysed asset).
+    const queryAssetIdsEarly = [...new Set(t.match(/\b[A-Z]{1,3}-\d{3,4}\b/g) || [])];
+    const historyDepth = queryAssetIdsEarly.length > 0 ? 8 : 2;
     const conversationHistory = messages
       .filter(m => m.type === 'user' || m.type === 'agent')
-      .slice(-8)
+      .slice(-historyDepth)
       .map(m => ({
         role: m.type === 'user' ? 'user' : 'assistant',
         content: m.type === 'user'
@@ -412,7 +483,7 @@ export default function ChatView() {
     doThink(async () => {
       try {
         // Intercept multi-asset comparison queries — answer from fleet state without backend
-        const queryAssetIds = [...new Set(t.match(/\b[A-Z]{1,3}-\d{3,4}\b/g) || [])];
+        const queryAssetIds = queryAssetIdsEarly;
         if (queryAssetIds.length >= 2 && /\bcompare\b|\bvs\.?\b|\bversus\b|\bagainst\b|\bbetween\b/i.test(t)) {
           const ca1 = (assets || []).find(a => a.id === queryAssetIds[0]);
           const ca2 = (assets || []).find(a => a.id === queryAssetIds[1]);
@@ -444,20 +515,81 @@ export default function ChatView() {
           storedForAsset.status || storedForAsset.monitoringStatus
           || storedForAsset.diagnosisStatus || storedForAsset.remediationAction
         );
-        // If a pipeline query targets a processed asset, show session cache immediately
-        const isPipelineQuery = /\banalys|\binspect|\bcheck|\bdiagnos|\bassess|\brun\b|\bfull\b|\bpipeline\b|\bstatus\b/i.test(t);
-        if (hasSessionState && queriedAsset && isPipelineQuery) {
+        // Any query about an actioned asset must be answered from session state.
+        // Keyword detection is too fragile — users ask follow-ups like "what about M-124?"
+        // which contain no health keywords but still expect the post-action status.
+        // Going to the backend for actioned assets triggers a full pipeline run that
+        // returns stale CRITICAL data, contradicting all other tabs.
+        if (hasSessionState && queriedAsset) {
           const chips = buildDefaultChips(persona, assets || [], queriedAsset);
           setContextChips(chips);
-          appendA(buildAssetSessionSummary(queriedAsset, storedForAsset), ['session · cached'], chips, []);
+          const _assetStatusOvr = (() => { try { return JSON.parse(sessionStorage.getItem('dro-asset-status') || '{}'); } catch { return {}; } })();
+          const _assetObj = (assets || []).find(a => a.id === queriedAsset || a.asset_id === queriedAsset);
+          const _currentHealth = _assetStatusOvr[queriedAsset] || _assetStatusOvr[_assetObj?.asset_id] || _assetObj?.st;
+          appendA(buildAssetSessionSummary(queriedAsset, storedForAsset, _currentHealth), ['session · status'], chips, []);
           return;
         }
 
+        // Only inject status overrides when the query is asset-specific — injecting for
+        // general questions ("what do 16 alerts mean?") causes the LLM to drag the last
+        // asset into an unrelated answer.
+        const isAssetQuery = queryAssetIds.length > 0;
+        if (isAssetQuery) {
+          const statusOverrides = (() => {
+            try { return JSON.parse(sessionStorage.getItem('dro-asset-status') || '{}'); } catch { return {}; }
+          })();
+          // Normalize stored keys to user-facing IDs (M-104 style) — backend may have
+          // stored the override under AST_MTR_001 which the LLM won't recognise in a query
+          const statusEntries = [...new Map(
+            Object.entries(statusOverrides).map(([key, st]) => {
+              const matched = (assets || []).find(a => a.id === key || a.asset_id === key);
+              return [matched?.id || key, st];
+            })
+          ).entries()].filter(([, st]) => st);
+          if (statusEntries.length > 0) {
+            const note = 'Session status updates (applied this session, not yet in backend): '
+              + statusEntries.map(([id, st]) => `${id} → ${st}`).join(', ')
+              + '. Use these when answering questions about asset health or urgency.';
+            conversationHistory.unshift({ role: 'assistant', content: note });
+          }
+        }
+
+        // Build the message sent to the backend. For asset queries where we have session
+        // status overrides, embed them directly in the message so the LLM sees them
+        // regardless of how the backend routes the request (history may be ignored on
+        // certain intent paths). The user already sees the original message via appendU(t).
+        let effectiveMessage = t;
+        if (isAssetQuery) {
+          const statusOverridesForMsg = (() => {
+            try { return JSON.parse(sessionStorage.getItem('dro-asset-status') || '{}'); } catch { return {}; }
+          })();
+          const relevantEntries = queryAssetIds
+            .map(qid => {
+              const matched = (assets || []).find(a => a.id === qid || a.asset_id === qid);
+              const key = matched?.id || qid;
+              const st = statusOverridesForMsg[key] || statusOverridesForMsg[matched?.asset_id];
+              return st ? `${key} health is currently "${st}"` : null;
+            })
+            .filter(Boolean);
+          if (relevantEntries.length > 0) {
+            effectiveMessage = `${t} [Session context: ${relevantEntries.join(', ')} — this was updated after action was taken this session and overrides backend data]`;
+          }
+        }
+
+        // Only pass the last referenced document as context when the query explicitly
+        // asks about a document / SOP — otherwise it biases every follow-up answer.
+        const isDocQuery = /\bdocument\b|\brefer\b|\bsop\b|\bsource\b|\bprocedure\b|\bmanual\b|\bwhich doc/i.test(t);
+
         const d = await askChat({
-          message: t,
+          message: effectiveMessage,
           persona: options.requestedPersona || persona,
           conversationId: conversationIdRef.current,
-          context: options.scenario ? { scenario: options.scenario } : null,
+          context: {
+            ...(options.scenario ? { scenario: options.scenario } : {}),
+            ...(isDocQuery && lastKnowledgeRef.current?.sop_id
+              ? { last_referenced_document: lastKnowledgeRef.current.sop_id }
+              : {}),
+          },
           conversationHistory,
         });
         conversationIdRef.current = d.conversation_id || conversationIdRef.current;
@@ -505,12 +637,17 @@ export default function ChatView() {
 
         // Normal response — update sidebar state and generate follow-up chips from response content
         setLivePipelineLog(pl);
+        if (d.knowledge_guidance) lastKnowledgeRef.current = d.knowledge_guidance;
         const chips = generateChipsFromResponse(d, buildDefaultChips(persona, assets || []));
         setContextChips(chips);
         const details = d.details && d.details.length ? '<br><br>' + d.details.map(x => '• ' + x).join('<br>') : '';
         const actions = d.actions && d.actions.length ? '<br><br><strong>Actions:</strong><br>' + d.actions.map(x => '→ ' + x).join('<br>') : '';
         const questions = d.clarification && d.clarification.questions ? '<br><br><strong>Needed:</strong><br>' + d.clarification.questions.map(x => '? ' + x).join('<br>') : '';
-        appendA(d.response + details + actions + questions, routes, chips, pl);
+        const dkg = d.knowledge_guidance;
+        const dSopLine = dkg?.sop_id
+          ? `<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--b);font-size:10px;color:var(--t3)">📄 <strong style="color:var(--t2)">Referenced document:</strong> ${dkg.sop_id}${dkg.matching_cases?.length ? ` · ${dkg.matching_cases.length} case${dkg.matching_cases.length !== 1 ? 's' : ''} matched` : ''}</div>`
+          : '';
+        appendA(sanitizeResponse(d.response) + details + actions + questions + dSopLine, routes, chips, pl);
 
         // Non-blocking gates shown alongside the response
         if (d.hitl_advisory?.advisory_note) {
@@ -883,8 +1020,8 @@ function HITLRemediationMsg({ msg, onSq, doThink, appendA, addMessage, persona }
         <div className="rrow"><span className="rs">data foundation - HITL gate</span></div>
         <div className="bbl a">
           <div style={{ border: '1.5px solid #f59e0b', borderRadius: '10px', padding: '14px', background: 'rgba(245,158,11,0.07)' }}>
-            <div style={{ fontSize: '9px', fontWeight: 700, color: '#f59e0b', fontFamily: 'var(--m)', marginBottom: '10px' }}>HITL - DATA FOUNDATION AGENT - Signal Quality Gate</div>
-            <strong style={{ color: 'var(--t)' }}>Signal flagged - operator decision required before analysis continues</strong>
+            <div style={{ fontSize: '9px', fontWeight: 700, color: '#f59e0b', fontFamily: 'var(--m)', marginBottom: '10px' }}>SIGNAL QUALITY ISSUE · Data Foundation Agent</div>
+            <strong style={{ color: 'var(--t)' }}>A sensor signal has quality issues — choose how to handle it before analysis continues</strong>
             <div style={{ margin: '10px 0', fontSize: '12px', color: 'var(--t2)', lineHeight: '1.8' }}>
               Quality score: <strong style={{ color: '#f59e0b' }}>{qPct}</strong><br />
               Missing fields: <strong>{missingStr}</strong><br />
@@ -1082,13 +1219,13 @@ function HITLMonitoringMsg({ msg, onSq, doThink, appendA, addMessage, persona })
         <div className="bbl a">
           <div style={{ border: '1.5px solid #f59e0b', borderRadius: '10px', padding: '14px', background: 'rgba(245,158,11,0.06)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
-              <span style={{ fontSize: '9px', fontWeight: 700, color: '#f59e0b', fontFamily: 'var(--m)' }}>HITL · MONITORING AGENT · Borderline EWMA Alert</span>
+              <span style={{ fontSize: '9px', fontWeight: 700, color: '#f59e0b', fontFamily: 'var(--m)' }}>ANOMALY REVIEW · Monitoring Agent</span>
               <span style={{ fontSize: '9px', fontWeight: 600, color: '#64748b', marginLeft: 'auto' }}>FOR: {resolverNames || 'Configured resolver'}</span>
             </div>
-            <strong style={{ color: 'var(--t)' }}>Borderline anomaly — operator confirmation required before fault diagnosis proceeds</strong>
+            <strong style={{ color: 'var(--t)' }}>A borderline anomaly was detected. Confirm whether to investigate further or dismiss as normal.</strong>
             <div style={{ margin: '10px 0', fontSize: '12px', color: 'var(--t2)', lineHeight: '1.9' }}>
               Anomaly score: <strong style={{ color: '#f59e0b' }}>{scorePct}</strong><br />
-              Trigger: <strong>EWMA control chart only</strong> — Hotelling T² multivariate detector did not fire<br />
+              Trigger: <strong>Single-sensor threshold exceeded</strong> — multivariate detector did not fire<br />
               EWMA signals: <strong>{ewmaSignals}</strong><br />
               Regime: {h.regime || 'normal running'}
             </div>
@@ -1099,11 +1236,11 @@ function HITLMonitoringMsg({ msg, onSq, doThink, appendA, addMessage, persona })
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                 <button onClick={() => resolve('SUPPRESS')}
                   style={{ padding: '7px 18px', borderRadius: '6px', border: 'none', background: '#f59e0b', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: '12px' }}>
-                  Suppress — expected transient
+                  Dismiss — treat as normal
                 </button>
                 <button onClick={() => resolve('CONFIRM')}
                   style={{ padding: '7px 18px', borderRadius: '6px', border: 'none', background: '#ef4444', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: '12px' }}>
-                  Confirm — proceed with diagnosis
+                  Investigate — run fault diagnosis
                 </button>
               </div>
             ) : resolved ? (
@@ -1211,10 +1348,10 @@ function HITLDiagnosisMsg({ msg, onSq, doThink, appendA, addMessage, persona }) 
         <div className="bbl a">
           <div style={{ border: '1.5px solid #f97316', borderRadius: '10px', padding: '14px', background: 'rgba(249,115,22,0.06)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
-              <span style={{ fontSize: '9px', fontWeight: 700, color: '#f97316', fontFamily: 'var(--m)' }}>HITL · FAILURE INTELLIGENCE AGENT · Low Confidence Classification</span>
+              <span style={{ fontSize: '9px', fontWeight: 700, color: '#f97316', fontFamily: 'var(--m)' }}>FAULT CLASSIFICATION REVIEW · Failure Intelligence Agent</span>
               <span style={{ fontSize: '9px', fontWeight: 600, color: '#64748b', marginLeft: 'auto' }}>FOR: {resolverNames || 'Configured resolver'}</span>
             </div>
-            <strong style={{ color: 'var(--t)' }}>Low-confidence fault classification — engineer confirmation required before risk proceeds</strong>
+            <strong style={{ color: 'var(--t)' }}>The AI detected a fault but confidence is below threshold. Please confirm or override before risk assessment continues.</strong>
             <div style={{ margin: '10px 0', fontSize: '12px', color: 'var(--t2)', lineHeight: '1.9' }}>
               Classified fault: <strong>{faultLabel}</strong>{h.fault_code && <span style={{ color: 'var(--t3)' }}> ({h.fault_code})</span>}<br />
               Stage: <strong>{stageLabel}</strong><br />
@@ -1228,11 +1365,11 @@ function HITLDiagnosisMsg({ msg, onSq, doThink, appendA, addMessage, persona }) 
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                 <button onClick={() => resolve('CONFIRM')}
                   style={{ padding: '7px 18px', borderRadius: '6px', border: 'none', background: '#f97316', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: '12px' }}>
-                  Confirm — {faultLabel}
+                  Confirm: {faultLabel}
                 </button>
                 <button onClick={() => resolve('MARK_UNDETERMINED')}
                   style={{ padding: '7px 18px', borderRadius: '6px', border: '1px solid #6b7280', background: 'transparent', color: 'var(--t2)', fontWeight: 700, cursor: 'pointer', fontSize: '12px' }}>
-                  Override — mark undetermined
+                  Override — needs manual inspection
                 </button>
               </div>
             ) : resolved ? (
@@ -1304,10 +1441,10 @@ function HITLKnowledgeMsg({ msg, doThink, appendA, persona }) {
         <div className="bbl a">
           <div style={{ border: '1.5px solid #06b6d4', borderRadius: '10px', padding: '14px', background: 'rgba(6,182,212,0.06)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
-              <span style={{ fontSize: '9px', fontWeight: 700, color: '#06b6d4', fontFamily: 'var(--m)' }}>HITL · KNOWLEDGE AGENT · No SOP Found</span>
+              <span style={{ fontSize: '9px', fontWeight: 700, color: '#06b6d4', fontFamily: 'var(--m)' }}>NO PROCEDURE FOUND · Knowledge Agent</span>
               <span style={{ fontSize: '9px', fontWeight: 600, color: '#64748b', marginLeft: 'auto' }}>FOR: {resolverNames || 'Configured resolver'}</span>
             </div>
-            <strong style={{ color: 'var(--t)' }}>No standard operating procedure found — manual SOP lookup required</strong>
+            <strong style={{ color: 'var(--t)' }}>No standard procedure exists for this fault type — decide how to proceed</strong>
             <div style={{ margin: '10px 0', fontSize: '12px', color: 'var(--t2)', lineHeight: '1.9' }}>
               Asset: <strong>{assetId}</strong><br />
               Fault mode: <strong>{faultLabel}</strong><br />
@@ -1320,11 +1457,11 @@ function HITLKnowledgeMsg({ msg, doThink, appendA, persona }) {
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                 <button onClick={() => resolve('FLAG_MANUAL')}
                   style={{ padding: '7px 18px', borderRadius: '6px', border: 'none', background: '#ef4444', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: '12px' }}>
-                  Flag for manual SOP lookup
+                  Escalate — get procedure manually
                 </button>
                 <button onClick={() => resolve('ACCEPT_EMPTY')}
                   style={{ padding: '7px 18px', borderRadius: '6px', border: '1px solid #06b6d4', background: 'transparent', color: '#06b6d4', fontWeight: 700, cursor: 'pointer', fontSize: '12px' }}>
-                  Proceed without SOP
+                  Continue without procedure
                 </button>
               </div>
             ) : resolved ? (
@@ -1488,7 +1625,7 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
   const [showRejectInput, setShowRejectInput] = useState(false);
   const [rejectCode, setRejectCode] = useState('');
   const [rejectReason, setRejectReason] = useState('');
-  const { refreshNotifCounts, pushNotification, patchMessage, refreshWorkOrders, updateAssetPipelineState } = useContext(AppContext);
+  const { refreshNotifCounts, pushNotification, patchMessage, refreshWorkOrders, updateAssetPipelineState, updateAssetStatus, assets: allAssets } = useContext(AppContext);
   const rec = msg.rec;
   const canResolve = canResolveHITL(rec.hitl_access, persona);
   const decisionSupport = rec.decision_support || {};
@@ -1498,7 +1635,7 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
   const [escalationRemaining, setEscalationRemaining] = useState(() =>
     escalationStep ? remainingSeconds(escalationStep.escalates_at_utc) : null
   );
-  const alternative = (rec.ranked_alternatives || [])[1];
+  const alternative = (rec.ranked_alternatives || [])[0];
   const action = rec.recommended_action;
   const urgencyColor = { immediate: '#ef4444', urgent: '#f97316', planned: '#3b82f6', monitor: '#6b7280' }[rec.urgency] || '#6b7280';
   const canConfirmReject = Boolean(rejectCode) && (rejectCode !== 'other' || Boolean(rejectReason.trim()));
@@ -1566,7 +1703,7 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
 
           html = `<div style="border:1.5px solid #10b981;border-radius:10px;padding:14px;background:rgba(16,185,129,0.04)">`;
           html += `<div style="font-size:9px;font-weight:700;color:#10b981;font-family:var(--m);margin-bottom:8px">✓ APPROVED & EXECUTED · EXECUTOR RESULT</div>`;
-          html += `<div style="font-size:13px;font-weight:600;color:var(--t);margin-bottom:2px">${doneCount} / ${steps.length} steps complete · action: ${(data.action_taken || '').replace(/_/g, ' ')}</div>`;
+          html += `<div style="font-size:13px;font-weight:600;color:var(--t);margin-bottom:2px">${doneCount} / ${steps.length} steps complete · ${friendlyActionLabel(data.action_taken)}</div>`;
           html += `<div style="font-size:10px;color:var(--t3);font-family:var(--m);margin-bottom:10px">`;
           if (data.work_order_id) html += `Work order: <span style="color:#10b981">${data.work_order_id}</span>`;
           if (data.audit_reference) html += ` · Audit: ${data.audit_reference}`;
@@ -1598,6 +1735,45 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
             approvedBy: persona,
             approvedAt: new Date().toISOString(),
           });
+          // Persist WO display fields that the backend WO record won't carry —
+          // risk level, cost, RUL window, duration and assigned persona
+          if (data.work_order_id) {
+            const pvr = decisionSupport.parts_vs_rul;
+            // Execution crew = personas notified to carry out the work, excluding decision-maker roles
+            const _EXEC_CREW_ROLES = new Set(['maintenance', 'engineer', 'safety', 'ot']);
+            const _EXEC_MAP = {
+              immediate: ['supervisor', 'engineer', 'maintenance', 'safety'],
+              urgent:    ['supervisor', 'engineer', 'maintenance'],
+              planned:   ['engineer', 'maintenance'],
+              monitor:   ['engineer', 'ot'],
+            };
+            const execCrew = (_EXEC_MAP[(rec.urgency || 'planned').toLowerCase()] || ['maintenance'])
+              .filter(p => _EXEC_CREW_ROLES.has(p))
+              .map(p => _EXECUTOR_PERSONA_DISPLAY[p] || p);
+            saveWOEnrichment(data.work_order_id, {
+              risk: rec.urgency?.toUpperCase() || '—',
+              cost: decisionSupport.cost_if_approved != null
+                ? `$${decisionSupport.cost_if_approved.toLocaleString()}`
+                : '—',
+              rul: pvr?.rul_min_days != null
+                ? `${pvr.rul_min_days}–${pvr.rul_max_days}d`
+                : '—',
+              est: action.estimated_duration_hours
+                ? `${action.estimated_duration_hours}h`
+                : '—',
+              asgn: execCrew.join(' / ') || _EXECUTOR_PERSONA_DISPLAY[persona] || 'DRO Agent',
+              parts: data.parts_reserved
+                || rec.required_parts?.map(p => `${p.part_number} ×${p.quantity}`).join(', ')
+                || '—',
+              pr: rec.urgency === 'immediate' ? 'URGENT' : rec.urgency === 'urgent' ? 'URGENT' : 'MEDIUM',
+            });
+          }
+          // Downgrade asset from critical → warning when WO is created (maintenance scheduled)
+          const approvedAsset = (allAssets || []).find(a => a.id === rec.asset_id || a.asset_id === rec.asset_id);
+          if (approvedAsset?.st === 'critical') {
+            // Use frontend ID (M-104 style) so the chat status injection can match user queries
+            updateAssetStatus(approvedAsset.id || rec.asset_id, 'warning');
+          }
           // Notify relevant personas (mirrors backend _URGENCY_ROUTING)
           const URGENCY_RECIPIENTS = {
             immediate: ['supervisor', 'engineer', 'maintenance', 'safety'],
@@ -1658,18 +1834,17 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
           <div style={{ border: '1.5px solid #10b981', borderRadius: '10px', padding: '14px', background: 'rgba(16,185,129,0.06)' }}>
             {/* Header */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
-              <span style={{ fontSize: '9px', fontWeight: 700, color: '#10b981', fontFamily: 'var(--m)' }}>HITL · EXECUTOR AGENT · Execution Approval</span>
+              <span style={{ fontSize: '9px', fontWeight: 700, color: '#10b981', fontFamily: 'var(--m)' }}>APPROVAL REQUIRED · Executor Agent</span>
               <span style={{ fontSize: '9px', fontWeight: 600, color: '#64748b', marginLeft: 'auto' }}>FOR: {currentApproverName}</span>
             </div>
-            <strong style={{ color: 'var(--t)' }}>Maintenance recommendation awaiting approval before execution</strong>
+            <strong style={{ color: 'var(--t)' }}>Review and approve this maintenance action — a work order will be created automatically once approved</strong>
 
             {/* Core details */}
             <div style={{ margin: '10px 0', fontSize: '12px', color: 'var(--t2)', lineHeight: '2' }}>
               Case: <strong>{rec.case_id}</strong> &nbsp;|&nbsp; Asset: <strong>{rec.asset_id}</strong><br />
-              Action: <strong>{action.name.replace(/_/g, ' ')}</strong> &nbsp;<span style={{ fontSize: '10px', color: 'var(--t3)' }}>({action.description})</span><br />
+              Action: <strong>{friendlyActionLabel(action.name)}</strong><br />
               Urgency: <strong style={{ color: urgencyColor }}>{rec.urgency.toUpperCase()}</strong>
-              &nbsp;|&nbsp; Est. duration: <strong>{action.estimated_duration_hours}h</strong>
-              &nbsp;|&nbsp; Window: <strong>{rec.window_chosen || '—'}</strong><br />
+              &nbsp;|&nbsp; Est. duration: <strong>{action.estimated_duration_hours}h</strong><br />
               Parts: {rec.required_parts.map(p => (
                 <span key={p.part_number} style={{ background: 'rgba(16,185,129,.1)', border: '1px solid #10b981', borderRadius: '4px', padding: '2px 8px', fontSize: '11px', color: '#10b981', marginRight: '4px' }}>
                   {p.part_number} ×{p.quantity}
@@ -1679,9 +1854,12 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
             </div>
 
             {/* Rationale */}
-            <div style={{ fontSize: '11px', color: 'var(--t2)', background: 'rgba(16,185,129,0.06)', padding: '9px 11px', borderRadius: '6px', borderLeft: '2px solid #10b981', marginBottom: '12px', lineHeight: '1.6' }}>
-              {rec.rationale}
-            </div>
+            {rec.rationale && (
+              <div style={{ fontSize: '11px', color: 'var(--t2)', background: 'rgba(16,185,129,0.06)', padding: '9px 11px', borderRadius: '6px', borderLeft: '2px solid #10b981', marginBottom: '12px', lineHeight: '1.6' }}>
+                <div style={{ fontSize: '10px', fontWeight: 600, color: 'var(--t3)', fontFamily: 'var(--m)', textTransform: 'uppercase', marginBottom: '4px' }}>Why this action was recommended</div>
+                {cleanRationale(rec.rationale)}
+              </div>
+            )}
 
             {/* A4 — backend-scheduled approval escalation */}
             {escalationStep && (
@@ -1749,7 +1927,7 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
                         <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: i < decisionSupport.historical_cases.length - 1 ? '4px' : 0 }}>
                           <span style={{ color: ok ? '#10b981' : '#ef4444', fontSize: '10px', flexShrink: 0 }}>{ok ? '✓' : '✗'}</span>
                           <span style={{ color: 'var(--t3)', fontSize: '9px', fontFamily: 'var(--m)', flexShrink: 0, width: '92px' }}>{c.recorded_at || c.case_id}</span>
-                          <span style={{ color: 'var(--t2)', fontSize: '10.5px', flex: 1 }}>{c.action_taken.replace(/_/g, ' ')} → <span style={{ color: ok ? '#10b981' : '#ef4444' }}>{c.outcome}</span> · {c.source}</span>
+                          <span style={{ color: 'var(--t2)', fontSize: '10.5px', flex: 1 }}>{friendlyActionLabel(c.action_taken)} → <span style={{ color: ok ? '#10b981' : '#ef4444' }}>{c.outcome}</span> · {c.source}</span>
                         </div>
                       );
                     })}
@@ -1758,7 +1936,7 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
 
                 {/* Authority check */}
                 {decisionSupport.authority_check !== 'not_evaluated' && (
-                  <div style={{ padding: '7px 11px', borderBottom: alternative ? '1px solid rgba(16,185,129,.15)' : 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ padding: '7px 11px', borderBottom: 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <span style={{ color: 'var(--t3)', fontSize: '10.5px' }}>Approver authority</span>
                     <span style={{ color: decisionSupport.authority_check === 'within_authority' ? '#10b981' : '#f97316', fontWeight: 600, fontSize: '10px' }}>
                       {decisionSupport.authority_reason}
@@ -1766,15 +1944,6 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
                   </div>
                 )}
 
-                {/* Alternative action */}
-                {alternative && (
-                  <div style={{ padding: '7px 11px' }}>
-                    <div style={{ fontSize: '9px', color: 'var(--t3)', fontFamily: 'var(--m)', marginBottom: '3px', letterSpacing: '.5px' }}>ALTERNATIVE</div>
-                    <div style={{ color: 'var(--t2)', fontSize: '10.5px' }}>
-                      <strong style={{ color: 'var(--t)' }}>{alternative.action.replace(/_/g, ' ')}</strong> — {alternative.rationale}
-                    </div>
-                  </div>
-                )}
               </div>
             )}
 

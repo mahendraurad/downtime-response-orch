@@ -5,7 +5,7 @@ export default function Topbar() {
   const {
     currentView, setCurrentView,
     theme, setTheme,
-    assets, dataStatus,
+    assets, assetsLoaded, dataStatus,
   } = useContext(AppContext);
 
   const navItems = [
@@ -62,7 +62,14 @@ export default function Topbar() {
             {theme === 'light' ? '🌙' : '☀️'}
           </button>
           <div className="ldot"></div>
-          <div className="ltx">{dataStatus.assets === 'backend_agent_pipeline' ? 'BACKEND LIVE' : 'DEMO FALLBACK'}</div>
+          {assetsLoaded && (
+            <div className="ltx" style={{ color: dataStatus.assets !== 'fallback' ? 'var(--gn)' : 'var(--t3)' }}>
+              {dataStatus.assets !== 'fallback' ? 'BACKEND LIVE' : 'BACKEND OFFLINE'}
+            </div>
+          )}
+          {!assetsLoaded && (
+            <div className="ltx" style={{ color: 'var(--t3)' }}>Connecting…</div>
+          )}
           {alertCount > 0 && (
             <div className="abdg">⚠ {alertCount} ALERTS</div>
           )}
@@ -74,6 +81,11 @@ export default function Topbar() {
         <span className="ahr-label">FLEET HEALTH</span>
         <div className="ahr-divider" />
         <div className="ahr-pills">
+          {assetsLoaded && assets.length === 0 && (
+            <div className="ahr-pill" style={{ color: 'var(--t3)', fontSize: '11px' }}>
+              No assets available — check backend connection
+            </div>
+          )}
           {criticalAssets.map(a => (
             <button
               key={a.id}
@@ -111,7 +123,9 @@ export default function Topbar() {
         </div>
         <div style={{ marginLeft: 'auto', flexShrink: 0, display: 'flex', alignItems: 'center', gap: '5px' }}>
           <span className="ahr-ts-dot" />
-          <span className="ahr-ts">{dataStatus.assets === 'backend_agent_pipeline' ? 'Agent pipeline snapshot' : 'Configured demo fallback'}</span>
+          <span className="ahr-ts">
+            {!assetsLoaded ? 'Connecting to backend…' : dataStatus.assets !== 'fallback' ? 'Live from agent pipeline' : 'Backend offline — awaiting reconnect'}
+          </span>
         </div>
       </div>
     </>
