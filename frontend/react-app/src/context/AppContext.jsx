@@ -407,13 +407,19 @@ export function AppProvider({ children }) {
       if (newStatus === 'Closed') {
         const wo = prev.find(w => w.id === id);
         if (wo?.as) {
-          // Persist asset status override so it survives a page refresh
-          const statusOverrides = loadAssetStatusOverrides();
-          saveAssetStatusOverrides({ ...statusOverrides, [wo.as]: 'healthy' });
-
           const applyHealthy = a =>
             (a.id === wo.as || a.asset_id === wo.as) ? { ...a, st: 'healthy' } : a;
-          setAssets(assets => assets.map(applyHealthy));
+          setAssets(currentAssets => {
+            // Save under BOTH the backend ID (wo.as) and the frontend ID (e.g. 'M-124').
+            // Approval wrote 'warning' under the frontend ID — closing must overwrite that
+            // same key with 'healthy', otherwise the chat status lookup returns stale data.
+            const frontendId = currentAssets.find(a => a.id === wo.as || a.asset_id === wo.as)?.id;
+            const statusOverrides = loadAssetStatusOverrides();
+            const updated = { ...statusOverrides, [wo.as]: 'healthy' };
+            if (frontendId && frontendId !== wo.as) updated[frontendId] = 'healthy';
+            saveAssetStatusOverrides(updated);
+            return currentAssets.map(applyHealthy);
+          });
           setSelectedAsset(sel => sel ? applyHealthy(sel) : sel);
           // Mark the corresponding pipeline state entry as WO closed so AgentDetail shows "Completed"
           setAssetPipelineState(prevPipe => {

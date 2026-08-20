@@ -515,20 +515,33 @@ export default function ChatView() {
           storedForAsset.status || storedForAsset.monitoringStatus
           || storedForAsset.diagnosisStatus || storedForAsset.remediationAction
         );
-        // Any query about an actioned asset must be answered from session state.
-        // Keyword detection is too fragile — users ask follow-ups like "what about M-124?"
-        // which contain no health keywords but still expect the post-action status.
-        // Going to the backend for actioned assets triggers a full pipeline run that
-        // returns stale CRITICAL data, contradicting all other tabs.
-        if (hasSessionState && queriedAsset) {
+        // Pipeline re-run queries on actioned assets → session cache (no new pipeline run)
+        const isPipelineQuery = /\banalys|\binspect|\bcheck|\bdiagnos|\bassess|\brun\b|\bfull\b|\bpipeline\b/i.test(t);
+        if (hasSessionState && queriedAsset && isPipelineQuery) {
           const chips = buildDefaultChips(persona, assets || [], queriedAsset);
           setContextChips(chips);
-          const _assetStatusOvr = (() => { try { return JSON.parse(sessionStorage.getItem('dro-asset-status') || '{}'); } catch { return {}; } })();
-          const _assetObj = (assets || []).find(a => a.id === queriedAsset || a.asset_id === queriedAsset);
-          const _currentHealth = _assetStatusOvr[queriedAsset] || _assetStatusOvr[_assetObj?.asset_id] || _assetObj?.st;
-          appendA(buildAssetSessionSummary(queriedAsset, storedForAsset, _currentHealth), ['session · status'], chips, []);
+          const _assetStatusOvr1 = (() => { try { return JSON.parse(sessionStorage.getItem('dro-asset-status') || '{}'); } catch { return {}; } })();
+          const _assetObj1 = (assets || []).find(a => a.id === queriedAsset || a.asset_id === queriedAsset);
+          const _health1 = _assetStatusOvr1[queriedAsset] || _assetStatusOvr1[_assetObj1?.asset_id] || _assetObj1?.st;
+          appendA(buildAssetSessionSummary(queriedAsset, storedForAsset, _health1), ['session · cached'], chips, []);
           return;
         }
+
+        // Health/status queries on actioned assets → session status card (prevents stale
+        // CRITICAL pipeline data from contradicting what other tabs already show)
+        const isStatusQuery = /\bhealthy?\b|\bhealth\b|\bstatus\b|\bstill\s+(critical|fault|fail)\b|\b(fixed|resolved|repaired|recovered)\b|\bcurrent\s+(condition|state)\b/i.test(t);
+        if (hasSessionState && queriedAsset && isStatusQuery) {
+          const chips = buildDefaultChips(persona, assets || [], queriedAsset);
+          setContextChips(chips);
+          const _assetStatusOvr2 = (() => { try { return JSON.parse(sessionStorage.getItem('dro-asset-status') || '{}'); } catch { return {}; } })();
+          const _assetObj2 = (assets || []).find(a => a.id === queriedAsset || a.asset_id === queriedAsset);
+          const _health2 = _assetStatusOvr2[queriedAsset] || _assetStatusOvr2[_assetObj2?.asset_id] || _assetObj2?.st;
+          appendA(buildAssetSessionSummary(queriedAsset, storedForAsset, _health2), ['session · status'], chips, []);
+          return;
+        }
+
+        // All other queries about actioned assets (RUL, cost, parts, sensors, fault details)
+        // go to the LLM normally. HITL gates are suppressed further down by hasSessionState.
 
         // Only inject status overrides when the query is asset-specific — injecting for
         // general questions ("what do 16 alerts mean?") causes the LLM to drag the last
