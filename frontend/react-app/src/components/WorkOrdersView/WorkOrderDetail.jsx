@@ -159,7 +159,7 @@ const WO_PERSONA_ACTS = {
 };
 
 export default function WorkOrderDetail({ wo }) {
-  const { persona, updateWOStatus } = useContext(AppContext);
+  const { persona, updateWOStatus, updateAssetPipelineState, updateAssetStatus } = useContext(AppContext);
   const [checklist, setChecklist]   = useState(() => wo ? wo.cl.map(item => ({ ...item })) : []);
   const [chipAnswers, setChipAnswers] = useState({});
   const [chipLoading, setChipLoading] = useState(false);
@@ -274,8 +274,14 @@ export default function WorkOrderDetail({ wo }) {
                   title={act.newSt ? `Move this work order to "${act.newSt}"` : act.export ? 'Download pre-repair sensor data as CSV' : act.l}
                   style={alreadyApplied ? { opacity: 0.35, cursor: 'not-allowed' } : {}}
                   onClick={() => {
-                    if (act.newSt)   updateWOStatus(wo.id, act.newSt, persona);
-                    if (act.export)  handleExport(wo.as);
+                    if (act.newSt) {
+                      updateWOStatus(wo.id, act.newSt, persona);
+                      if (act.newSt === 'Closed' && wo.as) {
+                        updateAssetPipelineState(wo.as, { woClosed: true });
+                        updateAssetStatus(wo.as, 'healthy');
+                      }
+                    }
+                    if (act.export) handleExport(wo.as);
                   }}
                 >
                   {act.export && exporting ? 'Exporting…' : act.l}

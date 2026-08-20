@@ -84,7 +84,9 @@ function buildLiveOutput(idx, pipelineResult, asset, persona, storedState) {
       const fd = pipelineResult.fault_diagnosis;
       if (!fd) return null;
       const conf = fd.confidence != null ? `${Math.round(fd.confidence * 100)}%` : 'N/A';
-      return `${fd.fault_type || 'Unknown fault'} · Confidence: ${conf} · Stage ${fd.severity_stage ?? 'N/A'} · ${fd.root_cause || ''}`.replace(/ · $/, '');
+      const faultLabel = (fd.fault_mode || fd.fault_type || '').replace(/_/g, ' ') || 'Unknown fault';
+      const stage = fd.iso_stage ?? fd.severity_stage ?? 'N/A';
+      return `${faultLabel} · Confidence: ${conf} · Stage ${stage} · ${fd.root_cause || ''}`.replace(/ · $/, '');
     }
     case 3: { // Predictive Risk
       const ra = pipelineResult.risk_assessment;
@@ -370,7 +372,7 @@ function OverviewPanel({ asset, persona, states, selectedNode, node, state, pipe
               </div>
             )}
             {/* Live pipeline result tiles */}
-            {fd && <div className="dc"><div className="dcl">Fault Type</div><div className="dcv" style={{ fontSize: '11px' }}>{fd.fault_type || '—'}</div></div>}
+            {fd && <div className="dc"><div className="dcl">Fault Type</div><div className="dcv" style={{ fontSize: '11px' }}>{(fd.fault_mode || fd.fault_type || '').replace(/_/g, ' ') || '—'}</div></div>}
             {fd?.confidence != null && (
               <div className="dc">
                 <div className="dcl">FI Confidence</div>
@@ -381,7 +383,11 @@ function OverviewPanel({ asset, persona, states, selectedNode, node, state, pipe
             )}
             {ra?.failure_probability != null && (
               <div className="dc">
-                <div className="dcl">Failure Prob</div>
+                <div className="dcl">
+                  {(storedState?.woClosed || storedState?.status === 'approved')
+                    ? 'Failure Prob (at analysis)'
+                    : 'Failure Prob'}
+                </div>
                 <div className="dcv" style={{ fontSize: '12px', color: ra.failure_probability >= 0.6 ? 'var(--rd)' : ra.failure_probability >= 0.3 ? 'var(--am)' : 'var(--gn)' }}>
                   {Math.round(ra.failure_probability * 100)}%
                 </div>

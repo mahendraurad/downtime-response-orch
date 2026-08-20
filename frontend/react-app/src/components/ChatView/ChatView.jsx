@@ -179,6 +179,9 @@ function buildAssetSessionSummary(assetId, stored, currentHealth) {
     const hColor = { healthy: '#10b981', warning: '#f97316', critical: '#ef4444' }[currentHealth] || 'var(--t2)';
     rows.push(`Current health: <strong style="color:${hColor}">${currentHealth.charAt(0).toUpperCase() + currentHealth.slice(1)}</strong>`);
   }
+  if (stored.originalRUL) {
+    rows.push(`RUL at time of analysis: <strong>${stored.originalRUL}</strong> <span style="color:var(--t3);font-size:11px">(pre-intervention)</span>`);
+  }
   if (stored.remediationAction) {
     const label = stored.remediationAction === 'IMPUTE' ? 'Imputed from baseline' : stored.remediationAction === 'DROP' ? 'Signal dropped' : 'Kept with quality flag';
     rows.push(`Signal quality gate: <strong>${label}</strong>`);
@@ -214,21 +217,20 @@ function buildAssetSessionSummary(assetId, stored, currentHealth) {
 // cost, fault details) in the context of the resolved state rather than raw data.
 function buildResolvedActionNote(assetId, stored) {
   if (!stored) return null;
-  const parts = [`Resolved session context for ${assetId}:`];
+  const parts = [`Context for ${assetId} (actioned this session):`];
   if (stored.originalRUL) parts.push(`- RUL at time of analysis: ${stored.originalRUL}`);
-  if (stored.originalHealth) parts.push(`- Health at time of analysis: ${stored.originalHealth}`);
   if (stored.diagnosisFaultLabel) parts.push(`- Fault diagnosed: ${stored.diagnosisFaultLabel}`);
-  if (stored.actionTaken) parts.push(`- Maintenance action taken: ${friendlyActionLabel(stored.actionTaken)}`);
-  if (stored.status === 'approved') {
-    const woRef = stored.woId ? ` (Work Order: ${stored.woId})` : '';
-    parts.push(`- Status: RESOLVED — maintenance approved${woRef} by ${stored.approvedBy || 'approver'}`);
-    parts.push('INSTRUCTION: Answer follow-up questions about this asset using the historical data above. Use past tense for the fault/RUL (e.g. "The RUL was X days when the analysis ran"). Do NOT present the asset as currently critical — maintenance has been scheduled.');
+  if (stored.actionTaken) parts.push(`- Maintenance action: ${friendlyActionLabel(stored.actionTaken)}`);
+  if (stored.woClosed) {
+    parts.push('- Work order: CLOSED — repair complete, asset restored to service');
+    parts.push('IMPORTANT: The repair is done. Answer health/status questions as: asset restored to service. Do NOT open with "Fault detected".');
+  } else if (stored.status === 'approved') {
+    const woRef = stored.woId ? ` (WO: ${stored.woId})` : '';
+    parts.push(`- Work order: approved${woRef} by ${stored.approvedBy || 'approver'} — maintenance scheduled`);
+    parts.push('IMPORTANT: Use past tense for fault/RUL details (e.g. "The RUL was X when the analysis ran"). Do NOT open with "Fault detected" — the issue is being resolved. Current health reflects the post-action state and overrides any backend pipeline data.');
   } else if (stored.status === 'rejected') {
-    parts.push(`- Status: DEFERRED — recommendation was rejected by ${stored.rejectedBy || 'approver'}`);
-    parts.push('INSTRUCTION: Note that the analysis flagged issues but the maintenance action was rejected. The asset continues to operate.');
-  } else if (stored.woClosed) {
-    parts.push('- Status: COMPLETE — work order closed, repair performed');
-    parts.push('INSTRUCTION: Reflect that the repair is complete and the asset has been restored to service.');
+    parts.push(`- Work order: rejected by ${stored.rejectedBy || 'approver'} — asset continues to run`);
+    parts.push('IMPORTANT: Note that while a fault was detected, the maintenance action was rejected. Answer in that context.');
   }
   return parts.length > 1 ? parts.join('\n') : null;
 }
@@ -521,10 +523,15 @@ export default function ChatView() {
 
         // Session cache — resolve BEFORE calling backend so we never re-fire HITL gates
         // for assets that have already been actioned in this session.
-        const queriedAsset = queryAssetIds[0] || null;
-        // Persist the queried asset so HITL resolve callbacks can find it even on old messages
-        // that were created before the queriedAsset field was added.
-        if (queriedAsset) { try { sessionStorage.setItem('dro-last-queried-asset', queriedAsset); } catch {} }
+        const queriedAssetExplicit = queryAssetIds[0] || null;
+        // Fall back to the last explicitly queried asset so follow-up questions
+        // without an asset ID (e.g. "what is the health status now?") still resolve
+        // to the correct asset and hit the session intercept / context injection.
+        const queriedAsset = queriedAssetExplicit || (() => {
+          try { return sessionStorage.getItem('dro-last-queried-asset'); } catch { return null; }
+        })();
+        // Only persist when the asset was explicitly named — don't overwrite with the fallback value.
+        if (queriedAssetExplicit) { try { sessionStorage.setItem('dro-last-queried-asset', queriedAssetExplicit); } catch {} }
         const backendAssetId = queriedAsset ? (assets || []).find(a => a.id === queriedAsset)?.asset_id : null;
         // Read from sessionStorage directly so we always get the latest value regardless of
         // React closure staleness (state batch may not have committed to this render yet).
@@ -564,13 +571,29 @@ export default function ChatView() {
           return;
         }
 
-        // All other queries about actioned assets (RUL, cost, parts, sensors, fault details)
-        // go to the LLM normally. HITL gates are suppressed further down by hasSessionState.
+        // Detail queries (RUL, cost, fault, risk, parts) on already-actioned assets
+        // → session summary card. Prevents the backend pipeline from re-running and
+        // returning stale CRITICAL data with "Approve work order" actions.
+        const isDetailQuery = /\brul\b|\brisk\b|\bexposure\b|\bfault\b|\bfailure\b|\bparts?\b|\bcost\b|\bwhat\s+was\b|\bwhat\s+were\b|\bprobabilit/i.test(t);
+        if (hasSessionState && queriedAsset && isDetailQuery) {
+          const chips = buildDefaultChips(persona, assets || [], queriedAsset);
+          setContextChips(chips);
+          const _assetStatusOvr3 = (() => { try { return JSON.parse(sessionStorage.getItem('dro-asset-status') || '{}'); } catch { return {}; } })();
+          const _assetObj3 = (assets || []).find(a => a.id === queriedAsset || a.asset_id === queriedAsset);
+          const _health3 = _assetStatusOvr3[queriedAsset] || _assetStatusOvr3[_assetObj3?.asset_id] || _assetObj3?.st;
+          appendA(buildAssetSessionSummary(queriedAsset, storedForAsset, _health3), ['session · historical data'], chips, []);
+          return;
+        }
+
+        // All other queries about actioned assets go to the LLM with session context injected.
+        // HITL gates are suppressed further down by hasSessionState.
 
         // Only inject status overrides when the query is asset-specific — injecting for
         // general questions ("what do 16 alerts mean?") causes the LLM to drag the last
         // asset into an unrelated answer.
-        const isAssetQuery = queryAssetIds.length > 0;
+        // True when the query explicitly names an asset OR when we resolved via fallback
+        // so that status-override context injection applies to follow-up questions too.
+        const isAssetQuery = queryAssetIds.length > 0 || !!queriedAsset;
         if (isAssetQuery) {
           const statusOverrides = (() => {
             try { return JSON.parse(sessionStorage.getItem('dro-asset-status') || '{}'); } catch { return {}; }
