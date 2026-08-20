@@ -209,6 +209,30 @@ function buildAssetSessionSummary(assetId, stored, currentHealth) {
     + `</div>`;
 }
 
+// Builds a plain-text context note about what was actioned for an asset this session.
+// Injected into conversation history so the LLM answers follow-up questions (RUL,
+// cost, fault details) in the context of the resolved state rather than raw data.
+function buildResolvedActionNote(assetId, stored) {
+  if (!stored) return null;
+  const parts = [`Resolved session context for ${assetId}:`];
+  if (stored.originalRUL) parts.push(`- RUL at time of analysis: ${stored.originalRUL}`);
+  if (stored.originalHealth) parts.push(`- Health at time of analysis: ${stored.originalHealth}`);
+  if (stored.diagnosisFaultLabel) parts.push(`- Fault diagnosed: ${stored.diagnosisFaultLabel}`);
+  if (stored.actionTaken) parts.push(`- Maintenance action taken: ${friendlyActionLabel(stored.actionTaken)}`);
+  if (stored.status === 'approved') {
+    const woRef = stored.woId ? ` (Work Order: ${stored.woId})` : '';
+    parts.push(`- Status: RESOLVED — maintenance approved${woRef} by ${stored.approvedBy || 'approver'}`);
+    parts.push('INSTRUCTION: Answer follow-up questions about this asset using the historical data above. Use past tense for the fault/RUL (e.g. "The RUL was X days when the analysis ran"). Do NOT present the asset as currently critical — maintenance has been scheduled.');
+  } else if (stored.status === 'rejected') {
+    parts.push(`- Status: DEFERRED — recommendation was rejected by ${stored.rejectedBy || 'approver'}`);
+    parts.push('INSTRUCTION: Note that the analysis flagged issues but the maintenance action was rejected. The asset continues to operate.');
+  } else if (stored.woClosed) {
+    parts.push('- Status: COMPLETE — work order closed, repair performed');
+    parts.push('INSTRUCTION: Reflect that the repair is complete and the asset has been restored to service.');
+  }
+  return parts.length > 1 ? parts.join('\n') : null;
+}
+
 // Builds asset-aware default chips using real fleet asset IDs.
 // Framing is persona-specific so each role gets a relevant starting question.
 function buildDefaultChips(persona, assets = [], priorityAssetId = null) {
@@ -565,6 +589,13 @@ export default function ChatView() {
               + '. Use these when answering questions about asset health or urgency.';
             conversationHistory.unshift({ role: 'assistant', content: note });
           }
+          // Inject resolved action context for follow-up questions (RUL, fault details,
+          // cost) on assets that were already actioned — prevents the LLM from pulling
+          // raw critical-state data and presenting it as the current situation.
+          if (hasSessionState && queriedAsset) {
+            const actionNote = buildResolvedActionNote(queriedAsset, storedForAsset);
+            if (actionNote) conversationHistory.unshift({ role: 'assistant', content: actionNote });
+          }
         }
 
         // Build the message sent to the backend. For asset queries where we have session
@@ -586,6 +617,14 @@ export default function ChatView() {
             .filter(Boolean);
           if (relevantEntries.length > 0) {
             effectiveMessage = `${t} [Session context: ${relevantEntries.join(', ')} — this was updated after action was taken this session and overrides backend data]`;
+          }
+          // Also embed resolved action context directly in the message so the backend
+          // LLM sees it even on intent paths that don't forward conversation history.
+          if (hasSessionState && queriedAsset) {
+            const actionNote = buildResolvedActionNote(queriedAsset, storedForAsset);
+            if (actionNote) {
+              effectiveMessage = `${effectiveMessage} [${actionNote.replace(/\n/g, '; ')}]`;
+            }
           }
         }
 
@@ -1747,6 +1786,10 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
             executionStatus: data.status || null,
             approvedBy: persona,
             approvedAt: new Date().toISOString(),
+            originalRUL: decisionSupport.parts_vs_rul?.rul_min_days != null
+              ? `${decisionSupport.parts_vs_rul.rul_min_days}–${decisionSupport.parts_vs_rul.rul_max_days} days`
+              : null,
+            originalHealth: (rec.urgency === 'immediate' || rec.urgency === 'urgent') ? 'critical' : 'warning',
           });
           // Persist WO display fields that the backend WO record won't carry —
           // risk level, cost, RUL window, duration and assigned persona
