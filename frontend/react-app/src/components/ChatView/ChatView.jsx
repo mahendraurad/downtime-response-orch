@@ -38,6 +38,32 @@ function friendlyActionLabel(name) {
   return name.replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase());
 }
 
+const ACTION_LABELS_PAST = {
+  stop_and_replace:        'Stopped the asset and replaced the bearing',
+  immediate_replacement:   'Bearing replaced immediately — emergency intervention completed',
+  emergency_replacement:   'Emergency bearing replacement completed',
+  emergency_shutdown:      'Asset shut down immediately — safety intervention completed',
+  defer_and_monitor:       'Repair deferred — maintenance scheduled with increased monitoring',
+  schedule_replacement:    'Planned bearing replacement scheduled',
+  planned_replacement:     'Planned bearing replacement scheduled',
+  schedule_maintenance:    'Planned maintenance window scheduled',
+  bearing_replacement:     'Bearing replaced during maintenance window',
+  monitor_only:            'Continued running with close monitoring',
+  vibration_monitoring:    'Vibration monitoring frequency increased',
+  inspection_only:         'Physical inspection scheduled for next opportunity',
+  partial_load_operation:  'Operating load reduced — running with caution',
+  reduce_load:             'Operating load reduced immediately',
+  lubrication_and_monitor: 'Bearing re-lubricated, monitoring for improvement',
+  lubrication:             'Bearing re-lubricated',
+  run_to_failure:          'Decision taken: accepted risk — running to failure',
+};
+
+function pastActionLabel(name) {
+  if (!name) return '—';
+  const key = name.toLowerCase().replace(/[\s\-]+/g, '_');
+  return ACTION_LABELS_PAST[key] || (friendlyActionLabel(name) + ' — completed');
+}
+
 function formatMoney(amount) {
   if (amount >= 1000000) return `$${(amount / 1000000).toFixed(1)}M`;
   if (amount >= 1000) return `$${Math.round(amount / 1000)}k`;
@@ -201,7 +227,7 @@ function buildAssetSessionSummary(assetId, stored, currentHealth) {
     rows.push(`Execution: <strong style="color:#ef4444">Rejected</strong> by ${stored.rejectedBy || 'approver'}`);
   }
   if (stored.actionTaken) {
-    rows.push(`Action: <strong>${friendlyActionLabel(stored.actionTaken)}</strong>`);
+    rows.push(`Action taken: <strong>${pastActionLabel(stored.actionTaken)}</strong>`);
   }
   const accentColor = stored.woClosed ? '#10b981' : stored.status === 'approved' ? '#10b981' : stored.status === 'rejected' ? '#ef4444' : '#3b82f6';
   return `<div style="border:1.5px solid ${accentColor};border-radius:10px;padding:14px;background:rgba(0,0,0,0.02)">`
@@ -235,6 +261,81 @@ function buildResolvedActionNote(assetId, stored) {
   return parts.length > 1 ? parts.join('\n') : null;
 }
 
+// Answers a specific follow-up question from session-stored pipeline data.
+// Returns targeted HTML if session data covers the question, null otherwise
+// (caller falls through to the LLM with context injected).
+function buildTargetedSessionAnswer(q, assetId, stored, health) {
+  const t = q.toLowerCase();
+  const lines = [];
+
+  const asksRUL     = /\brul\b|\bremaining.{0,20}life|\blifetime\b/.test(t);
+  const asksFault   = /\bfault\b|\bfailure[- ]?mode\b|\bdiagnos|\broot.cause|\bkurtosis|\bbpfo\b/.test(t);
+  const asksAction  = /\baction\b|\bwhat.{0,15}(done|taken|happened|decided|recommend|approv|reject)/.test(t);
+  const asksStatus  = /\bhealth\b|\bstatus\b|\bcurrent\b|\brestored\b|\bfixed\b|\bstill\b|\brecovered\b/.test(t);
+  const asksMonitor = /\bmonitor\b|\banomaly\b|\bsuppress\b/.test(t);
+  const asksSignal  = /\bsignal\b|\bimpute\b|\bquality.gate\b/.test(t);
+  const asksWO      = /\bwork.?order\b|\bwo\b|\bapprove\b|\breject\b/.test(t);
+
+  if (asksStatus && health) {
+    const hColor = { healthy: '#10b981', warning: '#f97316', critical: '#ef4444' }[health] || 'var(--t2)';
+    lines.push(`Current health: <strong style="color:${hColor}">${health.charAt(0).toUpperCase() + health.slice(1)}</strong> — updated after action taken this session`);
+  }
+  if (asksRUL && stored.originalRUL) {
+    lines.push(`RUL at time of analysis: <strong>${stored.originalRUL}</strong> <span style="color:var(--t3);font-size:11px">(pre-intervention)</span>`);
+  }
+  if (asksFault) {
+    if (stored.diagnosisFaultLabel) lines.push(`Fault classified: <strong>${stored.diagnosisFaultLabel}</strong>`);
+    if (stored.diagnosisStatus) {
+      const dl = stored.diagnosisStatus === 'confirmed'
+        ? `Confirmed — ${stored.diagnosisFaultLabel || 'fault classified'}`
+        : 'Overridden to undetermined';
+      lines.push(`Diagnosis: <strong>${dl}</strong>`);
+    }
+  }
+  if (asksMonitor && stored.monitoringStatus) {
+    lines.push(`Anomaly review: <strong>${stored.monitoringStatus === 'suppressed' ? 'Suppressed — no fault analysis' : 'Confirmed — proceeded with diagnosis'}</strong>`);
+  }
+  if (asksSignal && stored.remediationAction) {
+    const label = stored.remediationAction === 'IMPUTE' ? 'Imputed from baseline' : stored.remediationAction === 'DROP' ? 'Signal dropped' : 'Kept with quality flag';
+    lines.push(`Signal quality gate: <strong>${label}</strong>`);
+  }
+  if (asksAction || asksWO) {
+    if (stored.woClosed) {
+      lines.push(`Outcome: <strong style="color:#10b981">Work order closed</strong> — repair completed, asset restored to service`);
+    } else if (stored.status === 'approved') {
+      lines.push(`Outcome: <strong style="color:#10b981">Work order approved</strong>${stored.woId ? ` (${stored.woId})` : ''} by ${stored.approvedBy || 'approver'} — maintenance scheduled`);
+    } else if (stored.status === 'rejected') {
+      lines.push(`Outcome: <strong style="color:#ef4444">Work order rejected</strong> by ${stored.rejectedBy || 'approver'} — asset continues to run`);
+    }
+    if (stored.actionTaken) lines.push(`Action taken: <strong>${pastActionLabel(stored.actionTaken)}</strong>`);
+  }
+
+  if (lines.length === 0) return null;
+
+  const accentColor = stored.woClosed ? '#10b981' : stored.status === 'approved' ? '#10b981' : stored.status === 'rejected' ? '#ef4444' : '#3b82f6';
+  return `<div style="border:1.5px solid ${accentColor};border-radius:10px;padding:14px;background:rgba(0,0,0,0.02)">`
+    + `<div style="font-size:9px;font-weight:700;color:${accentColor};font-family:var(--m);margin-bottom:8px">SESSION DATA · ${assetId}</div>`
+    + `<div style="font-size:12px;color:var(--t2);line-height:2">${lines.map(l => '• ' + l).join('<br>')}</div>`
+    + `<div style="margin-top:10px;font-size:11px;color:var(--t3)">Captured during this session's pipeline run. Ask for a <strong>fresh analysis</strong> to re-run against current backend data.</div>`
+    + `</div>`;
+}
+
+// Builds past-tense session outcome lines for injection into LLM responses on session assets.
+// Used to replace the pipeline's present-tense action bullets with what actually happened.
+function buildSessionOutcomeHtml(stored) {
+  const parts = [];
+  if (stored.woClosed) {
+    parts.push(`<strong style="color:#10b981">✓ Work order closed</strong> — repair completed, asset restored to service`);
+  } else if (stored.status === 'approved') {
+    parts.push(`<strong style="color:#10b981">✓ Work order approved</strong>${stored.woId ? ` (${stored.woId})` : ''} — maintenance scheduled`);
+  } else if (stored.status === 'rejected') {
+    parts.push(`<strong style="color:#ef4444">✗ Work order rejected</strong> — asset continues to run`);
+  }
+  if (stored.actionTaken) parts.push(`Action taken: <strong>${pastActionLabel(stored.actionTaken)}</strong>`);
+  if (parts.length === 0) return '';
+  return `<br><br><strong style="color:var(--t2)">Session outcome:</strong><br>${parts.map(p => '→ ' + p).join('<br>')}`;
+}
+
 // Builds asset-aware default chips using real fleet asset IDs.
 // Framing is persona-specific so each role gets a relevant starting question.
 function buildDefaultChips(persona, assets = [], priorityAssetId = null) {
@@ -247,15 +348,18 @@ function buildDefaultChips(persona, assets = [], priorityAssetId = null) {
   const a = top[0]?.id;
   const b = top[1]?.id;
   if (!a) return [];
+  // 3-chip initial set — all single-asset so the backend can always answer.
+  // Context-specific chips (with comparison, cost, etc.) are generated by
+  // generateChipsFromResponse once the AI has returned relevant data.
   const frames = {
-    supervisor:  [`Analyse asset ${a} completely`, `What is the run/defer risk for ${a}?`,         b ? `How does ${a} compare in urgency to ${b}?`       : `What is the production impact if ${a} fails?`],
-    engineer:    [`Analyse asset ${a} completely`, `What is the RUL basis and confidence for ${a}?`, b ? `Full fault diagnosis for ${b}`                   : `What fault modes are active on ${a}?`],
-    maintenance: [`Analyse asset ${a} completely`, `What parts and crew are needed for ${a}?`,      b ? `Optimal maintenance window for ${a} and ${b}?`   : `Inspection schedule for ${a}`],
-    manager:     [`Analyse asset ${a} completely`, `Financial exposure if ${a} fails unplanned?`,   b ? `Production impact: ${a} vs ${b}`                 : `OEE impact of deferring ${a} maintenance`],
-    executive:   [`Analyse asset ${a} completely`, `Financial exposure from top critical assets`,   b ? `Portfolio risk: ${a} and ${b}`                   : `Top risk assets and strategic exposure`],
-    ot:          [`Analyse asset ${a} completely`, `Which sensors are out of range on ${a}?`,       b ? `Signal health check for ${b}`                    : `Are there historian data gaps for ${a}?`],
-    safety:      [`Analyse asset ${a} completely`, `What LOTO requirements apply to ${a}?`,         b ? `Safety permits needed for ${b}?`                 : `Personnel risk assessment for ${a}`],
-    md:          [`Analyse asset ${a} completely`, `Board-level risk summary for ${a}`,             b ? `Approval decisions needed for ${a} and ${b}`     : `What decisions require escalation for ${a}?`],
+    supervisor:  [`Analyse asset ${a} completely`, `What is the run/defer risk for ${a}?`,          b ? `What is the run/defer risk for ${b}?`           : `What is the production impact if ${a} fails unplanned?`],
+    engineer:    [`Analyse asset ${a} completely`, `What is the RUL basis and confidence for ${a}?`, b ? `What fault modes are active on ${b}?`            : `What fault modes are active on ${a}?`],
+    maintenance: [`Analyse asset ${a} completely`, `What parts and crew are needed for ${a}?`,       b ? `What parts are needed for ${b}?`                : `What is the inspection schedule for ${a}?`],
+    manager:     [`Analyse asset ${a} completely`, `Financial exposure if ${a} fails unplanned?`,    b ? `Financial exposure if ${b} fails unplanned?`    : `OEE impact of deferring ${a} maintenance`],
+    executive:   [`Analyse asset ${a} completely`, `Financial exposure from top critical assets`,    b ? `What is the strategic risk from ${b}?`          : `Top risk assets and strategic exposure`],
+    ot:          [`Analyse asset ${a} completely`, `Which sensors are out of range on ${a}?`,        b ? `Which sensors are flagged on ${b}?`             : `Are there historian data gaps for ${a}?`],
+    safety:      [`Analyse asset ${a} completely`, `What LOTO requirements apply to ${a}?`,          b ? `What are the LOTO steps for ${b}?`              : `What safety permits are needed for ${a}?`],
+    md:          [`Analyse asset ${a} completely`, `Board-level risk summary for ${a}`,              b ? `What is the strategic risk from ${b}?`          : `What decisions require escalation for ${a}?`],
   };
   return frames[persona] || [`Analyse asset ${a} completely`];
 }
@@ -279,7 +383,7 @@ function generateChipsFromResponse(d, fallbackQp) {
     if (text.includes('cost') || text.includes('financial') || text.includes('production') || text.includes('exposure'))
       chips.push(`Financial exposure if ${primary} fails unplanned?`);
     if (secondary && chips.length < 3)
-      chips.push(`How does ${primary} compare in urgency to ${secondary}?`);
+      chips.push(`Full risk assessment and RUL for ${secondary}?`);
     if (chips.length < 3)
       chips.push(`What happens if we defer action on ${primary}?`);
     return chips.slice(0, 3);
@@ -334,6 +438,7 @@ export default function ChatView() {
   const [thinking, setThinking] = useState(false);
   const [livePipelineLog, setLivePipelineLog] = useState([]);
   const [contextChips, setContextChips] = useState(() => buildDefaultChips(persona, assets || []));
+  const [usedChips, setUsedChips] = useState(() => new Set());
   const msgsRef = useRef(null);
   const inpRef = useRef(null);
   const conversationIdRef = useRef(null);
@@ -350,6 +455,7 @@ export default function ChatView() {
   // On persona switch: reset conversation, restore stored history or show home
   useEffect(() => {
     conversationIdRef.current = null;
+    setUsedChips(new Set());
     setContextChips(buildDefaultChips(persona, assets || []));
     if (!messages || messages.length === 0) {
       renderChatHome();
@@ -546,6 +652,51 @@ export default function ChatView() {
           storedForAsset.status || storedForAsset.monitoringStatus
           || storedForAsset.diagnosisStatus || storedForAsset.remediationAction
         );
+        // Multi-asset query where 2+ named assets are all in this session's pipeline store —
+        // build a combined session card without hitting the backend (which would fail with
+        // "asset names alone are not evidence" when it has no fresh fleet snapshot).
+        if (queryAssetIds.length >= 2 && !isFreshRequest) {
+          const _ov = (() => { try { return JSON.parse(sessionStorage.getItem('dro-asset-status') || '{}'); } catch { return {}; } })();
+          const sessionPairs = queryAssetIds.slice(0, 3).map(id => {
+            const assetObj = (assets || []).find(a => a.id === id || a.asset_id === id);
+            const bkId = assetObj?.asset_id;
+            const store = (bkId && rawPipelineStore[bkId]) || rawPipelineStore[id] || null;
+            const hasSession = store && (store.status || store.monitoringStatus || store.diagnosisStatus || store.remediationAction);
+            if (!hasSession) return null;
+            const health = _ov[id] || _ov[bkId] || assetObj?.st;
+            return { id, store, health };
+          }).filter(Boolean);
+
+          if (sessionPairs.length >= 2) {
+            const assetSections = sessionPairs.map(({ id, store, health }, idx) => {
+              const hColor = { healthy: '#10b981', warning: '#f97316', critical: '#ef4444' }[health] || 'var(--t2)';
+              const lines = [];
+              if (health) lines.push(`Health: <strong style="color:${hColor}">${health.charAt(0).toUpperCase() + health.slice(1)}</strong>`);
+              if (store.originalRUL) lines.push(`RUL at analysis: <strong>${store.originalRUL}</strong> <span style="color:var(--t3);font-size:11px">(pre-intervention)</span>`);
+              if (store.diagnosisFaultLabel) lines.push(`Fault: <strong>${store.diagnosisFaultLabel}</strong>`);
+              if (store.woClosed) lines.push(`Outcome: <strong style="color:#10b981">Work order closed</strong> — repair completed`);
+              else if (store.status === 'approved') lines.push(`Outcome: <strong style="color:#10b981">Work order approved</strong>${store.woId ? ` (${store.woId})` : ''} — maintenance scheduled`);
+              else if (store.status === 'rejected') lines.push(`Outcome: <strong style="color:#ef4444">Work order rejected</strong>`);
+              if (store.actionTaken) lines.push(`Action taken: <strong>${pastActionLabel(store.actionTaken)}</strong>`);
+              const divider = idx < sessionPairs.length - 1 ? 'border-bottom:1px solid var(--b);padding-bottom:10px;margin-bottom:10px;' : '';
+              return `<div style="${divider}">`
+                + `<div style="font-size:10px;font-weight:700;color:var(--ac2);font-family:var(--m);margin-bottom:5px">${id}</div>`
+                + `<div style="font-size:12px;color:var(--t2);line-height:1.9">${lines.map(l => '• ' + l).join('<br>')}</div>`
+                + `</div>`;
+            }).join('');
+            const multiHtml = `<div style="border:1.5px solid var(--ac2);border-radius:10px;padding:14px;background:rgba(0,0,0,0.02)">`
+              + `<div style="font-size:9px;font-weight:700;color:var(--ac2);font-family:var(--m);margin-bottom:10px">SESSION DATA · ${sessionPairs.map(p => p.id).join(' & ')}</div>`
+              + assetSections
+              + `<div style="margin-top:10px;font-size:11px;color:var(--t3)">Both assets were actioned this session. Ask for a <strong>fresh analysis</strong> on each asset to get updated pipeline data.</div>`
+              + `</div>`;
+            const multiChips = buildDefaultChips(persona, assets || [], sessionPairs[0].id);
+            setContextChips(multiChips);
+            setUsedChips(new Set());
+            appendA(multiHtml, ['session · multi-asset data'], multiChips, []);
+            return;
+          }
+        }
+
         // Pipeline re-run queries on actioned assets → session cache (no new pipeline run)
         const isPipelineQuery = /\banalys|\binspect|\bcheck|\bdiagnos|\bassess|\brun\b|\bfull\b|\bpipeline\b/i.test(t);
         if (hasSessionState && queriedAsset && isPipelineQuery) {
@@ -558,31 +709,22 @@ export default function ChatView() {
           return;
         }
 
-        // Health/status queries on actioned assets → session status card (prevents stale
-        // CRITICAL pipeline data from contradicting what other tabs already show)
-        const isStatusQuery = /\bhealthy?\b|\bhealth\b|\bstatus\b|\bstill\s+(critical|fault|fail)\b|\b(fixed|resolved|repaired|recovered)\b|\bcurrent\s+(condition|state)\b/i.test(t);
-        if (hasSessionState && queriedAsset && isStatusQuery) {
-          const chips = buildDefaultChips(persona, assets || [], queriedAsset);
-          setContextChips(chips);
-          const _assetStatusOvr2 = (() => { try { return JSON.parse(sessionStorage.getItem('dro-asset-status') || '{}'); } catch { return {}; } })();
-          const _assetObj2 = (assets || []).find(a => a.id === queriedAsset || a.asset_id === queriedAsset);
-          const _health2 = _assetStatusOvr2[queriedAsset] || _assetStatusOvr2[_assetObj2?.asset_id] || _assetObj2?.st;
-          appendA(buildAssetSessionSummary(queriedAsset, storedForAsset, _health2), ['session · status'], chips, []);
-          return;
-        }
-
-        // Detail queries (RUL, cost, fault, risk, parts) on already-actioned assets
-        // → session summary card. Prevents the backend pipeline from re-running and
-        // returning stale CRITICAL data with "Approve work order" actions.
-        const isDetailQuery = /\brul\b|\brisk\b|\bexposure\b|\bfault\b|\bfailure\b|\bparts?\b|\bcost\b|\bwhat\s+was\b|\bwhat\s+were\b|\bprobabilit/i.test(t);
-        if (hasSessionState && queriedAsset && isDetailQuery) {
-          const chips = buildDefaultChips(persona, assets || [], queriedAsset);
-          setContextChips(chips);
-          const _assetStatusOvr3 = (() => { try { return JSON.parse(sessionStorage.getItem('dro-asset-status') || '{}'); } catch { return {}; } })();
-          const _assetObj3 = (assets || []).find(a => a.id === queriedAsset || a.asset_id === queriedAsset);
-          const _health3 = _assetStatusOvr3[queriedAsset] || _assetStatusOvr3[_assetObj3?.asset_id] || _assetObj3?.st;
-          appendA(buildAssetSessionSummary(queriedAsset, storedForAsset, _health3), ['session · historical data'], chips, []);
-          return;
+        // Follow-up questions on actioned assets — answer specifically from session data
+        // where possible (different answer per question), fall through to LLM otherwise.
+        // Replaces the old static-card intercepts so every follow-up gets a tailored response.
+        const isFollowUpQuery = /\bhealthy?\b|\bhealth\b|\bstatus\b|\bstill\s+(critical|fault|fail)\b|\b(fixed|resolved|repaired|recovered)\b|\bcurrent\s+(condition|state)\b|\brul\b|\brisk\b|\bexposure\b|\bfault\b|\bfailure\b|\bparts?\b|\bcost\b|\bwhat\s+was\b|\bwhat\s+were\b|\bprobabilit/i.test(t);
+        if (hasSessionState && queriedAsset && isFollowUpQuery) {
+          const _statusOvr = (() => { try { return JSON.parse(sessionStorage.getItem('dro-asset-status') || '{}'); } catch { return {}; } })();
+          const _assetObj  = (assets || []).find(a => a.id === queriedAsset || a.asset_id === queriedAsset);
+          const _health    = _statusOvr[queriedAsset] || _statusOvr[_assetObj?.asset_id] || _assetObj?.st;
+          const targeted   = buildTargetedSessionAnswer(t, queriedAsset, storedForAsset, _health);
+          if (targeted) {
+            const chips = buildDefaultChips(persona, assets || [], queriedAsset);
+            setContextChips(chips);
+            appendA(targeted, ['session · data'], chips, []);
+            return;
+          }
+          // Session store doesn't cover this question — fall through to LLM with context injected
         }
 
         // All other queries about actioned assets go to the LLM with session context injected.
@@ -713,16 +855,27 @@ export default function ChatView() {
         // Normal response — update sidebar state and generate follow-up chips from response content
         setLivePipelineLog(pl);
         if (d.knowledge_guidance) lastKnowledgeRef.current = d.knowledge_guidance;
-        const chips = generateChipsFromResponse(d, buildDefaultChips(persona, assets || []));
+        const chips = generateChipsFromResponse(d, buildDefaultChips(persona, assets || [], queriedAsset));
         setContextChips(chips);
+        setUsedChips(new Set());
         const details = d.details && d.details.length ? '<br><br>' + d.details.map(x => '• ' + x).join('<br>') : '';
-        const actions = d.actions && d.actions.length ? '<br><br><strong>Actions:</strong><br>' + d.actions.map(x => '→ ' + x).join('<br>') : '';
         const questions = d.clarification && d.clarification.questions ? '<br><br><strong>Needed:</strong><br>' + d.clarification.questions.map(x => '? ' + x).join('<br>') : '';
         const dkg = d.knowledge_guidance;
         const dSopLine = dkg?.sop_id
           ? `<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--b);font-size:10px;color:var(--t3)">📄 <strong style="color:var(--t2)">Referenced document:</strong> ${dkg.sop_id}${dkg.matching_cases?.length ? ` · ${dkg.matching_cases.length} case${dkg.matching_cases.length !== 1 ? 's' : ''} matched` : ''}</div>`
           : '';
-        appendA(sanitizeResponse(d.response) + details + actions + questions + dSopLine, routes, chips, pl);
+        // When a session-actioned asset falls through to the LLM, suppress the pipeline's
+        // present-tense action recommendations and replace them with past-tense session outcomes.
+        // Add a clear "pre-intervention" header so the figures are obviously historical.
+        let responseBody;
+        if (hasSessionState && queriedAsset && storedForAsset) {
+          const preHeader = `<div style="font-size:9.5px;font-weight:700;color:var(--am);font-family:var(--m);margin-bottom:10px;padding:5px 9px;border-radius:5px;background:rgba(249,115,22,.08);border:1px solid rgba(249,115,22,.25)">⚠ PRE-INTERVENTION DATA · ${queriedAsset} — figures below are from before the repair was completed this session</div>`;
+          responseBody = preHeader + sanitizeResponse(d.response) + details + buildSessionOutcomeHtml(storedForAsset) + questions + dSopLine;
+        } else {
+          const actions = d.actions && d.actions.length ? '<br><br><strong>Actions:</strong><br>' + d.actions.map(x => '→ ' + x).join('<br>') : '';
+          responseBody = sanitizeResponse(d.response) + details + actions + questions + dSopLine;
+        }
+        appendA(responseBody, routes, chips, pl);
 
         // Non-blocking gates shown alongside the response
         if (d.hitl_advisory?.advisory_note) {
@@ -847,8 +1000,8 @@ export default function ChatView() {
             </button>
           </div>
           <div className="qps">
-            {contextChips.map((q, i) => (
-              <button key={i} className="qpb" onClick={() => sendMsg(q)} disabled={thinking} style={thinking ? { opacity: 0.4, cursor: 'not-allowed' } : {}}>{q}</button>
+            {contextChips.filter(c => !usedChips.has(c)).map((q, i) => (
+              <button key={q} className="qpb" onClick={() => { setUsedChips(prev => new Set([...prev, q])); sendMsg(q); }} disabled={thinking} style={thinking ? { opacity: 0.4, cursor: 'not-allowed' } : {}}>{q}</button>
             ))}
           </div>
         </div>

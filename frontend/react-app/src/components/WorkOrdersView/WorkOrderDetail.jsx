@@ -1,9 +1,8 @@
 import React, { useContext, useState } from 'react';
 import { AppContext } from '../../context/AppContext';
-import { patchWorkOrder } from '../../api/workOrders';
-import { askChat } from '../../api/chat';
 import { authedFetch } from '../../api/http';
 import { API } from '../../config/api';
+import { PD } from '../../data/personas';
 
 const PR_COLOR = { URGENT: 'var(--rd)', MEDIUM: 'var(--am)', LOW: 'var(--gn)' };
 const PR_BG    = { URGENT: 'var(--rdm)', MEDIUM: 'var(--adm)', LOW: 'var(--gd)' };
@@ -160,47 +159,7 @@ const WO_PERSONA_ACTS = {
 
 export default function WorkOrderDetail({ wo }) {
   const { persona, updateWOStatus, updateAssetPipelineState, updateAssetStatus } = useContext(AppContext);
-  const [checklist, setChecklist]   = useState(() => wo ? wo.cl.map(item => ({ ...item })) : []);
-  const [chipAnswers, setChipAnswers] = useState({});
-  const [chipLoading, setChipLoading] = useState(false);
-  const [activeChipIdxs, setActiveChipIdxs] = useState({});
-  const [loadingForPersona, setLoadingForPersona] = useState(null);
-  const chipAnswer = chipAnswers[persona] ?? null;
-  const activeChipIdx = activeChipIdxs[persona] ?? null;
-  const isThinking = chipLoading && loadingForPersona === persona;
-  const [exporting, setExporting]   = useState(false);
-
-  React.useEffect(() => {
-    if (wo) setChecklist(wo.cl.map(item => ({ ...item })));
-    setChipAnswers({});
-    setActiveChipIdxs({});
-  }, [wo && wo.id]);
-
-  async function handleChipClick(q, idx) {
-    if (chipLoading) return;
-    if (activeChipIdx === idx && chipAnswer !== null) {
-      setChipAnswers(prev => ({ ...prev, [persona]: null }));
-      setActiveChipIdxs(prev => ({ ...prev, [persona]: null }));
-      return;
-    }
-    const callingPersona = persona;
-    setChipLoading(true);
-    setLoadingForPersona(callingPersona);
-    setActiveChipIdxs(prev => ({ ...prev, [callingPersona]: idx }));
-    setChipAnswers(prev => ({ ...prev, [callingPersona]: null }));
-    try {
-      const prefix = wo
-        ? `[Work Order: ${wo.id} | Asset: ${wo.as} | Status: ${wo.st} | Priority: ${wo.pr} | RUL: ${wo.rul} | Risk: ${wo.risk}]\n\n`
-        : '';
-      const data = await askChat({ message: prefix + q, persona: callingPersona });
-      setChipAnswers(prev => ({ ...prev, [callingPersona]: data.response || data.message || 'No answer returned.' }));
-    } catch {
-      setChipAnswers(prev => ({ ...prev, [callingPersona]: 'Could not fetch answer. Please try again.' }));
-    } finally {
-      setChipLoading(false);
-      setLoadingForPersona(null);
-    }
-  }
+  const [exporting, setExporting] = useState(false);
 
   async function handleExport(assetId) {
     if (exporting) return;
@@ -241,14 +200,8 @@ export default function WorkOrderDetail({ wo }) {
                        : 'scheduled';
 
   const personaActs = (WO_PERSONA_ACTS[persona] || WO_PERSONA_ACTS.supervisor)[stateKey]
-                   || { actions: [], chips: [] };
-  const { actions, chips } = personaActs;
-
-  function toggleChecklist(i) {
-    const newDone = !checklist[i].ck;
-    setChecklist(prev => prev.map((item, idx) => idx === i ? { ...item, ck: newDone } : item));
-    patchWorkOrder(wo.id, { checklist_index: i, checklist_done: newDone }).catch(() => {});
-  }
+                   || { actions: [] };
+  const { actions } = personaActs;
 
   return (
     <>
@@ -291,30 +244,6 @@ export default function WorkOrderDetail({ wo }) {
           </div>
         )}
 
-        {/* AI query chips */}
-        {chips.length > 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', marginTop: actions.length ? '10px' : '10px' }}>
-            {chips.map((q, i) => (
-              <button
-                key={i}
-                className="wo-chip"
-                disabled={chipLoading}
-                onClick={() => handleChipClick(q, i)}
-              >
-                {isThinking && activeChipIdx === i ? '…' : q}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {/* Inline AI answer */}
-        {(isThinking || chipAnswer) && (
-          <div style={{ margin: '10px 0 0', padding: '12px 14px', borderRadius: '8px', background: 'var(--sf)', border: '1px solid var(--b)', borderLeft: '3px solid var(--ac2)', fontSize: '12px', color: 'var(--t2)', lineHeight: '1.7' }}>
-            {isThinking
-              ? <span style={{ color: 'var(--t3)', fontStyle: 'italic' }}>Agent thinking…</span>
-              : chipAnswer}
-          </div>
-        )}
       </div>
 
       <div className="wodbody">
@@ -329,20 +258,9 @@ export default function WorkOrderDetail({ wo }) {
             </div>
             <div className="dc"><div className="dcl">Duration Est.</div><div className="dcv">{wo.est}</div></div>
             <div className="dc"><div className="dcl">Parts</div><div className="dcv" style={{ fontSize: '11px' }}>{wo.parts}</div></div>
-            <div className="dc"><div className="dcl">Assigned To</div><div className="dcv" style={{ fontSize: '11px' }}>{WO_ASSIGNEES[wo.st] || (wo.st === 'Closed' ? '✓ Completed' : wo.asgn || '—')}</div></div>
+            <div className="dc"><div className="dcl">Assigned To</div><div className="dcv" style={{ fontSize: '11px' }}>{WO_ASSIGNEES[wo.st] || (wo.st === 'Closed' ? `✓ Completed by ${(PD[persona]?.nm || '').split(' — ')[1] || PD[persona]?.nm || '—'}` : wo.asgn || '—')}</div></div>
             <div className="dc"><div className="dcl">Cost</div><div className="dcv" style={{ fontSize: '11px' }}>{wo.cost}</div></div>
           </div>
-        </div>
-
-        <div className="dsec">
-          <div className="sttl">Task Checklist</div>
-          {checklist.map((item, i) => (
-            <div key={i} className="clitem">
-              <div className={`clcb${item.ck ? ' ck' : ''}`} onClick={() => toggleChecklist(i)} />
-              <span className={`cltx${item.ck ? ' dk' : ''}`}>{item.tx}</span>
-              <span className="cltg">{item.tg}</span>
-            </div>
-          ))}
         </div>
 
         <div className="dsec">
