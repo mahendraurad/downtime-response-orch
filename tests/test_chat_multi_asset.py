@@ -51,11 +51,39 @@ def test_multi_asset_plan_has_action_and_deadline_for_each_asset(client):
     assert rows[2]["status"]=="data_review" and rows[2]["recommendation"] is None
 
 
-def test_single_asset_signal_does_not_count_as_fleet_evidence(client):
+def test_single_asset_signal_produces_partial_multi_asset_result(client):
     signal=deepcopy(load_telemetry_rows("outer_race_fault")[-1])
     data=client.post("/api/chat",json={"message":QUERY,"context":{"signal":signal}}).json()
-    assert data["clarification_required"] and data["pipeline_log"]==[]
-    assert "multi_asset_results" not in data
+    assert data["clarification_required"] is False
+    rows=data["multi_asset_results"]
+    assert rows[0]["display_asset_id"]=="M-104" and rows[0]["pipeline_log"]
+    assert [row["status"] for row in rows[1:]]==["unavailable","unavailable"]
+    assert all(log["asset"]=="M-104" for log in data["pipeline_log"])
+
+
+def test_unknown_asset_does_not_suppress_evidenced_known_asset(client):
+    signal=deepcopy(load_telemetry_rows("outer_race_fault")[-1])
+    data=client.post("/api/chat",json={
+        "message":"Plan M-104 and X-999 for this week",
+        "context":{"signal":signal},
+    }).json()
+    assert data["intent"]=="multi_asset_plan"
+    assert data["clarification_required"] is False
+    rows=data["multi_asset_results"]
+    assert [row["display_asset_id"] for row in rows]==["M-104","X-999"]
+    assert rows[0]["status"]=="action_required" and rows[0]["pipeline_log"]
+    assert rows[1]["status"]=="unavailable"
+    assert rows[1]["recommendation"] is None and rows[1]["pipeline_log"]==[]
+    assert rows[1]["reason"]=="no fleet evidence was supplied for this asset"
+    assert "evaluated 1 of 2 requested assets" in data["response"]
+
+
+def test_unknown_asset_order_is_preserved_in_partial_plan(client):
+    data=_ask(client,"Plan Z-998, M-104 and P-207 for this week")
+    assert [row["display_asset_id"] for row in data["multi_asset_results"]]==[
+        "Z-998","M-104","P-207",
+    ]
+    assert data["multi_asset_results"][0]["status"]=="unavailable"
 
 
 def test_duplicate_asset_mentions_are_deduplicated(client):
@@ -88,6 +116,7 @@ def test_frontend_forwards_multi_asset_query_to_chat_api():
     source=Path("frontend/react-app/src/components/ChatView/ChatView.jsx").read_text(encoding="utf-8")
     assert "if (CHAT_KB[t])" not in source
     assert "conversationId: conversationIdRef.current" in source
+    assert '<div className="act-cards" style={{ display: \'none\' }}>' in source
 
 
 def test_main_chat_has_no_single_asset_pipeline_or_offline_shortcut():

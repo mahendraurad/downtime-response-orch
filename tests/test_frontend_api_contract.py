@@ -81,6 +81,7 @@ def test_frontend_uses_backend_contracts_for_group_a():
     root = Path(__file__).resolve().parents[1] / "frontend" / "react-app" / "src"
     app_context = (root / "context" / "AppContext.jsx").read_text(encoding="utf-8")
     chat = (root / "components" / "ChatView" / "ChatView.jsx").read_text(encoding="utf-8")
+    escalation_timer = (root / "utils" / "escalationTimer.js").read_text(encoding="utf-8")
     assert "fetchDashboardAssets" in app_context
     assert "fetchWorkOrders" in app_context
     assert "activeEscalationStep" in app_context
@@ -94,6 +95,9 @@ def test_frontend_uses_backend_contracts_for_group_a():
     assert "approval escalation countdown" in chat
     assert "escalationStageIndex" in chat
     assert "target: step.to_persona_id" in app_context
+    assert "activeEscalationStep(escalation, stageIndex, personaId)" in app_context
+    assert "terminalPersonaId" in escalation_timer
+    assert "normalizedPersonaId(personaId)" in escalation_timer
     assert "transferId" in app_context
     assert "FOR: Plant Supervisor" not in chat
     assert "buildExecutionSteps" not in chat

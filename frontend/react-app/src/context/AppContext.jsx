@@ -264,7 +264,7 @@ export function AppProvider({ children }) {
             }
             const stageIndex = Number(message.escalationStageIndex || 0);
             const escalation = message.rec?.decision_support?.approval_escalation;
-            const step = activeEscalationStep(escalation, stageIndex);
+            const step = activeEscalationStep(escalation, stageIndex, personaId);
             if (!step || remainingSeconds(step.escalates_at_utc, nowMs) !== 0) {
               return message;
             }

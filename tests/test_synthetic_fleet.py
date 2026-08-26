@@ -243,7 +243,7 @@ def test_dashboard_api_projects_all_assets_with_varied_statuses():
     assert all(row["pipeline_log"] for row in payload["assets"])
 
 
-def test_demo_work_orders_cover_registered_assets_and_multiple_priorities():
+def test_demo_work_order_fixtures_are_not_loaded_into_realtime_api():
     from src.api.main import app
 
     configured = load_demo_work_orders()
@@ -260,9 +260,9 @@ def test_demo_work_orders_cover_registered_assets_and_multiple_priorities():
     response = TestClient(app).get("/api/workorders")
     assert response.status_code == 200
     rows = response.json()["workorders"]
-    assert {"WO-2024-1847", "WO-DEMO-0207", "WO-DEMO-0301"} <= {
-        row["id"] for row in rows
-    }
+    configured_ids = {row["id"] for row in configured}
+    runtime_ids = {row["id"] for row in rows}
+    assert configured_ids.isdisjoint(runtime_ids)
 
 
 def test_websocket_baselines_cover_the_entire_fleet():

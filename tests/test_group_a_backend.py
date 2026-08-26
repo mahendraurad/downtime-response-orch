@@ -121,14 +121,22 @@ def test_immediate_approval_has_named_exact_escalation_schedule(upstream):
         "manager", "executive",
     ]
     assert escalation.steps[0].to_persona_name == "Plant Manager — Sarah Chen"
-    assert escalation.steps[0].timeout_seconds == 900
+    assert escalation.steps[0].timeout_seconds == 30
     assert escalation.steps[0].escalates_at_utc == (
-        now + timedelta(minutes=15)
+        now + timedelta(seconds=30)
     ).isoformat()
     assert escalation.steps[1].to_persona_name == "VP Operations — Michael Osei"
     assert escalation.steps[1].escalates_at_utc == (
-        now + timedelta(minutes=30)
+        now + timedelta(seconds=60)
     ).isoformat()
+
+
+def test_all_approval_escalation_demo_timeouts_are_30_seconds():
+    from src.tools.decision_support_config import load_decision_support_config
+    policy=load_decision_support_config()["approval_escalation"]
+    assert policy["timeout_seconds_by_urgency"]=={
+        "immediate":30,"urgent":30,"planned":30,"monitor":30,
+    }
 
 
 def test_manager_approval_starts_at_manager_and_escalates_only_to_vp(upstream):

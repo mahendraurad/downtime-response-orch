@@ -761,20 +761,34 @@ class LearningConfig:
     minimum_score: float
     top_k: int
     log_learned_cases: bool
+    rejection_repository_path: str = "data/rejection_feedback.json"
+    include_rejections_in_history: bool = True
+    rejection_window_days: int = 30
+    rejection_review_threshold: int = 2
     def validate(self):
         if not self.allowed_execution_statuses or not set(self.allowed_execution_statuses) <= {"success", "partial"}:
             raise ValueError("learning execution statuses are invalid")
         if self.llm_max_characters <= 0 or self.top_k <= 0 or not 0 <= self.minimum_score <= 1:
             raise ValueError("learning numeric policy is invalid")
+        if not self.rejection_repository_path.strip():
+            raise ValueError("rejection repository path is required")
+        if self.rejection_window_days <= 0 or self.rejection_review_threshold < 2:
+            raise ValueError("rejection learning policy is invalid")
 
 
 def load_learning_config(path: str = _LEARNING_CONFIG) -> LearningConfig:
     if not os.path.exists(path): raise FileNotFoundError(f"Learning config not found: {os.path.abspath(path)}")
     with open(path, "r", encoding="utf-8") as fh: raw = json.load(fh)
     val, llm, ret = raw["validation"], raw["llm_narrative"], raw["retrieval"]
+    rejection_repo = raw.get("rejection_repository", {})
+    rejection_policy = raw.get("rejection_learning", {})
     cfg = LearningConfig(raw["repository"]["json_path"], raw["training_export"]["jsonl_path"],
         val["allowed_execution_statuses"], val["require_timezone"], val["require_root_cause"],
         llm["enabled"], llm["max_characters"], ret["minimum_score"], ret["top_k"],
-        raw["logging"]["log_learned_cases"])
+        raw["logging"]["log_learned_cases"],
+        rejection_repo.get("json_path", "data/rejection_feedback.json"),
+        rejection_policy.get("include_in_history", True),
+        rejection_policy.get("consecutive_window_days", 30),
+        rejection_policy.get("reliability_review_threshold", 2))
     cfg.validate(); return cfg
 # ***********************

@@ -29,7 +29,13 @@ _RULES = [
     # ── Learning history ──────────────────────────────────────────────────────
     ("learning_history", ("last 3 failures", "last three failures", "recent failures",
                           "failure history", "what did we learn", "learnings from",
-                          "learned bearing cases", "learned cases"),
+                          "learned bearing cases", "learned cases",
+                          "what did you learn", "what did you learnt",
+                          "what do you learn", "what do you learnt",
+                          "what have you learned", "what have you learnt",
+                          "what have we learned", "what have we learnt",
+                          "what was learned", "what was learnt",
+                          "learning about", "lessons about"),
      "history", (8,), False),
 
     # ── Full pipeline — explicit analysis or work-order requests ─────────────

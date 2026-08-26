@@ -24,7 +24,7 @@ class LearningMemoryAgent:
         self._cfg = cfg or load_learning_config(); self._cfg.validate()
         self._repo = repository or JSONLearnedCaseRepository(self._cfg.repository_path)
         self._rejections = rejection_repository or JSONRejectionRepository(
-            "data/rejection_feedback.json"
+            self._cfg.rejection_repository_path
         )
         self._llm = llm_client
         self._now = now_fn or (lambda: datetime.now(timezone.utc))
@@ -41,7 +41,9 @@ class LearningMemoryAgent:
         content = self._template(execution, feedback)
         content, source = self._optional_llm(content, feedback)
         doc = LearnedCaseDocument(
-            case_id=feedback.case_id, content=content, fault_mode=feedback.confirmed_fault_mode,
+            case_id=feedback.case_id, asset_id=feedback.asset_id,
+            bearing_id=feedback.bearing_id, content=content,
+            fault_mode=feedback.confirmed_fault_mode,
             asset_type="", bearing_type="", iso_stage=0,
             outcome=f"{feedback.action_taken}: {feedback.root_cause}",
             tags=[feedback.confirmed_fault_mode, feedback.action_taken,
@@ -66,11 +68,45 @@ class LearningMemoryAgent:
             doc.status_reason = f"learning persistence failed: {exc}"
         return doc
 
-    def recent_cases(self, limit: int = 3) -> list[dict]:
+    def recent_cases(self, limit: int = 3, asset_id: str = "") -> list[dict]:
         """Read validated learned history; this does not create new learning."""
         if not hasattr(self._repo, "list_recent"):
             return []
-        return self._repo.list_recent(limit)
+        try:
+            return self._repo.list_recent(limit, asset_id=asset_id)
+        except TypeError:
+            rows = self._repo.list_recent(limit)
+            return [row for row in rows if not asset_id or row.get("asset_id") == asset_id]
+
+    def recent_rejections(self, limit: int = 3, asset_id: str = "") -> list[dict]:
+        """Read rejection feedback as decision learning, not confirmed outcomes."""
+        if not self._cfg.include_rejections_in_history or not hasattr(self._rejections, "list_recent"):
+            return []
+        try:
+            rows = self._rejections.list_recent(
+                limit=limit, asset_id=asset_id, decision="rejected"
+            )
+        except TypeError:
+            rows = self._rejections.list_recent(limit)
+            rows = [row for row in rows if row.get("decision") == "rejected"
+                    and (not asset_id or row.get("asset_id") == asset_id)]
+        return [{
+            "case_id": str(row.get("case_id", "")),
+            "asset_id": str(row.get("asset_id", "")),
+            "fault_mode": str(row.get("fault_mode", "")),
+            "reason_code": str(row.get("reason_code", "")),
+            "free_text": str(row.get("free_text", "")),
+            "persona_id": str(row.get("persona_id", "")),
+            "recorded_at": str(row.get("decided_at", row.get("rejected_at", ""))),
+            "learning_type": "rejection_feedback",
+            "valid_closure": True,
+            "closure_status": "rejected",
+            "physical_outcome_confirmed": False,
+            "confirmed_outcome": False,
+            "reliability_review_required": bool(
+                row.get("reliability_review_required", False)
+            ),
+        } for row in rows]
 
     def matching_cases(self, asset_id: str, fault_mode: str,
                        limit: int = 3) -> list[dict]:
@@ -84,7 +120,14 @@ class LearningMemoryAgent:
         if not isinstance(feedback, RejectionFeedback):
             return RejectionLearningResult(
                 case_id="", status="invalid_input",
-                persistence_status="not_stored",
+                learning_recorded=False, persistence_status="not_stored",
+            )
+        required_fields = (feedback.case_id, feedback.asset_id, feedback.fault_mode,
+                           feedback.persona_id)
+        if any(not isinstance(value, str) or not value.strip() for value in required_fields):
+            return RejectionLearningResult(
+                case_id=feedback.case_id, status="invalid_input",
+                learning_recorded=False, persistence_status="not_stored",
             )
         now = self._now()
         try:
@@ -94,33 +137,55 @@ class LearningMemoryAgent:
         except ValueError:
             return RejectionLearningResult(
                 case_id=feedback.case_id, status="invalid_input",
-                persistence_status="not_stored",
+                learning_recorded=False, persistence_status="not_stored",
             )
         if rejected_at.tzinfo is None or rejected_at > now:
             return RejectionLearningResult(
                 case_id=feedback.case_id, status="invalid_input",
-                persistence_status="not_stored",
+                learning_recorded=False, persistence_status="not_stored",
             )
         try:
+            if (hasattr(self._rejections, "exists_decision")
+                    and self._rejections.exists_decision(feedback.case_id, "rejected")):
+                return RejectionLearningResult(
+                    case_id=feedback.case_id, status="duplicate",
+                    learning_recorded=False,
+                    valid_closure=True, closure_status="rejected",
+                    persistence_status="duplicate_not_stored",
+                    review_reason="rejection feedback for this case is already recorded",
+                )
             self._rejections.append({
                 **feedback.model_dump(), "decision": "rejected",
                 "decided_at": rejected_at.isoformat(),
+                "learning_type": "rejection_feedback",
+                "valid_closure": True,
+                "closure_status": "rejected",
             })
             count = self._rejections.consecutive_rejections(
-                feedback.asset_id, feedback.fault_mode, now, days=30
+                feedback.asset_id, feedback.fault_mode, now,
+                days=self._cfg.rejection_window_days
             )
+            required = count >= self._cfg.rejection_review_threshold
+            if hasattr(self._rejections, "update_decision"):
+                self._rejections.update_decision(feedback.case_id, "rejected", {
+                    "consecutive_rejections": count,
+                    "reliability_review_required": required,
+                })
         except Exception as exc:
             return RejectionLearningResult(
                 case_id=feedback.case_id, status="persistence_failed",
-                persistence_status="failed", review_reason=str(exc),
+                learning_recorded=False, persistence_status="failed",
+                review_reason=str(exc),
             )
-        required = count >= 2
         return RejectionLearningResult(
             case_id=feedback.case_id,
+            valid_closure=True,
+            closure_status="rejected",
             reliability_review_required=required,
             consecutive_rejections=count,
             review_reason=(
-                "same asset and fault rejected consecutively within 30 days"
+                f"same asset and fault rejected consecutively within "
+                f"{self._cfg.rejection_window_days} days"
                 if required else ""
             ),
         )
@@ -168,7 +233,8 @@ class LearningMemoryAgent:
 
     @staticmethod
     def _template(execution, feedback):
-        return (f"Closed maintenance case {feedback.case_id}. Confirmed fault: "
+        return (f"Closed maintenance case {feedback.case_id} for asset "
+            f"{feedback.asset_id}, bearing {feedback.bearing_id}. Confirmed fault: "
             f"{feedback.confirmed_fault_mode}. Root cause: {feedback.root_cause}. "
             f"Action taken: {feedback.action_taken}. Recommendation followed: "
             f"{feedback.recommendation_followed}. Technician notes: {feedback.technician_notes}. "

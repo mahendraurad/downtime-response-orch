@@ -225,29 +225,78 @@ def _learning_agent():
 
 
 @traceable(name="Agent 8 - Learning History Query", run_type="retriever", tags=["dro", "agent-8"])
-def _learning_history_draft(persona: str, limit: int = 3):
+def _learning_history_draft(persona: str, limit: int = 3,
+                            asset_id: str = "", asset_label: str = ""):
     persona_context = build_persona_context(persona)
-    cases = _learning_agent().recent_cases(limit)
-    if not cases:
+    agent = _learning_agent()
+    cases = agent.recent_cases(limit, asset_id=asset_id)
+    rejections = agent.recent_rejections(limit, asset_id=asset_id)
+    records = [
+        {**case, "learning_type": "validated_outcome",
+         "recorded_at": str(case.get("created_at", "")),
+         "valid_closure": True, "closure_status": "completed",
+         "physical_outcome_confirmed": True, "confirmed_outcome": True}
+        for case in cases
+    ] + list(rejections)
+    records.sort(key=lambda row: str(row.get("recorded_at", "")), reverse=True)
+    records = records[:limit]
+    label = asset_label or asset_id
+    if not records:
+        scope = f" for {label}" if label else ""
         return ({"persona": persona_context.id,
             "persona_context": persona_context.model_dump(),
-            "response": "No validated closed failure cases are available in Agent 8 memory. Learning is recorded only after successful execution and confirmed closure feedback.",
+            "response": (f"No completed or rejected closure records are available "
+                f"in Agent 8 memory{scope}. Agent 8 learns from both confirmed "
+                "maintenance completion and recommendation rejection."),
             "details": [], "actions": [], "case_references": [],
             "call_plan": ["agent_8"], "needs_context": False,
-            "agent_outputs": {"learned_cases": []}}, cases)
-    details = [
-        f"{case.get('case_id', 'unknown case')}: {case.get('fault_mode', 'unknown fault')}; outcome: {case.get('outcome', 'not recorded')}. Learning: {case.get('content', 'not recorded')}"
-        for case in cases
-    ]
+            "agent_outputs": {"learned_cases": [], "rejection_learnings": [],
+                              "learning_records": []}}, records)
+    details = []
+    references = []
+    for record in records:
+        case_id = record.get("case_id", "unknown case")
+        if record.get("learning_type") == "rejection_feedback":
+            reason = str(record.get("reason_code", "not recorded")).replace("_", " ")
+            note = record.get("free_text") or "no additional comment"
+            details.append(
+                f"{case_id}: recommendation for {record.get('fault_mode', 'unknown fault')} "
+                f"was rejected by {record.get('persona_id', 'an operator')} because {reason}; "
+                f"comment: {note}. This rejection is a valid Agent 8 closure and "
+                "learning outcome; a physical post-maintenance outcome can be recorded separately."
+            )
+            references.append(f"Rejection decision {case_id}")
+        else:
+            details.append(
+                f"{case_id}: {record.get('fault_mode', 'unknown fault')}; "
+                f"outcome: {record.get('outcome', 'not recorded')}. "
+                f"Learning: {record.get('content', 'not recorded')}"
+            )
+            references.append(f"Learned case {case_id}")
     audience = f"{persona_context.role} learning context"
+    outcome_count = sum(row.get("learning_type") == "validated_outcome" for row in records)
+    rejection_count = sum(row.get("learning_type") == "rejection_feedback" for row in records)
+    if rejection_count:
+        response = (f"{audience}: Agent 8 found {outcome_count} completed "
+                    f"maintenance closure(s) and {rejection_count} rejected "
+                    f"recommendation closure(s)"
+                    f"{' for ' + label if label else ''}.")
+    else:
+        response = (f"{audience}: the last {outcome_count} validated closed failure "
+                    f"case{'s' if outcome_count != 1 else ''} are summarized below.")
+    actions = ["Use confirmed outcomes to review recurring causes and maintenance effectiveness."]
+    if any(row.get("reliability_review_required") for row in records):
+        actions.append("Reliability Engineering review is required for repeated rejection feedback.")
     return ({"persona": persona_context.id,
         "persona_context": persona_context.model_dump(),
-        "response": f"{audience}: the last {len(cases)} validated closed failure cases are summarized below.",
+        "response": response,
         "details": details,
-        "actions": ["Use these confirmed outcomes to review recurring causes and maintenance effectiveness."],
-        "case_references": [f"Learned case {case.get('case_id', '')}" for case in cases],
+        "actions": actions,
+        "case_references": references,
         "call_plan": ["agent_8"], "needs_context": False,
-        "agent_outputs": {"learned_cases": cases}}, cases)
+        "agent_outputs": {"learned_cases": cases,
+                          "rejection_learnings": rejections,
+                          "learning_records": records}}, records)
 
 
 _MULTI_ASSET_SCENARIOS = load_fleet_scenario_map()
@@ -373,7 +422,7 @@ def _scenario_for_asset(asset_id: str) -> str:
 
 
 def _assets_from_message(message: str) -> list[tuple[str,str,str]]:
-    """Return ordered, deduplicated (display, canonical, scenario) matches."""
+    """Return all ordered asset mentions, including unregistered identifiers."""
     upper = str(message).upper()
     positions = []
     for display,(asset_id,scenario) in _MULTI_ASSET_SCENARIOS.items():
@@ -381,8 +430,25 @@ def _assets_from_message(message: str) -> list[tuple[str,str,str]]:
         candidates.append((upper.find(asset_id),display))
         valid = [(pos,label) for pos,label in candidates if pos >= 0]
         if valid: positions.append((min(pos for pos,_ in valid),display,asset_id,scenario))
+    known_aliases = {
+        alias
+        for display, (asset_id, _) in _MULTI_ASSET_SCENARIOS.items()
+        for alias in (display, asset_id)
+    }
+    for match in re.finditer(r"\b(?:[A-Z]{1,3}-\d{3,4}|AST_[A-Z0-9_]+)\b", upper):
+        identifier = match.group(0)
+        if identifier not in known_aliases:
+            positions.append((match.start(), identifier, identifier, ""))
     positions.sort(key=lambda item:item[0])
-    return [(display,asset_id,scenario) for _,display,asset_id,scenario in positions]
+    result = []
+    seen = set()
+    for _, display, asset_id, scenario in positions:
+        key = asset_id or display
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append((display, asset_id, scenario))
+    return result
 
 
 def _deadline_for_recommendation(recommendation) -> str:
@@ -1905,8 +1971,9 @@ def reject_recommendation(
     """Persist structured rejection feedback through Agent 8 memory."""
     require_persona(req.persona, user)
     from src.schemas.feedback import RejectionFeedback
+    canonical_asset = _asset_from_message(req.asset_id) or req.asset_id
     feedback = RejectionFeedback(
-        case_id=req.case_id, asset_id=req.asset_id,
+        case_id=req.case_id, asset_id=canonical_asset,
         fault_mode=req.fault_mode, reason_code=req.reason_code,
         free_text=req.free_text, persona_id=build_persona_context(req.persona).id,
         rejected_at=datetime.now(timezone.utc).isoformat(),
@@ -2090,7 +2157,11 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
         (isinstance(existing_signal,dict) and existing_signal.get("asset_id")!=explicit_asset) or
         (_ctx_scenario_asset and _ctx_scenario_asset!=explicit_asset)
     ):
-        context.pop("signal",None); context.pop("scenario",None); context.pop("row_index",None)
+        # Asset-bound evidence and prior synthesis cannot cross an explicit
+        # asset switch. Keeping either can repeat or contaminate the answer.
+        for field in ("signal", "scenario", "row_index", "last_pipeline_result",
+                      "per_asset_signals"):
+            context.pop(field,None)
     context.update(incoming)
     supplied_asset=explicit_asset or context.get("asset_id")
     requested_assets=_assets_from_message(req.message)
@@ -2105,10 +2176,13 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
     if scenario and signal is None:
         try: signal=_get_demo_signal(str(scenario),int(context.get("row_index",-1)))
         except (KeyError,ValueError,TypeError) as exc: raise HTTPException(404,f"Scenario unavailable: {scenario}") from exc
+    _preload_plan=plan_query(pending or req.message,signal is not None)
     # Registered UI demo assets have an explicit backend scenario mapping.
     # Loading that mapped fixture is evidence-backed demo behavior, not an
     # inference from the asset name. Deployments can disable it in config.
     if (signal is None and not scenario and len(requested_assets) == 1
+            and _preload_plan.intent != "learning_history"
+            and bool(requested_assets[0][2])
             and _ORCH_CONFIG["chat"].get("auto_load_registered_demo_scenarios", False)):
         _, mapped_asset, mapped_scenario = requested_assets[0]
         if supplied_asset == mapped_asset:
@@ -2147,7 +2221,7 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
     _classified=_intent_class.get("intent_type","pipeline")
 
     if (_classified=="conversational" and not plan.needs_signal
-            and not requested_assets and plan.intent not in {"fleet"}):
+            and not requested_assets and plan.intent not in {"fleet", "learning_history"}):
         # Early return: answer follow-up with LLM and history, skip all pipeline routing
         _conv_draft=_conversational_draft(req.message,req.conversation_history,req.persona,
                                           pipeline_context=context.get("last_pipeline_result"))
@@ -2160,15 +2234,32 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
         return _conv_result
 
     _hitl_fields: Dict = {}  # populated when pipeline runs inline
-    if len(requested_assets)>1 and not isinstance(context.get("fleet_snapshot"),dict):
+    if len(requested_assets)>1:
+        # Promote every supplied or conversation-cached signal into a partial
+        # fleet snapshot. Missing/unknown assets remain explicit unavailable
+        # rows; they must not suppress results backed by valid evidence.
+        _snapshot=(deepcopy(context.get("fleet_snapshot"))
+                   if isinstance(context.get("fleet_snapshot"),dict) else {})
         _per_asset=context.get("per_asset_signals",{})
-        _virtual={display:_per_asset[canonical] for display,canonical,_ in requested_assets if canonical in _per_asset}
-        if len(_virtual)==len(requested_assets):
-            context["fleet_snapshot"]=_virtual
-    if len(requested_assets)>1 and not isinstance(context.get("fleet_snapshot"),dict):
+        if isinstance(_per_asset,dict):
+            for display,canonical,_ in requested_assets:
+                cached=_per_asset.get(canonical)
+                if isinstance(cached,dict) and display not in _snapshot:
+                    _snapshot[display]=(deepcopy(cached) if (
+                        "signal" in cached or "scenario" in cached
+                    ) else {"signal":deepcopy(cached)})
+        if isinstance(signal,dict):
+            signal_asset=str(signal.get("asset_id","")).upper()
+            for display,canonical,_ in requested_assets:
+                if canonical==signal_asset and display not in _snapshot:
+                    _snapshot[display]={"signal":deepcopy(signal)}
+                    break
+        if _snapshot:
+            context["fleet_snapshot"]=_snapshot
+    if len(requested_assets)>1 and not context.get("fleet_snapshot"):
         draft=_clarification_draft(req.persona,"multi_asset_plan",["fleet_snapshot"],
-            ["Please provide an approved fleet snapshot containing telemetry or an explicitly selected scenario for each named asset."],
-            "Asset names alone are not evidence. No fleet or asset result has been generated.")
+            ["Please provide approved telemetry or an explicitly selected scenario for at least one named asset."],
+            "Asset names alone are not evidence. No asset result has been generated.")
         plan_intent="multi_asset_plan"
     elif len(requested_assets)>1:
         draft,state=_multi_asset_plan(
@@ -2193,8 +2284,12 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
             "A fleet comparison requires validated fleet evidence and an aggregation path. No ranking has been fabricated.")
         plan_intent=plan.intent
     elif plan.intent == "learning_history":
-        draft,cases=_learning_history_draft(req.persona,3)
-        state={"pipeline_log":[{"node":"learning_memory","status":"history_query","latency_ms":0,"count":len(cases)}]}
+        asset_label=(requested_assets[0][0] if len(requested_assets)==1 else supplied_asset or "")
+        draft,records=_learning_history_draft(
+            req.persona,3,asset_id=supplied_asset or "",asset_label=asset_label
+        )
+        state={"pipeline_log":[{"node":"learning_memory","status":"history_query",
+            "latency_ms":0,"count":len(records),"asset_id":supplied_asset or ""}]}
         plan_intent=plan.intent
     elif plan.needs_signal and signal is None:
         if supplied_asset and supplied_asset not in load_asset_master():
@@ -2303,7 +2398,11 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
         "reflection_status":reflected.status,"reflection_iterations":reflected.iterations,
         "reflection_termination_reason":reflected.termination_reason,
         "pipeline_log":state.get("pipeline_log",[]),
-        "context_status":{"retained_fields":sorted(key for key in context if not key.startswith("_")),
+        "context_status":{"retained_fields":sorted(
+            key for key in context
+            if not key.startswith("_")
+            and key not in {"last_pipeline_result", "per_asset_signals"}
+        ),
                           "pending":bool(context.get("_pending_message"))}}
     if _hitl_fields:
         result.update(_hitl_fields)

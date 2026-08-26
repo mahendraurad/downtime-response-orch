@@ -25,8 +25,20 @@ export function formatEscalationTime(escalatesAtUtc, locale) {
   }).format(deadline);
 }
 
-export function activeEscalationStep(escalation, stageIndex = 0) {
+function normalizedPersonaId(personaId) {
+  return personaId === 'md' ? 'executive' : String(personaId || '');
+}
+
+export function activeEscalationStep(escalation, stageIndex = 0, personaId = '') {
   if (escalation?.status !== 'active' || !Array.isArray(escalation.steps)) {
+    return null;
+  }
+  // The last target in the configured chain is the final authority. It has
+  // nobody further to escalate to, so it must never receive a countdown even
+  // if a manually forwarded/restored card carries an earlier stage index.
+  const terminalPersonaId = escalation.steps.at(-1)?.to_persona_id;
+  if (terminalPersonaId
+      && normalizedPersonaId(personaId) === normalizedPersonaId(terminalPersonaId)) {
     return null;
   }
   return escalation.steps[stageIndex] || null;

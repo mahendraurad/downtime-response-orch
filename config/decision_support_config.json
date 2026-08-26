@@ -31,10 +31,10 @@
   "approval_escalation": {
     "enabled": true,
     "timeout_seconds_by_urgency": {
-      "immediate": 900,
-      "urgent": 3600,
-      "planned": 14400,
-      "monitor": 86400
+      "immediate": 30,
+      "urgent": 30,
+      "planned": 30,
+      "monitor": 30
     }
   },
   "execution_steps": {

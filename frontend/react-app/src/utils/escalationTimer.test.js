@@ -28,6 +28,17 @@ test('activeEscalationStep selects only active configured steps', () => {
   assert.equal(activeEscalationStep({ status: 'active', steps }, 4), null);
 });
 
+test('final authority never receives a countdown even with a stale stage index', () => {
+  const steps = [
+    { from_persona_id: 'supervisor', to_persona_id: 'manager' },
+    { from_persona_id: 'manager', to_persona_id: 'executive' },
+  ];
+  const escalation = { status: 'active', steps };
+  assert.equal(activeEscalationStep(escalation, 0, 'executive'), null);
+  assert.equal(activeEscalationStep(escalation, 0, 'md'), null);
+  assert.deepEqual(activeEscalationStep(escalation, 1, 'manager'), steps[1]);
+});
+
 test('formatEscalationTime exposes an exact readable deadline', () => {
   const formatted = formatEscalationTime('2026-08-04T10:15:00Z', 'en-GB');
   assert.match(formatted, /04 Aug 2026/);

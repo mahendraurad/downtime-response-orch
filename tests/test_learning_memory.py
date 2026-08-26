@@ -4,7 +4,7 @@ import json
 import pytest
 from src.agents.learning_memory_agent import LearningMemoryAgent
 from src.schemas.execution import ExecutionResult
-from src.schemas.feedback import FeedbackEvent
+from src.schemas.feedback import FeedbackEvent, RejectionFeedback
 from src.tools.config_loader import load_learning_config
 from src.tools.learned_case_repository import JSONLearnedCaseRepository
 
@@ -21,13 +21,103 @@ def _feedback(**kw):
         post_repair_temp_c=42,days_to_failure_actual=2,closed_at="2026-07-19T10:00:00Z")
     values.update(kw); return FeedbackEvent(**values)
 def _agent(tmp_path, llm=None):
-    cfg=load_learning_config(); cfg.repository_path=str(tmp_path/"cases.json"); cfg.training_export_path=str(tmp_path/"rows.jsonl")
+    cfg=load_learning_config(); cfg.repository_path=str(tmp_path/"cases.json"); cfg.training_export_path=str(tmp_path/"rows.jsonl"); cfg.rejection_repository_path=str(tmp_path/"rejections.json")
     return LearningMemoryAgent(cfg, llm_client=llm)
 
 def test_closed_execution_creates_learned_case(tmp_path):
     doc=_agent(tmp_path).process(_execution(),_feedback())
     assert doc.learning_status=="learned" and doc.persistence_status=="stored" and doc.index_status=="indexed"
     assert "outer_race_fault" in doc.content and doc.linked_execution_case_id=="CASE-L1"
+    assert doc.asset_id=="AST_MTR_001" and doc.bearing_id=="BRG_001"
+
+
+def test_recent_closed_cases_can_be_filtered_by_exact_asset(tmp_path):
+    agent=_agent(tmp_path)
+    agent.process(_execution(),_feedback())
+    agent.process(_execution(case_id="CASE-L2"),_feedback(
+        case_id="CASE-L2",asset_id="AST_PMP_001",bearing_id="BRG_004"))
+    assert [row["case_id"] for row in agent.recent_cases(
+        3,asset_id="AST_MTR_001")]==["CASE-L1"]
+
+
+def test_duplicate_rejection_is_idempotent_and_not_counted_twice(tmp_path):
+    now=datetime(2026,8,26,12,0,tzinfo=timezone.utc)
+    agent=_agent(tmp_path); agent._now=lambda:now
+    feedback=RejectionFeedback(case_id="REC-DUP",asset_id="AST_MTR_001",
+        fault_mode="outer_race_fault",reason_code="diagnosis_wrong",
+        free_text="wrong diagnosis",persona_id="supervisor",
+        rejected_at="2026-08-26T10:00:00Z")
+    first=agent.record_rejection(feedback); second=agent.record_rejection(feedback)
+    assert first.status=="recorded" and first.consecutive_rejections==1
+    assert first.valid_closure and first.closure_status=="rejected"
+    assert second.status=="duplicate" and not second.learning_recorded
+    assert second.persistence_status=="duplicate_not_stored"
+    assert len(agent.recent_rejections(5,"AST_MTR_001"))==1
+
+
+def test_invalid_rejection_is_not_reported_as_a_valid_closure(tmp_path):
+    now=datetime(2026,8,26,12,0,tzinfo=timezone.utc)
+    agent=_agent(tmp_path); agent._now=lambda:now
+    result=agent.record_rejection(RejectionFeedback(
+        case_id="REC-FUTURE",asset_id="AST_MTR_001",
+        fault_mode="outer_race_fault",reason_code="other",
+        persona_id="supervisor",rejected_at="2026-08-27T10:00:00Z"))
+    assert result.status=="invalid_input"
+    assert not result.learning_recorded and not result.valid_closure
+    assert result.closure_status==""
+
+
+def test_two_distinct_rejections_trigger_review_and_are_retrievable(tmp_path):
+    now=datetime(2026,8,26,12,0,tzinfo=timezone.utc)
+    agent=_agent(tmp_path); agent._now=lambda:now
+    for case_id,stamp in (("REC-1","2026-08-25T10:00:00Z"),
+                          ("REC-2","2026-08-26T10:00:00Z")):
+        result=agent.record_rejection(RejectionFeedback(
+            case_id=case_id,asset_id="AST_MTR_001",fault_mode="outer_race_fault",
+            reason_code="second_opinion",free_text="review requested",
+            persona_id="supervisor",rejected_at=stamp))
+    assert result.reliability_review_required and result.consecutive_rejections==2
+    rows=agent.recent_rejections(3,"AST_MTR_001")
+    assert [row["case_id"] for row in rows]==["REC-2","REC-1"]
+    assert rows[0]["reliability_review_required"] is True
+    assert all(row["valid_closure"] is True for row in rows)
+    assert all(row["closure_status"]=="rejected" for row in rows)
+    assert all(row["confirmed_outcome"] is False for row in rows)
+
+
+def test_other_asset_or_fault_does_not_inflate_rejection_sequence(tmp_path):
+    now=datetime(2026,8,26,12,0,tzinfo=timezone.utc)
+    agent=_agent(tmp_path); agent._now=lambda:now
+    rows=(("REC-1","AST_MTR_001","outer_race_fault"),
+          ("REC-2","AST_PMP_001","outer_race_fault"),
+          ("REC-3","AST_MTR_001","inner_race_fault"))
+    results=[]
+    for case_id,asset_id,fault in rows:
+        results.append(agent.record_rejection(RejectionFeedback(
+            case_id=case_id,asset_id=asset_id,fault_mode=fault,
+            reason_code="second_opinion",persona_id="supervisor",
+            rejected_at="2026-08-26T10:00:00Z")))
+    assert all(result.consecutive_rejections==1 for result in results)
+    assert not any(result.reliability_review_required for result in results)
+
+
+def test_malformed_legacy_rejection_rows_are_ignored_safely(tmp_path):
+    path=tmp_path/"rejections.json"
+    path.write_text(json.dumps([None,"bad",{
+        "case_id":"NAIVE","asset_id":"AST_MTR_001",
+        "fault_mode":"outer_race_fault","decision":"rejected",
+        "decided_at":"2026-08-01T10:00:00",
+    }]))
+    cfg=load_learning_config(); cfg.repository_path=str(tmp_path/"cases.json")
+    cfg.training_export_path=str(tmp_path/"rows.jsonl")
+    cfg.rejection_repository_path=str(path)
+    agent=LearningMemoryAgent(cfg,now_fn=lambda:datetime(
+        2026,8,26,12,0,tzinfo=timezone.utc))
+    result=agent.record_rejection(RejectionFeedback(
+        case_id="VALID",asset_id="AST_MTR_001",fault_mode="outer_race_fault",
+        reason_code="other",persona_id="supervisor",
+        rejected_at="2026-08-26T10:00:00Z"))
+    assert result.status=="recorded" and result.consecutive_rejections==1
 
 @pytest.mark.parametrize("status",["success","partial"])
 def test_allowed_execution_outcomes_are_learned(tmp_path,status):

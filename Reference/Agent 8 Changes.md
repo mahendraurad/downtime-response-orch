@@ -64,3 +64,78 @@ than three available cases, invalid limits, malformed stored rows, and honest
 empty-history behavior.
 
 <!-- *********************** -->
+
+## 2026-08-26 - Rejection learning and asset-specific chat retrieval
+
+### Defect found
+
+Recommendation rejections were being written to `data/rejection_feedback.json`,
+but Agent 8 history queries read only validated closed outcomes from
+`data/learned_cases.json`. The phrase `What do you learnt about M-104?` was not
+recognized as a learning-history intent, and history retrieval was not filtered
+by asset. As a result, the stored rejection could not be returned through chat.
+
+### Corrected behavior
+
+- Agent 8 exposes completed maintenance closures and rejected recommendation
+  closures through separate, asset-filtered read paths.
+- A rejection is a valid Agent 8 closure and learning outcome. It records the
+  closed recommendation decision immediately; any later physical maintenance
+  result remains a separate outcome that can also be learned.
+- Display identifiers such as `M-104` are normalized to their canonical asset
+  identifier before rejection feedback is stored.
+- Learning questions route only to Agent 8. They do not load a telemetry
+  scenario, call Agents 1-7, or get intercepted as conversational LLM output.
+- Common `learned` and `learnt` question variants are recognized.
+- Replaying the same rejection case is idempotent and cannot falsely trigger
+  the consecutive-rejection rule.
+- Two distinct consecutive rejections for the same asset and fault within the
+  configured window trigger Reliability Engineering review.
+- An explicit asset switch clears cached asset-bound analysis context.
+
+### Configuration
+
+`config/learning_config.json` controls:
+
+```json
+{
+  "rejection_repository": {"json_path": "data/rejection_feedback.json"},
+  "rejection_learning": {
+    "include_in_history": true,
+    "consecutive_window_days": 30,
+    "reliability_review_threshold": 2
+  }
+}
+```
+
+### Chat example
+
+After rejecting a recommendation for M-104, this question:
+
+```text
+What did you learn about M-104?
+```
+
+returns the matching Agent 8 rejection closure, reason code, operator comment,
+persona and case reference. The response identifies it as a valid closed
+decision and distinguishes any later physical maintenance result.
+
+### Tests
+
+The direct Agent 8 suite now contains 57 tests. Additional API/chat and Group A
+tests cover rejection-to-chat round trips, exact asset isolation, intent
+variants, LLM interception prevention, repeated-rejection escalation, approval
+sequence breaks, 30-day boundaries, malformed legacy records and API contract
+validation.
+
+Current focused regression result:
+
+```text
+95 passed
+```
+
+Full repository regression result:
+
+```text
+1029 passed, 1 deprecation warning
+```

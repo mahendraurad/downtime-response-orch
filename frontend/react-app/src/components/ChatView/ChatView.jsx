@@ -1144,7 +1144,7 @@ function MessageBubble({ msg, persona, onSq, doThink, appendA, addMessage, fleet
             </div>
             <div dangerouslySetInnerHTML={{ __html: pd.gr.replace(/\n/g, '<br>') }} />
           </div>
-          <div className="act-cards">
+          <div className="act-cards" style={{ display: 'none' }}>
             {pd.actions.map((a, i) => (
               <button
                 key={i}
@@ -1950,7 +1950,9 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
   const decisionSupport = rec.decision_support || {};
   const escalation = decisionSupport.approval_escalation || {};
   const escalationStageIndex = Number(msg.escalationStageIndex || 0);
-  const escalationStep = activeEscalationStep(escalation, escalationStageIndex);
+  const escalationStep = activeEscalationStep(
+    escalation, escalationStageIndex, persona
+  );
   const [escalationRemaining, setEscalationRemaining] = useState(() =>
     escalationStep ? remainingSeconds(escalationStep.escalates_at_utc) : null
   );

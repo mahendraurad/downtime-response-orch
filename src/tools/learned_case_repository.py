@@ -20,11 +20,16 @@ class JSONLearnedCaseRepository:
         rows.append(document.to_dict()); self.path.write_text(json.dumps(rows, indent=2), encoding="utf-8")
     def get(self, case_id): return next((r for r in self._rows() if r.get("case_id") == case_id), None)
     def count(self): return len(self._rows())
-    def list_recent(self, limit=3):
+    def list_recent(self, limit=3, asset_id=""):
         """Return newest valid learned cases without exposing mutable store rows."""
         if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
             return []
         rows = [row for row in self._rows() if isinstance(row, dict)]
+        if asset_id:
+            rows = [row for row in rows if (
+                row.get("asset_id") == asset_id
+                or (not row.get("asset_id") and asset_id in str(row.get("content", "")))
+            )]
         rows.sort(key=lambda row: str(row.get("created_at", "")), reverse=True)
         return [dict(row) for row in rows[:limit]]
     def search(self, query, top_k=5, minimum_score=0.15, **_):
@@ -97,17 +102,54 @@ class JSONRejectionRepository:
         rows.append(dict(row))
         self.path.write_text(json.dumps(rows, indent=2), encoding="utf-8")
 
+    def exists_decision(self, case_id, decision):
+        return any(
+            isinstance(row, dict)
+            and row.get("case_id") == case_id
+            and row.get("decision") == decision
+            for row in self._rows()
+        )
+
+    def list_recent(self, limit=3, asset_id="", decision="rejected"):
+        """Return newest matching decision records without mutable store rows."""
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
+            return []
+        rows = [row for row in self._rows() if isinstance(row, dict)]
+        if decision:
+            rows = [row for row in rows if row.get("decision") == decision]
+        if asset_id:
+            rows = [row for row in rows if row.get("asset_id") == asset_id]
+        rows.sort(key=lambda row: str(row.get("decided_at", "")), reverse=True)
+        return [dict(row) for row in rows[:limit]]
+
+    def update_decision(self, case_id, decision, changes):
+        rows = self._rows()
+        updated = False
+        for row in reversed(rows):
+            if (isinstance(row, dict) and row.get("case_id") == case_id
+                    and row.get("decision") == decision):
+                row.update(dict(changes))
+                updated = True
+                break
+        if updated:
+            self.path.write_text(json.dumps(rows, indent=2), encoding="utf-8")
+        return updated
+
     def consecutive_rejections(self, asset_id, fault_mode, now, days=30):
         cutoff = now - timedelta(days=days)
         relevant = []
         for sequence, row in enumerate(self._rows()):
+            if not isinstance(row, dict):
+                continue
             if row.get("asset_id") != asset_id or row.get("fault_mode") != fault_mode:
                 continue
             try:
                 timestamp = datetime.fromisoformat(
                     str(row.get("decided_at", "")).replace("Z", "+00:00")
                 )
-            except ValueError:
+            except (ValueError, TypeError):
+                continue
+            if timestamp.tzinfo is None:
                 continue
             if timestamp >= cutoff:
                 relevant.append((timestamp, sequence, row))

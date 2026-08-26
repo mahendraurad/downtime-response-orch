@@ -27,6 +27,8 @@ class FeedbackEvent(BaseModel):
 class LearnedCaseDocument(BaseModel):
     """Written to vector store by Learning Agent."""
     case_id:         str       = ""
+    asset_id:        str       = ""
+    bearing_id:      str       = ""
     content:         str       = ""   # human-readable narrative for RAG retrieval
     fault_mode:      str       = ""
     asset_type:      str       = ""
@@ -44,7 +46,7 @@ class LearnedCaseDocument(BaseModel):
     post_repair_temp_c: float = 0.0
     days_to_failure_actual: Optional[int] = None
     narrative_source: str = "template"
-    schema_version: str = "1.1"
+    schema_version: str = "1.2"
     learning_config_version: str = ""
     source_execution_schema_version: str = ""
     source_executor_config_version: str = ""
@@ -74,6 +76,10 @@ class RejectionFeedback(BaseModel):
 class RejectionLearningResult(BaseModel):
     case_id: str
     status: str = "recorded"
+    learning_type: str = "rejection_feedback"
+    learning_recorded: bool = True
+    valid_closure: bool = False
+    closure_status: str = ""
     reliability_review_required: bool = False
     consecutive_rejections: int = 1
     review_reason: str = ""

@@ -1,8 +1,10 @@
 {
   "repository": {"json_path": "data/learned_cases.json"},
+  "rejection_repository": {"json_path": "data/rejection_feedback.json"},
   "training_export": {"jsonl_path": "data/learning_training_rows.jsonl"},
   "validation": {"allowed_execution_statuses": ["success", "partial"], "require_timezone": true, "require_root_cause": true},
   "llm_narrative": {"enabled": true, "max_characters": 2000},
   "retrieval": {"minimum_score": 0.15, "top_k": 5},
+  "rejection_learning": {"include_in_history": true, "consecutive_window_days": 30, "reliability_review_threshold": 2},
   "logging": {"log_learned_cases": true}
 }
