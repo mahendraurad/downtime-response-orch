@@ -246,6 +246,22 @@ function buildResolvedActionNote(assetId, stored) {
   const parts = [`Context for ${assetId} (actioned this session):`];
   if (stored.originalRUL) parts.push(`- RUL at time of analysis: ${stored.originalRUL}`);
   if (stored.diagnosisFaultLabel) parts.push(`- Fault diagnosed: ${stored.diagnosisFaultLabel}`);
+  if (stored.diagnosisStatus) {
+    const dlText = stored.diagnosisStatus === 'confirmed'
+      ? `Reliability Engineer confirmed diagnosis: ${stored.diagnosisFaultLabel || 'fault classified'}`
+      : 'Reliability Engineer overrode diagnosis to undetermined';
+    parts.push(`- ${dlText}`);
+  }
+  if (stored.monitoringStatus) {
+    const msText = stored.monitoringStatus === 'suppressed'
+      ? 'Monitoring anomaly was suppressed — no fault analysis performed'
+      : 'Monitoring anomaly was confirmed — proceeded with diagnosis';
+    parts.push(`- ${msText}`);
+  }
+  if (stored.remediationAction) {
+    const remLabel = stored.remediationAction === 'IMPUTE' ? 'Imputed from bearing baseline' : stored.remediationAction === 'DROP' ? 'Signal dropped' : 'Kept with quality flag';
+    parts.push(`- Signal quality gate: ${remLabel}`);
+  }
   if (stored.actionTaken) parts.push(`- Maintenance action: ${friendlyActionLabel(stored.actionTaken)}`);
   if (stored.woClosed) {
     parts.push('- Work order: CLOSED — repair complete, asset restored to service');
@@ -270,11 +286,15 @@ function buildTargetedSessionAnswer(q, assetId, stored, health) {
 
   const asksRUL     = /\brul\b|\bremaining.{0,20}life|\blifetime\b/.test(t);
   const asksFault   = /\bfault\b|\bfailure[- ]?mode\b|\bdiagnos|\broot.cause|\bkurtosis|\bbpfo\b/.test(t);
-  const asksAction  = /\baction\b|\bwhat.{0,15}(done|taken|happened|decided|recommend|approv|reject)/.test(t);
-  const asksStatus  = /\bhealth\b|\bstatus\b|\bcurrent\b|\brestored\b|\bfixed\b|\bstill\b|\brecovered\b/.test(t);
+  const asksAction  = /\baction\b|\bwhat.{0,15}(done|taken|happened|decided|recommend|approv|reject)|\breliabilit|\bengineer\b|\bforward/.test(t);
+  const asksVibTemp = /\bvibration\b|\btemperature\b|\bvib\b|\btemp\b|\bsensor\b|\breading\b/.test(t);
+  const asksStatus  = !asksVibTemp && /\bhealth\b|\bstatus\b|\bcurrent\b|\brestored\b|\bfixed\b|\bstill\b|\brecovered\b/.test(t);
   const asksMonitor = /\bmonitor\b|\banomaly\b|\bsuppress\b/.test(t);
   const asksSignal  = /\bsignal\b|\bimpute\b|\bquality.gate\b/.test(t);
   const asksWO      = /\bwork.?order\b|\bwo\b|\bapprove\b|\breject\b/.test(t);
+  const asksSafety  = /\bloto\b|\bppe\b|\bsafety\b|\bcompliance\b|\bpermit\b|\bisolat/.test(t);
+
+  if (asksVibTemp) return null;
 
   if (asksStatus && health) {
     const hColor = { healthy: '#10b981', warning: '#f97316', critical: '#ef4444' }[health] || 'var(--t2)';
@@ -300,14 +320,66 @@ function buildTargetedSessionAnswer(q, assetId, stored, health) {
     lines.push(`Signal quality gate: <strong>${label}</strong>`);
   }
   if (asksAction || asksWO) {
-    if (stored.woClosed) {
-      lines.push(`Outcome: <strong style="color:#10b981">Work order closed</strong> — repair completed, asset restored to service`);
-    } else if (stored.status === 'approved') {
-      lines.push(`Outcome: <strong style="color:#10b981">Work order approved</strong>${stored.woId ? ` (${stored.woId})` : ''} by ${stored.approvedBy || 'approver'} — maintenance scheduled`);
-    } else if (stored.status === 'rejected') {
-      lines.push(`Outcome: <strong style="color:#ef4444">Work order rejected</strong> by ${stored.rejectedBy || 'approver'} — asset continues to run`);
+    if (stored.diagnosisStatus) {
+      const dlText = stored.diagnosisStatus === 'confirmed'
+        ? `Confirmed — ${stored.diagnosisFaultLabel || 'fault classified'}`
+        : 'Overridden to undetermined';
+      lines.push(`Reliability Engineer decision: <strong>${dlText}</strong>`);
     }
-    if (stored.actionTaken) lines.push(`Action taken: <strong>${pastActionLabel(stored.actionTaken)}</strong>`);
+    if (stored.monitoringStatus && !stored.diagnosisStatus) {
+      const msText = stored.monitoringStatus === 'suppressed' ? 'Suppressed anomaly — no fault analysis' : 'Confirmed anomaly — proceeded with diagnosis';
+      lines.push(`Monitoring review action: <strong>${msText}</strong>`);
+    }
+    if (stored.woClosed) {
+      lines.push(`Execution outcome: <strong style="color:#10b981">Work order closed</strong> — repair completed, asset restored to service`);
+    } else if (stored.status === 'approved') {
+      lines.push(`Execution outcome: <strong style="color:#10b981">Work order approved</strong>${stored.woId ? ` (${stored.woId})` : ''} by ${stored.approvedBy || 'approver'} — maintenance scheduled`);
+    } else if (stored.status === 'rejected') {
+      lines.push(`Execution outcome: <strong style="color:#ef4444">Work order rejected</strong> by ${stored.rejectedBy || 'approver'} — asset continues to run`);
+    }
+    if (stored.actionTaken) lines.push(`Maintenance action taken: <strong>${pastActionLabel(stored.actionTaken)}</strong>`);
+  }
+  if (asksSafety) {
+    if (stored.woClosed || stored.status === 'approved') {
+      lines.push(`LOTO: Isolation procedure required for maintenance — verify with maintenance lead`);
+      lines.push(`PPE: Standard bearing/rotating machinery PPE applies`);
+      if (stored.actionTaken) lines.push(`Compliance record: log after job closure for ${pastActionLabel(stored.actionTaken)}`);
+    } else if (stored.diagnosisStatus === 'overridden' || !stored.diagnosisFaultLabel) {
+      lines.push(`LOTO: No mandatory isolation required — fault undetermined, no Zone D classification`);
+      lines.push(`PPE: Standard PPE applies — no elevated safety requirements`);
+      lines.push(`For full LOTO/compliance evidence, request a fresh analysis with the Safety persona`);
+    } else if (stored.remediationAction) {
+      lines.push(`Signal quality: <strong>${stored.remediationAction === 'IMPUTE' ? 'Imputed from baseline' : stored.remediationAction}</strong> — compliance evidence from imputed signal only`);
+      lines.push(`PPE and LOTO apply per standard protocol. Request fresh full analysis for complete compliance documentation`);
+    } else {
+      lines.push(`No fault confirmed this session — standard safety protocols apply`);
+      lines.push(`Request a fresh analysis with the Safety persona for detailed LOTO and compliance evidence`);
+    }
+  }
+
+  const asksAdvisory = /\bwatch\s*(for|out)?\b|\bwait\b|\bdefer\b|\bnext\s+(week|days?)\b|\bexpect\b|\bshutdown\b|\bweekend\b/.test(t);
+  if (asksAdvisory && lines.length === 0) {
+    if (stored.woClosed) {
+      lines.push(`Outcome: <strong style="color:#10b981">Repair completed</strong> — asset restored to service`);
+      lines.push(`Watch for: vibration and temperature returning to baseline levels post-repair`);
+      lines.push(`Deferral not applicable — repair was completed this session`);
+    } else if (stored.status === 'approved') {
+      lines.push(`Outcome: <strong style="color:#10b981">Work order approved</strong>${stored.woId ? ` (${stored.woId})` : ''} — maintenance scheduled`);
+      if (stored.diagnosisFaultLabel) lines.push(`Watch for: progression of <strong>${stored.diagnosisFaultLabel}</strong> symptoms until repair is complete`);
+      lines.push(`Deferral not recommended — work order is already approved and active`);
+    } else if (stored.status === 'rejected') {
+      lines.push(`Outcome: <strong style="color:#ef4444">Work order rejected</strong> — asset continues to run`);
+      if (stored.diagnosisFaultLabel) lines.push(`Watch for: worsening <strong>${stored.diagnosisFaultLabel}</strong> — increasing vibration or temperature spikes`);
+      lines.push(`Monitor closely given the deferred action`);
+    } else if (stored.diagnosisStatus === 'overridden') {
+      lines.push(`Fault classification: <strong>Overridden to undetermined</strong>`);
+      lines.push(`Watch for: any new vibration or temperature anomalies on this asset`);
+      lines.push(`Request a fresh analysis if symptoms develop`);
+    } else if (stored.monitoringStatus) {
+      const ms = stored.monitoringStatus === 'suppressed' ? 'No fault confirmed' : 'Anomaly confirmed — proceed with caution';
+      lines.push(`Anomaly status: <strong>${ms}</strong>`);
+      lines.push(`Continue standard monitoring intervals and watch for vibration or temperature changes`);
+    }
   }
 
   if (lines.length === 0) return null;
@@ -657,7 +729,7 @@ export default function ChatView() {
         // "asset names alone are not evidence" when it has no fresh fleet snapshot).
         if (queryAssetIds.length >= 2 && !isFreshRequest) {
           const _ov = (() => { try { return JSON.parse(sessionStorage.getItem('dro-asset-status') || '{}'); } catch { return {}; } })();
-          const sessionPairs = queryAssetIds.slice(0, 3).map(id => {
+          const sessionPairs = queryAssetIds.map(id => {
             const assetObj = (assets || []).find(a => a.id === id || a.asset_id === id);
             const bkId = assetObj?.asset_id;
             const store = (bkId && rawPipelineStore[bkId]) || rawPipelineStore[id] || null;
@@ -667,27 +739,38 @@ export default function ChatView() {
             return { id, store, health };
           }).filter(Boolean);
 
+          const buildAssetSection = ({ id, store, health }, idx, arr) => {
+            const hColor = { healthy: '#10b981', warning: '#f97316', critical: '#ef4444' }[health] || 'var(--t2)';
+            const lines = [];
+            if (health) lines.push(`Health: <strong style="color:${hColor}">${health.charAt(0).toUpperCase() + health.slice(1)}</strong>`);
+            if (store.originalRUL) lines.push(`RUL at analysis: <strong>${store.originalRUL}</strong> <span style="color:var(--t3);font-size:11px">(pre-intervention)</span>`);
+            if (store.diagnosisFaultLabel) lines.push(`Fault: <strong>${store.diagnosisFaultLabel}</strong>`);
+            else if (store.diagnosisStatus === 'overridden') lines.push(`Fault: <strong>Overridden to undetermined</strong>`);
+            if (store.woClosed) lines.push(`Outcome: <strong style="color:#10b981">Work order closed</strong> — repair completed`);
+            else if (store.status === 'approved') lines.push(`Outcome: <strong style="color:#10b981">Work order approved</strong>${store.woId ? ` (${store.woId})` : ''} — maintenance scheduled`);
+            else if (store.status === 'rejected') lines.push(`Outcome: <strong style="color:#ef4444">Work order rejected</strong>`);
+            if (store.actionTaken) lines.push(`Action taken: <strong>${pastActionLabel(store.actionTaken)}</strong>`);
+            const divider = idx < arr.length - 1 ? 'border-bottom:1px solid var(--b);padding-bottom:10px;margin-bottom:10px;' : '';
+            return `<div style="${divider}">`
+              + `<div style="font-size:10px;font-weight:700;color:var(--ac2);font-family:var(--m);margin-bottom:5px">${id}</div>`
+              + `<div style="font-size:12px;color:var(--t2);line-height:1.9">${lines.map(l => '• ' + l).join('<br>')}</div>`
+              + `</div>`;
+          };
+
           if (sessionPairs.length >= 2) {
-            const assetSections = sessionPairs.map(({ id, store, health }, idx) => {
-              const hColor = { healthy: '#10b981', warning: '#f97316', critical: '#ef4444' }[health] || 'var(--t2)';
-              const lines = [];
-              if (health) lines.push(`Health: <strong style="color:${hColor}">${health.charAt(0).toUpperCase() + health.slice(1)}</strong>`);
-              if (store.originalRUL) lines.push(`RUL at analysis: <strong>${store.originalRUL}</strong> <span style="color:var(--t3);font-size:11px">(pre-intervention)</span>`);
-              if (store.diagnosisFaultLabel) lines.push(`Fault: <strong>${store.diagnosisFaultLabel}</strong>`);
-              if (store.woClosed) lines.push(`Outcome: <strong style="color:#10b981">Work order closed</strong> — repair completed`);
-              else if (store.status === 'approved') lines.push(`Outcome: <strong style="color:#10b981">Work order approved</strong>${store.woId ? ` (${store.woId})` : ''} — maintenance scheduled`);
-              else if (store.status === 'rejected') lines.push(`Outcome: <strong style="color:#ef4444">Work order rejected</strong>`);
-              if (store.actionTaken) lines.push(`Action taken: <strong>${pastActionLabel(store.actionTaken)}</strong>`);
-              const divider = idx < sessionPairs.length - 1 ? 'border-bottom:1px solid var(--b);padding-bottom:10px;margin-bottom:10px;' : '';
-              return `<div style="${divider}">`
-                + `<div style="font-size:10px;font-weight:700;color:var(--ac2);font-family:var(--m);margin-bottom:5px">${id}</div>`
-                + `<div style="font-size:12px;color:var(--t2);line-height:1.9">${lines.map(l => '• ' + l).join('<br>')}</div>`
-                + `</div>`;
-            }).join('');
+            const unanalysedIds = queryAssetIds.filter(id => !sessionPairs.find(p => p.id === id));
+            const assetSections = sessionPairs.map(buildAssetSection).join('');
+            const unanalysedHtml = unanalysedIds.map(id =>
+              `<div style="border-top:1px solid var(--b);margin-top:10px;padding-top:10px;">`
+              + `<div style="font-size:10px;font-weight:700;color:var(--t3);font-family:var(--m);margin-bottom:4px">${id} — Not yet analysed this session</div>`
+              + `<div style="font-size:11px;color:var(--t3)">Run a <strong>complete analysis of ${id}</strong> to include it in the action plan.</div>`
+              + `</div>`
+            ).join('');
             const multiHtml = `<div style="border:1.5px solid var(--ac2);border-radius:10px;padding:14px;background:rgba(0,0,0,0.02)">`
-              + `<div style="font-size:9px;font-weight:700;color:var(--ac2);font-family:var(--m);margin-bottom:10px">SESSION DATA · ${sessionPairs.map(p => p.id).join(' & ')}</div>`
+              + `<div style="font-size:9px;font-weight:700;color:var(--ac2);font-family:var(--m);margin-bottom:10px">SESSION DATA · ${sessionPairs.map(p => p.id).join(' & ')}${unanalysedIds.length ? ' (partial)' : ''}</div>`
               + assetSections
-              + `<div style="margin-top:10px;font-size:11px;color:var(--t3)">Both assets were actioned this session. Ask for a <strong>fresh analysis</strong> on each asset to get updated pipeline data.</div>`
+              + unanalysedHtml
+              + `<div style="margin-top:10px;font-size:11px;color:var(--t3)">These assets were actioned this session. Ask for a <strong>fresh analysis</strong> on each asset to get updated pipeline data.</div>`
               + `</div>`;
             const multiChips = buildDefaultChips(persona, assets || [], sessionPairs[0].id);
             setContextChips(multiChips);
@@ -695,11 +778,32 @@ export default function ChatView() {
             appendA(multiHtml, ['session · multi-asset data'], multiChips, []);
             return;
           }
+          if (sessionPairs.length >= 1) {
+            const unanalysedIds = queryAssetIds.filter(id => !sessionPairs.find(p => p.id === id));
+            const sessionSections = sessionPairs.map(buildAssetSection).join('');
+            const unanalysedHtml = unanalysedIds.map(id =>
+              `<div style="border-top:1px solid var(--b);margin-top:10px;padding-top:10px;">`
+              + `<div style="font-size:10px;font-weight:700;color:var(--t3);font-family:var(--m);margin-bottom:4px">${id} — Not yet analysed</div>`
+              + `<div style="font-size:11px;color:var(--t3)">Ask for a complete analysis of <strong>${id}</strong> to include it in the action plan.</div>`
+              + `</div>`
+            ).join('');
+            const partialHtml = `<div style="border:1.5px solid var(--ac2);border-radius:10px;padding:14px;background:rgba(0,0,0,0.02)">`
+              + `<div style="font-size:9px;font-weight:700;color:var(--ac2);font-family:var(--m);margin-bottom:10px">SESSION DATA · ${sessionPairs.map(p => p.id).join(' & ')} (partial)</div>`
+              + sessionSections
+              + unanalysedHtml
+              + `</div>`;
+            const partialChips = buildDefaultChips(persona, assets || [], sessionPairs[0].id);
+            setContextChips(partialChips);
+            setUsedChips(new Set());
+            appendA(partialHtml, ['session · partial data'], partialChips, []);
+            return;
+          }
         }
 
         // Pipeline re-run queries on actioned assets → session cache (no new pipeline run)
+        const isSpecificDataQuery = /\bloto\b|\bppe\b|\bsafety\b|\bcompliance\b|\bpermit\b|\baction\b|\btaken\b|\bengineer\b|\bforward|\bisolat/i.test(t);
         const isPipelineQuery = /\banalys|\binspect|\bcheck|\bdiagnos|\bassess|\brun\b|\bfull\b|\bpipeline\b/i.test(t);
-        if (hasSessionState && queriedAsset && isPipelineQuery) {
+        if (hasSessionState && queriedAsset && isPipelineQuery && !isSpecificDataQuery) {
           const chips = buildDefaultChips(persona, assets || [], queriedAsset);
           setContextChips(chips);
           const _assetStatusOvr1 = (() => { try { return JSON.parse(sessionStorage.getItem('dro-asset-status') || '{}'); } catch { return {}; } })();
@@ -712,7 +816,7 @@ export default function ChatView() {
         // Follow-up questions on actioned assets — answer specifically from session data
         // where possible (different answer per question), fall through to LLM otherwise.
         // Replaces the old static-card intercepts so every follow-up gets a tailored response.
-        const isFollowUpQuery = /\bhealthy?\b|\bhealth\b|\bstatus\b|\bstill\s+(critical|fault|fail)\b|\b(fixed|resolved|repaired|recovered)\b|\bcurrent\s+(condition|state)\b|\brul\b|\brisk\b|\bexposure\b|\bfault\b|\bfailure\b|\bparts?\b|\bcost\b|\bwhat\s+was\b|\bwhat\s+were\b|\bprobabilit/i.test(t);
+        const isFollowUpQuery = /\bhealthy?\b|\bhealth\b|\bstatus\b|\bstill\s+(critical|fault|fail)\b|\b(fixed|resolved|repaired|recovered)\b|\bcurrent\b|\bvibration\b|\btemperature\b|\bsensor\b|\brul\b|\brisk\b|\bexposure\b|\bfault\b|\bfailure\b|\bparts?\b|\bcost\b|\bwhat\s+was\b|\bwhat\s+were\b|\bprobabilit|\bwatch\b|\bwait\b|\bdefer\b|\bnext\s+week\b|\bexpect\b|\bshutdown\b|\bweekend\b|\baction\b|\btaken\b|\bloto\b|\bppe\b|\bsafety\b|\bcompliance\b|\bengineer\b/i.test(t);
         if (hasSessionState && queriedAsset && isFollowUpQuery) {
           const _statusOvr = (() => { try { return JSON.parse(sessionStorage.getItem('dro-asset-status') || '{}'); } catch { return {}; } })();
           const _assetObj  = (assets || []).find(a => a.id === queriedAsset || a.asset_id === queriedAsset);
@@ -815,37 +919,19 @@ export default function ChatView() {
 
         // HITL blocking gates — also gate-block with session cache in case a non-pipeline
         // query still triggers a HITL for an asset already processed this session.
-        if (d.hitl_required?.type === 'remediation') {
-          if (hasSessionState) {
-            const chips = buildDefaultChips(persona, assets || [], queriedAsset);
-            setContextChips(chips);
-            appendA(buildAssetSessionSummary(queriedAsset || backendAssetId, storedForAsset), ['session · cached'], chips, []);
-            return;
-          }
+        if (d.hitl_required?.type === 'remediation' && !hasSessionState) {
           const chips = buildDefaultChips(persona, assets || [], queriedAsset);
           setContextChips(chips);
           addMessage({ id: mkId(), type: 'hitl_remediation', data: d, scenario: null, persona, queriedAsset, chips, time: ts() });
           return;
         }
-        if (d.hitl_monitoring) {
-          if (hasSessionState) {
-            const chips = buildDefaultChips(persona, assets || [], queriedAsset);
-            setContextChips(chips);
-            appendA(buildAssetSessionSummary(queriedAsset || backendAssetId, storedForAsset), ['session · cached'], chips, []);
-            return;
-          }
+        if (d.hitl_monitoring && !hasSessionState) {
           const chips = buildDefaultChips(persona, assets || [], queriedAsset);
           setContextChips(chips);
           addMessage({ id: mkId(), type: 'hitl_monitoring', data: d, scenario: null, persona, queriedAsset, chips, time: ts() });
           return;
         }
-        if (d.hitl_diagnosis) {
-          if (hasSessionState) {
-            const chips = buildDefaultChips(persona, assets || [], queriedAsset);
-            setContextChips(chips);
-            appendA(buildAssetSessionSummary(queriedAsset || backendAssetId, storedForAsset), ['session · cached'], chips, []);
-            return;
-          }
+        if (d.hitl_diagnosis && !hasSessionState) {
           const chips = buildDefaultChips(persona, assets || [], queriedAsset);
           setContextChips(chips);
           addMessage({ id: mkId(), type: 'hitl_diagnosis', data: d, scenario: null, persona, queriedAsset, chips, time: ts() });
@@ -858,7 +944,8 @@ export default function ChatView() {
         const chips = generateChipsFromResponse(d, buildDefaultChips(persona, assets || [], queriedAsset));
         setContextChips(chips);
         setUsedChips(new Set());
-        const details = d.details && d.details.length ? '<br><br>' + d.details.map(x => '• ' + x).join('<br>') : '';
+        const details = d.details && d.details.length && !(hasSessionState && queriedAsset)
+          ? '<br><br>' + d.details.map(x => '• ' + x).join('<br>') : '';
         const questions = d.clarification && d.clarification.questions ? '<br><br><strong>Needed:</strong><br>' + d.clarification.questions.map(x => '? ' + x).join('<br>') : '';
         const dkg = d.knowledge_guidance;
         const dSopLine = dkg?.sop_id
@@ -868,7 +955,11 @@ export default function ChatView() {
         // present-tense action recommendations and replace them with past-tense session outcomes.
         // Add a clear "pre-intervention" header so the figures are obviously historical.
         let responseBody;
-        if (hasSessionState && queriedAsset && storedForAsset) {
+        const hasActualIntervention = storedForAsset && (
+          storedForAsset.woClosed || storedForAsset.status === 'approved' ||
+          storedForAsset.status === 'rejected' || storedForAsset.actionTaken
+        );
+        if (hasSessionState && queriedAsset && hasActualIntervention && d.intent !== 'conversational') {
           const preHeader = `<div style="font-size:9.5px;font-weight:700;color:var(--am);font-family:var(--m);margin-bottom:10px;padding:5px 9px;border-radius:5px;background:rgba(249,115,22,.08);border:1px solid rgba(249,115,22,.25)">⚠ PRE-INTERVENTION DATA · ${queriedAsset} — figures below are from before the repair was completed this session</div>`;
           responseBody = preHeader + sanitizeResponse(d.response) + details + buildSessionOutcomeHtml(storedForAsset) + questions + dSopLine;
         } else {

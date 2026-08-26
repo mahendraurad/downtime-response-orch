@@ -141,19 +141,23 @@ def _fmt_supervisor(*, asset_id, fault_mode, iso_stage, risk_level, rul_band,
                     rul_min, rul_max, fp, exposure, advisory, vib, temp,
                     severity, loto_ref, total_ms, **_) -> Dict:
     urgent = risk_level in ("critical", "high")
+    _rul_known = rul_min > 0 or rul_max > 0
+    _headline_parts = [f"{asset_id} — {fault_mode.replace('_', ' ').title()} Stage {iso_stage}"]
+    if risk_level != "—": _headline_parts.append(f"{risk_level.upper()} risk")
+    if _rul_known: _headline_parts.append(f"RUL {rul_min}–{rul_max} days")
+    if fp > 0: _headline_parts.append(f"Failure probability {fp:.0%}")
     headline = (
-        f"{asset_id} — {fault_mode.replace('_', ' ').title()} Stage {iso_stage} — "
-        f"{risk_level.upper()} risk. "
-        f"RUL {rul_min}–{rul_max} days. Failure probability {fp:.0%}."
-    ) if fault_mode != "—" else f"{asset_id} — No fault detected. Asset healthy."
+        ". ".join(_headline_parts) + "."
+        if fault_mode != "—" else f"{asset_id} — No fault detected. Asset healthy."
+    )
     return {
         "persona": "supervisor",
         "headline": headline,
         "details": [
-            f"Risk level: {risk_level.upper()}",
-            f"RUL window: {rul_band} ({rul_min}–{rul_max} days)",
-            f"Failure probability: {fp:.0%}",
-            f"Financial exposure: ${exposure:,.0f}",
+            *(([f"Risk level: {risk_level.upper()}"] if risk_level != "—" else [])),
+            *(([f"RUL window: {rul_band} ({rul_min}–{rul_max} days)"] if _rul_known else [])),
+            *(([f"Failure probability: {fp:.0%}"] if fp > 0 else [])),
+            *(([f"Financial exposure: ${exposure:,.0f}"] if exposure > 0 else [])),
             f"Vibration: {vib} mm/s  |  Temperature: {temp} °C",
             *(([f"Advisory: {advisory}"] if advisory else [])),
         ],

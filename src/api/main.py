@@ -172,7 +172,7 @@ def _llm_chat_classify(message: str, conversation_history: list | None) -> dict:
     return {"intent_type": "pipeline", "reasoning": "classification failed, defaulting to pipeline"}
 
 
-def _conversational_draft(message: str, conversation_history: list | None, persona: str) -> dict:
+def _conversational_draft(message: str, conversation_history: list | None, persona: str, pipeline_context: dict | None = None) -> dict:
     """Build a response for a conversational follow-up using LLM with history context."""
     persona_context = build_persona_context(persona)
     if _CHAT_LLM.is_configured():
@@ -185,9 +185,16 @@ def _conversational_draft(message: str, conversation_history: list | None, perso
                     for msg in recent
                     if str(msg.get("content", "")).strip()
                 )
+            asset_context_block = ""
+            if pipeline_context:
+                asset_id = pipeline_context.get("asset_id", "asset")
+                asset_context_block = (
+                    f"\n\n[LAST PIPELINE ANALYSIS — {asset_id}]\n"
+                    f"{pipeline_context.get('summary', '')}"
+                )
             user_prompt = (
-                f"Conversation history:\n{history_text}\n\nUser follow-up: {message}"
-                if history_text else message
+                f"Conversation history:\n{history_text}{asset_context_block}\n\nUser follow-up: {message}"
+                if history_text else f"{asset_context_block}\n\nUser follow-up: {message}".strip()
             )
             llm_resp = _CHAT_LLM.complete_json(
                 system_prompt=(
@@ -2142,7 +2149,8 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
     if (_classified=="conversational" and not plan.needs_signal
             and not requested_assets and plan.intent not in {"fleet"}):
         # Early return: answer follow-up with LLM and history, skip all pipeline routing
-        _conv_draft=_conversational_draft(req.message,req.conversation_history,req.persona)
+        _conv_draft=_conversational_draft(req.message,req.conversation_history,req.persona,
+                                          pipeline_context=context.get("last_pipeline_result"))
         _conv_reflected=_REFLEXION.process(_conv_draft,state,plan)
         _remember_chat_context(conversation_id,context)
         _conv_result={**_conv_reflected.response,"run_id":run_id,"conversation_id":conversation_id,
@@ -2152,6 +2160,11 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
         return _conv_result
 
     _hitl_fields: Dict = {}  # populated when pipeline runs inline
+    if len(requested_assets)>1 and not isinstance(context.get("fleet_snapshot"),dict):
+        _per_asset=context.get("per_asset_signals",{})
+        _virtual={display:_per_asset[canonical] for display,canonical,_ in requested_assets if canonical in _per_asset}
+        if len(_virtual)==len(requested_assets):
+            context["fleet_snapshot"]=_virtual
     if len(requested_assets)>1 and not isinstance(context.get("fleet_snapshot"),dict):
         draft=_clarification_draft(req.persona,"multi_asset_plan",["fleet_snapshot"],
             ["Please provide an approved fleet snapshot containing telemetry or an explicitly selected scenario for each named asset."],
@@ -2212,12 +2225,25 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
                 approval_status="pending", persona=req.persona,
                 thread_id=conversation_id,
             )
+            context.setdefault("per_asset_signals", {})[signal.get("asset_id", "")] = deepcopy(signal)
             formatted=format_for_persona(state,req.persona)
             _pipeline_headline=formatted.get("headline","Analysis complete.")
             _persona_context = build_persona_context(req.persona)
             draft={"persona":_persona_context.id,"persona_context":_persona_context.model_dump(),"response":_pipeline_headline,"details":formatted.get("details",[]),"actions":formatted.get("actions",[]),"call_plan":list(plan.agents),"needs_context":False,"clarification_required":False,
                    "agent_outputs":{"recommendation":state["recommendation"].to_dict() if state.get("recommendation") else None,
                                     "execution_result":state["execution_result"].to_dict() if state.get("execution_result") else None}}
+            context["last_pipeline_result"] = {
+                "asset_id": signal.get("asset_id", "") if isinstance(signal, dict) else "",
+                "pipeline_intent": plan.pipeline_intent,
+                "headline": _pipeline_headline,
+                "details": formatted.get("details", []),
+                "actions": formatted.get("actions", []),
+                "summary": (
+                    f"Headline: {_pipeline_headline}\n"
+                    f"Details: {'; '.join(formatted.get('details', []))}\n"
+                    f"Recommended actions: {'; '.join(formatted.get('actions', []))}"
+                ),
+            }
             # LLM synthesis: convert structured pipeline results into a direct answer
             if _CHAT_LLM.is_configured():
                 try:
@@ -2226,16 +2252,23 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
                         f"Details: {'; '.join(formatted.get('details',[]))}\n"
                         f"Recommended actions: {'; '.join(formatted.get('actions',[]))}"
                     )
+                    _synthesis_q = re.sub(
+                        r'\s*\[(?:Session context|Context for)[^\]]*\]', '', req.message
+                    ).strip()
                     _synth=_CHAT_LLM.complete_json(
                         system_prompt=(
                             "You are the DRO plant-maintenance assistant. "
                             "Use ONLY the pipeline data provided to answer the user's question directly. "
                             "If the question is yes/no, start with YES or NO. "
-                            "Be concise (2-4 sentences). Never fabricate data not in the pipeline result. "
+                            "Write 3-4 connected prose sentences — not a list of measurements. "
+                            "IMPORTANT: do not mention any value that is exactly 0, '0–0', '0%', or '$0' — "
+                            "these mean the agent did not run and the figure is unavailable. "
+                            "Imputed or baseline values ARE valid — report them and note '(imputed from baseline)' if relevant. "
+                            "Never fabricate data not in the pipeline result. "
                             'Return JSON: {"answer": "<synthesized plain-text answer>"}.\n\n'
                             + persona_response_prompt(_persona_context)
                         ),
-                        user_prompt=f"User question: {req.message}\n\nPipeline data:\n{_pipe_summary}",
+                        user_prompt=f"User question: {_synthesis_q}\n\nPipeline data:\n{_pipe_summary}",
                         temperature=0.2,
                         max_tokens=200,
                     )
