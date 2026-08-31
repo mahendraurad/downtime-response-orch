@@ -2,7 +2,7 @@
 
 DRO is a FastAPI and LangGraph backend for bearing predictive maintenance. It validates telemetry, detects anomalies, diagnoses bearing faults, estimates risk and RUL, retrieves cited maintenance guidance, recommends constrained actions, executes approved work through mock adapters, and learns from confirmed outcomes.
 
-The repository is ready for frontend integration in deterministic local mode. Azure credentials are optional.
+The repository is ready for frontend integration in deterministic local mode and can use shared Azure services when the documented environment settings are supplied.
 
 ## Current status
 
@@ -14,11 +14,11 @@ The repository is ready for frontend integration in deterministic local mode. Az
 | Human approval and HITL gates | Implemented |
 | Azure PostgreSQL HITL + LangGraph checkpoints | Connected and live-verified |
 | Reflexion and graceful error envelopes | Implemented |
-| Governed cited open-ended RAG | Implemented locally; Azure adapter ready |
+| Governed cited open-ended RAG | Implemented with local and Azure Search backends |
 | Local persistence and mock connectors | Implemented |
-| Automated backend tests | `963 passed` |
+| Automated backend tests | `1033 passed` |
 | React frontend from `feature/8agents_frontend` | Integrated on `dev` |
-| Real CMMS/ERP/historian and Azure services | Next phase |
+| Real CMMS/ERP/historian adapters | Next phase |
 
 ## Agent flow
 
@@ -130,6 +130,27 @@ Do not commit `.env`. Copy `.env.example` for local configuration, or create
 the same names as Azure App Service settings/Key Vault references. The template
 contains the non-secret DRO resource names and blank placeholders for keys,
 database credentials, tracing credentials, and JWT signing material.
+
+## Shared service access
+
+The following service configuration is intentionally centralized in
+`.env.example` so backend and frontend developers can run against the same DRO
+resources without committing secrets:
+
+| Capability | Required setting or permission |
+|---|---|
+| Azure AI/LLM | `AZURE_AI_ENDPOINT`, `AZURE_AI_DEPLOYMENT`, and `AZURE_AI_KEY` through local `.env`, App Service settings, or Key Vault |
+| Azure AI Search RAG | `AZURE_SEARCH_ENDPOINT`, `AZURE_SEARCH_INDEX_NAME`, `RAG_BACKEND=azure`, search field settings, and either `AZURE_SEARCH_KEY` or RBAC |
+| Azure Search RBAC | App Service or developer identity must have `Search Index Data Reader` on the search service/index |
+| PostgreSQL HITL/checkpoints | `POSTGRES_URL` with SSL enabled, plus `POSTGRES_HITL_SETUP=true` and/or `POSTGRES_CHECKPOINT_SETUP=true` only for first-time table setup |
+| LangSmith tracing | `LANGSMITH_TRACING=true`, `LANGSMITH_ENDPOINT`, `LANGSMITH_API_KEY`, and `LANGSMITH_PROJECT` |
+| Langfuse tracing | `LANGFUSE_TRACING=true`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, and `LANGFUSE_BASE_URL` |
+| Frontend API target | `VITE_API_BASE_URL` only when React is hosted separately from the FastAPI backend |
+
+For Azure App Service deployment, create these as application settings or Key
+Vault references with the same names. For local development, copy
+`.env.example` to an ignored `.env` and populate only the values the developer
+is approved to use.
 
 ## Start the backend
 
