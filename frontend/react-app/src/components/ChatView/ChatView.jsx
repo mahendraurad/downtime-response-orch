@@ -944,7 +944,12 @@ export default function ChatView() {
         const chips = generateChipsFromResponse(d, buildDefaultChips(persona, assets || [], queriedAsset));
         setContextChips(chips);
         setUsedChips(new Set());
-        const details = d.details && d.details.length && !(hasSessionState && queriedAsset)
+        // Preserve record-level details for Agent 8 learning history. Without
+        // this exception, an actioned asset showed only a count and hid the
+        // rejection reason/learned outcome from the user.
+        const suppressSessionDetails = hasSessionState && queriedAsset
+          && d.intent !== 'learning_history';
+        const details = d.details && d.details.length && !suppressSessionDetails
           ? '<br><br>' + d.details.map(x => '• ' + x).join('<br>') : '';
         const questions = d.clarification && d.clarification.questions ? '<br><br><strong>Needed:</strong><br>' + d.clarification.questions.map(x => '? ' + x).join('<br>') : '';
         const dkg = d.knowledge_guidance;
@@ -2199,7 +2204,7 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
                   </div>
                 </div>
                 <div aria-label="approval escalation countdown" style={{ color: '#f97316', fontFamily: 'var(--m)', fontSize: '16px', fontWeight: 700, flexShrink: 0 }}>
-                  {formatCountdown(escalationRemaining)}
+                  {escalationRemaining === 0 ? 'ESCALATING...' : formatCountdown(escalationRemaining)}
                 </div>
               </div>
             )}
