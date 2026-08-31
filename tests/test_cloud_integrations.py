@@ -1,6 +1,7 @@
 """Contract tests for optional production infrastructure adapters."""
 from __future__ import annotations
 
+from pathlib import Path
 import pytest
 
 from src.tools.azure_search_retriever import (
@@ -8,6 +9,23 @@ from src.tools.azure_search_retriever import (
 )
 from src.tools.checkpointing import build_checkpoint_resources
 from src.tools.retrieval_backend import build_retrieval_backend
+
+
+def test_environment_template_enables_dro_cloud_resources_without_secrets():
+    example=Path(".env.example").read_text(encoding="utf-8").replace("\r\n","\n")
+    assert "AZURE_AI_ENDPOINT=https://proj-boxai-dro-resource.services.ai.azure.com" in example
+    assert "AZURE_AI_DEPLOYMENT=gpt-5.4-mini" in example
+    assert "AZURE_SEARCH_ENDPOINT=https://ai-search-dro.search.windows.net" in example
+    assert "AZURE_SEARCH_INDEX_NAME=ai-search-dro" in example
+    assert "RAG_BACKEND=azure" in example and "AZURE_SEARCH_AUTH=rbac" in example
+    assert "AZURE_BLOB_CONTAINER=sop-dro" in example
+    for secret_name in (
+        "AZURE_AI_KEY","AZURE_OPENAI_KEY","AZURE_SEARCH_KEY",
+        "AZURE_CLIENT_SECRET","AZURE_BLOB_CONNECTION_STRING","POSTGRES_URL",
+        "LANGSMITH_API_KEY","LANGFUSE_PUBLIC_KEY","LANGFUSE_SECRET_KEY",
+        "OPENAI_API_KEY","DRO_JWT_SECRET",
+    ):
+        assert f"{secret_name}=\n" in example
 
 
 class _FakeSearchClient:

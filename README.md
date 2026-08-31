@@ -126,7 +126,10 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-Do not commit `.env`. Copy `.env.example` only when testing optional Azure-backed LLM/search/storage integrations.
+Do not commit `.env`. Copy `.env.example` for local configuration, or create
+the same names as Azure App Service settings/Key Vault references. The template
+contains the non-secret DRO resource names and blank placeholders for keys,
+database credentials, tracing credentials, and JWT signing material.
 
 ## Start the backend
 
@@ -213,9 +216,9 @@ All React chat questions, including asset-detail questions, go exclusively to
 `/api/chat`. There is no frontend canned-answer or single-asset pipeline
 fallback. An asset ID supplies identity, not evidence: asset analysis starts
 only when the request includes canonical telemetry or an explicitly selected
-scenario. Multi-asset planning requires an approved `fleet_snapshot` containing
-evidence for each asset, and fleet rankings remain blocked until a validated
-aggregation path is available.
+scenario. Multi-asset planning returns results for every asset backed by
+available evidence and marks missing or unknown assets as unavailable; fleet
+rankings remain blocked until a validated aggregation path is available.
 Conversation context has configurable expiry and turn limits, supports an
 explicit reset, rejects reserved internal context keys, and discards stale
 telemetry when the user changes assets.
