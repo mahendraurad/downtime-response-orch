@@ -16,7 +16,7 @@ The repository is ready for frontend integration in deterministic local mode and
 | Reflexion and graceful error envelopes | Implemented |
 | Governed cited open-ended RAG | Implemented with local and Azure Search backends |
 | Local persistence and mock connectors | Implemented |
-| Automated backend tests | `1033 passed` |
+| Automated backend tests | `1040 passed` |
 | React frontend from `feature/8agents_frontend` | Integrated on `dev` |
 | Real CMMS/ERP/historian adapters | Next phase |
 
@@ -333,7 +333,7 @@ Expected controlled values include:
 | Agent 5 guidance | `grounded`, `no_guidance`, `retrieval_failed`, `invalid_input` |
 | Agent 6 recommendation | `ok`, `invalid_input` |
 | Agent 7 execution | `success`, `partial`, `blocked`, `failed`, `invalid_input`, `duplicate` |
-| Agent 8 learning | `learned`, `duplicate`, `invalid_input`, `persistence_failed` |
+| Agent 8 learning | `learned`, `duplicate`, `invalid_input`, `persistence_failed`; chat observer also returns `no_new_learning`, `disabled`, `failed` |
 
 ## Expected outputs and errors
 
@@ -341,7 +341,8 @@ Expected controlled values include:
 - A supported fault can reach a grounded recommendation.
 - Repair/replacement recommendations remain `pending` until approved.
 - Execution runs only through the dedicated approval-aware path.
-- Learning requires completed execution and matching technician feedback.
+- Confirmed outcome learning requires completed execution and matching technician feedback.
+- Agent 8 also observes each successful chat turn and records only useful new evidence, knowledge, HITL, or clarification gaps.
 - Defined validation/not-found errors return HTTP 4xx responses.
 - Unexpected errors return a sanitized `INTERNAL_ERROR` envelope with a correlation `error_id`; raw exception details are not returned.
 - Approved conceptual questions return `source_type=approved_rag`, inline citation markers, a structured `citations` list, and a `knowledge_rag` pipeline-log entry.

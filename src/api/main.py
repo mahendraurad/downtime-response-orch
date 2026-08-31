@@ -231,13 +231,20 @@ def _learning_history_draft(persona: str, limit: int = 3,
     agent = _learning_agent()
     cases = agent.recent_cases(limit, asset_id=asset_id)
     rejections = agent.recent_rejections(limit, asset_id=asset_id)
+    observations = agent.recent_chat_observations(limit, asset_id=asset_id)
     records = [
         {**case, "learning_type": "validated_outcome",
          "recorded_at": str(case.get("created_at", "")),
          "valid_closure": True, "closure_status": "completed",
          "physical_outcome_confirmed": True, "confirmed_outcome": True}
         for case in cases
-    ] + list(rejections)
+    ] + list(rejections) + [
+        {**observation, "learning_type": "chat_observation",
+         "recorded_at": str(observation.get("created_at", "")),
+         "valid_closure": False, "closure_status": "observed",
+         "physical_outcome_confirmed": False, "confirmed_outcome": False}
+        for observation in observations
+    ]
     records.sort(key=lambda row: str(row.get("recorded_at", "")), reverse=True)
     records = records[:limit]
     label = asset_label or asset_id
@@ -266,6 +273,14 @@ def _learning_history_draft(persona: str, limit: int = 3,
                 "learning outcome; a physical post-maintenance outcome can be recorded separately."
             )
             references.append(f"Rejection decision {case_id}")
+        elif record.get("learning_type") == "chat_observation":
+            details.append(
+                f"{record.get('observation_id', case_id)}: "
+                f"{record.get('summary', 'chat observation recorded')}"
+            )
+            references.append(
+                f"Agent 8 chat observation {record.get('observation_id', case_id)}"
+            )
         else:
             details.append(
                 f"{case_id}: {record.get('fault_mode', 'unknown fault')}; "
@@ -276,11 +291,15 @@ def _learning_history_draft(persona: str, limit: int = 3,
     audience = f"{persona_context.role} learning context"
     outcome_count = sum(row.get("learning_type") == "validated_outcome" for row in records)
     rejection_count = sum(row.get("learning_type") == "rejection_feedback" for row in records)
+    observation_count = sum(row.get("learning_type") == "chat_observation" for row in records)
     if rejection_count:
         response = (f"{audience}: Agent 8 found {outcome_count} completed "
                     f"maintenance closure(s) and {rejection_count} rejected "
                     f"recommendation closure(s)"
                     f"{' for ' + label if label else ''}.")
+    elif observation_count:
+        response = (f"{audience}: Agent 8 found {observation_count} useful "
+                    f"chat observation(s){' for ' + label if label else ''}.")
     else:
         response = (f"{audience}: the last {outcome_count} validated closed failure "
                     f"case{'s' if outcome_count != 1 else ''} are summarized below.")
@@ -296,7 +315,55 @@ def _learning_history_draft(persona: str, limit: int = 3,
         "call_plan": ["agent_8"], "needs_context": False,
         "agent_outputs": {"learned_cases": cases,
                           "rejection_learnings": rejections,
+                          "chat_observations": observations,
                           "learning_records": records}}, records)
+
+
+@traceable(name="Agent 8 - Chat Learning Observer", run_type="chain", tags=["dro", "agent-8", "chat-learning"])
+def _observe_chat_learning(event: dict, persona_context):
+    return _learning_agent().observe_chat(
+        event, persona_context=persona_context
+    ).model_dump()
+
+
+def _attach_chat_learning(result: Dict[str, Any], req: "ChatRequest",
+                          run_id: str, conversation_id: str, intent: str,
+                          persona_context, requested_assets=None,
+                          supplied_asset: str = "") -> Dict[str, Any]:
+    assets = {
+        str(asset_id).upper()
+        for _, asset_id, _ in (requested_assets or [])
+        if str(asset_id).strip()
+    }
+    if supplied_asset:
+        assets.add(str(supplied_asset).upper())
+    event = {
+        "run_id": run_id,
+        "conversation_id": conversation_id,
+        "message": req.message,
+        "response": result.get("response", ""),
+        "intent": intent,
+        "persona": persona_context.id,
+        "asset_ids": sorted(assets),
+        "result": result,
+    }
+    try:
+        observation = _observe_chat_learning(event, persona_context)
+    except Exception as exc:
+        observation = {
+            "status": "failed",
+            "learning_type": "chat_observation",
+            "learning_recorded": False,
+            "reason": f"Agent 8 chat observation failed: {exc}",
+            "persistence_status": "failed",
+        }
+    result["learning_observation"] = observation
+    agent_outputs = result.get("agent_outputs")
+    if not isinstance(agent_outputs, dict):
+        agent_outputs = {}
+        result["agent_outputs"] = agent_outputs
+    agent_outputs["agent8_observation"] = observation
+    return result
 
 
 _MULTI_ASSET_SCENARIOS = load_fleet_scenario_map()
@@ -2142,11 +2209,14 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
         raise HTTPException(422,"conversation_id contains unsupported characters or is too long.")
     if req.message.strip().lower() in {"reset","start over","new conversation","cancel this request"}:
         _CHAT_CONTEXT_STORE.pop(conversation_id,None)
-        return {"run_id":run_id,"conversation_id":conversation_id,"intent":"reset",
+        _reset={"run_id":run_id,"conversation_id":conversation_id,"intent":"reset",
             "persona":selected_persona.id,"persona_context":selected_persona.model_dump(),
             "response":"Conversation context has been cleared.",
             "details":[],"actions":[],"call_plan":[],"pipeline_log":[],"sources":[],
             "needs_context":False,"clarification_required":False,"reflection_status":"accepted"}
+        return _attach_chat_learning(
+            _reset, req, run_id, conversation_id, "reset", selected_persona
+        )
     context=_load_chat_context(conversation_id)
     incoming=_public_context(req.context)
     explicit_asset=req.asset_id or _asset_from_message(req.message)
@@ -2210,7 +2280,10 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
               "details":[],"actions":[],"call_plan":[],"pipeline_log":[],
               "needs_context":False,"clarification_required":False}
         _remember_chat_context(conversation_id,context)
-        return _soc
+        return _attach_chat_learning(
+            _soc, req, run_id, conversation_id, "conversational",
+            selected_persona, requested_assets, supplied_asset or "",
+        )
 
     # ── Intent classification ─────────────────────────────────────────────────
     # LLM reads message + conversation history to distinguish:
@@ -2229,6 +2302,10 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
         _remember_chat_context(conversation_id,context)
         _conv_result={**_conv_reflected.response,"run_id":run_id,"conversation_id":conversation_id,
                       "intent":"conversational","reflection_status":_conv_reflected.status,"pipeline_log":[]}
+        _conv_result = _attach_chat_learning(
+            _conv_result, req, run_id, conversation_id, "conversational",
+            selected_persona, requested_assets, supplied_asset or "",
+        )
         try: _conv_result["audit"]=write_audit(_AUDIT_PATH,event="chat",run_id=run_id,status="ok",intent="conversational",agents=())
         except Exception: _conv_result["audit"]={"status":"audit_write_failed"}
         return _conv_result
@@ -2406,6 +2483,10 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
                           "pending":bool(context.get("_pending_message"))}}
     if _hitl_fields:
         result.update(_hitl_fields)
+    result = _attach_chat_learning(
+        result, req, run_id, conversation_id, plan_intent,
+        selected_persona, requested_assets, supplied_asset or "",
+    )
     try: result["audit"]=write_audit(_AUDIT_PATH,event="chat",run_id=run_id,status="ok",intent=plan.intent,agents=draft.get("call_plan",plan.agents))
     except Exception: result["audit"]={"status":"audit_write_failed"}
     return result

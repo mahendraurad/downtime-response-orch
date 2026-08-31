@@ -51,6 +51,7 @@ data/hitl_sessions.db
 data/hitl_sessions.db-shm
 data/hitl_sessions.db-wal
 data/learned_cases.json
+data/chat_learning_observations.json
 data/learning_training_rows.jsonl
 data/*.db-shm
 data/*.db-wal

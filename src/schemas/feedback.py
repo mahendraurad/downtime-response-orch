@@ -84,3 +84,18 @@ class RejectionLearningResult(BaseModel):
     consecutive_rejections: int = 1
     review_reason: str = ""
     persistence_status: str = "stored"
+
+
+class ChatLearningResult(BaseModel):
+    """Agent 8 decision after observing a chat turn."""
+    observation_id: str = ""
+    status: str = "no_new_learning"  # learned | duplicate | no_new_learning | disabled | failed
+    learning_type: str = "chat_observation"
+    learning_recorded: bool = False
+    learning_kind: str = ""
+    reason: str = ""
+    asset_ids: List[str] = Field(default_factory=list)
+    intent: str = ""
+    created_at: str = ""
+    persistence_status: str = "not_stored"
+    summary: str = ""

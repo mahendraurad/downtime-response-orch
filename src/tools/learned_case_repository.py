@@ -162,4 +162,56 @@ class JSONRejectionRepository:
                 break
             count += 1
         return count
+
+
+class JSONChatLearningRepository:
+    """Durable Agent 8 memory for useful chat observations."""
+    def __init__(self, path):
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+
+    def _rows(self):
+        if not self.path.exists():
+            return []
+        try:
+            rows = json.loads(self.path.read_text(encoding="utf-8"))
+            return rows if isinstance(rows, list) else []
+        except (json.JSONDecodeError, OSError):
+            return []
+
+    def exists_fingerprint(self, fingerprint):
+        return any(
+            isinstance(row, dict) and row.get("fingerprint") == fingerprint
+            for row in self._rows()
+        )
+
+    def save(self, row):
+        rows = self._rows()
+        fingerprint = row.get("fingerprint")
+        if fingerprint and any(
+            isinstance(existing, dict)
+            and existing.get("fingerprint") == fingerprint
+            for existing in rows
+        ):
+            raise ValueError("chat observation already exists")
+        rows.append(dict(row))
+        self.path.write_text(json.dumps(rows, indent=2), encoding="utf-8")
+
+    def list_recent(self, limit=3, asset_id="", learning_kind=""):
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
+            return []
+        rows = [row for row in self._rows() if isinstance(row, dict)]
+        if asset_id:
+            rows = [
+                row for row in rows
+                if asset_id in row.get("asset_ids", [])
+                or row.get("asset_id") == asset_id
+            ]
+        if learning_kind:
+            rows = [
+                row for row in rows
+                if row.get("learning_kind") == learning_kind
+            ]
+        rows.sort(key=lambda row: str(row.get("created_at", "")), reverse=True)
+        return [dict(row) for row in rows[:limit]]
 # ***********************

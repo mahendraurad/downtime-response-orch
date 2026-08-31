@@ -22,6 +22,7 @@ def _feedback(**kw):
     values.update(kw); return FeedbackEvent(**values)
 def _agent(tmp_path, llm=None):
     cfg=load_learning_config(); cfg.repository_path=str(tmp_path/"cases.json"); cfg.training_export_path=str(tmp_path/"rows.jsonl"); cfg.rejection_repository_path=str(tmp_path/"rejections.json")
+    cfg.chat_observation_repository_path=str(tmp_path/"chat_observations.json")
     return LearningMemoryAgent(cfg, llm_client=llm)
 
 def test_closed_execution_creates_learned_case(tmp_path):
@@ -168,6 +169,57 @@ def test_repository_roundtrip_and_searchability(tmp_path):
     agent=_agent(tmp_path); agent.process(_execution(),_feedback())
     row=agent._repo.get("CASE-L1"); hits=agent._repo.search("outer race contamination bearing replacement")
     assert row["fault_mode"]=="outer_race_fault" and hits[0]["source"]=="Learned case CASE-L1"
+
+
+def test_chat_observation_noops_when_no_learning_signal(tmp_path):
+    result=_agent(tmp_path).observe_chat({
+        "run_id":"CHAT-1","conversation_id":"CONV-1","message":"thanks",
+        "intent":"conversational","response":"You're welcome!",
+        "result":{"intent":"conversational","clarification_required":False},
+    })
+    assert result.status=="no_new_learning"
+    assert result.learning_recorded is False
+    assert _agent(tmp_path).recent_chat_observations(3)==[]
+
+
+def test_chat_observation_records_asset_registration_gap(tmp_path):
+    agent=_agent(tmp_path)
+    result=agent.observe_chat({
+        "run_id":"CHAT-2","conversation_id":"CONV-1",
+        "message":"Analyse X-999","intent":"risk",
+        "response":"Asset X-999 is not registered.",
+        "asset_ids":["X-999"],
+        "result":{"clarification_required":True,
+            "clarification":{"missing_fields":["asset_registration"],
+                "asset_id":"X-999"}},
+    })
+    assert result.status=="learned" and result.learning_recorded
+    assert result.learning_kind=="asset_registration_gap"
+    assert agent.recent_chat_observations(3,"X-999")[0]["observation_id"]==result.observation_id
+
+
+def test_duplicate_chat_observation_is_not_recorded_twice(tmp_path):
+    agent=_agent(tmp_path)
+    event={"run_id":"CHAT-3","conversation_id":"CONV-1",
+        "message":"Rank fleet","intent":"fleet","response":"Need aggregation.",
+        "result":{"clarification_required":True,
+            "clarification":{"missing_fields":["fleet_aggregation_service"]}}}
+    first=agent.observe_chat(event); second=agent.observe_chat(dict(event,run_id="CHAT-4"))
+    assert first.status=="learned"
+    assert second.status=="duplicate" and not second.learning_recorded
+    assert len(agent.recent_chat_observations(5))==1
+
+
+def test_chat_observation_records_knowledge_gap(tmp_path):
+    result=_agent(tmp_path).observe_chat({
+        "run_id":"CHAT-5","conversation_id":"CONV-1",
+        "message":"Explain obscure SOP","intent":"concept",
+        "response":"No approved source matched.",
+        "result":{"clarification_required":False,
+            "rag":{"status":"no_match","retrieval_query":"obscure SOP"}},
+    })
+    assert result.status=="learned"
+    assert result.learning_kind=="knowledge_gap"
 
 @pytest.mark.parametrize("limit",[0,-1,True,"3",None])
 def test_recent_history_rejects_invalid_limits(tmp_path,limit):

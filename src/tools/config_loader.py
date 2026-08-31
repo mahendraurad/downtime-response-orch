@@ -762,6 +762,10 @@ class LearningConfig:
     top_k: int
     log_learned_cases: bool
     rejection_repository_path: str = "data/rejection_feedback.json"
+    chat_observation_repository_path: str = "data/chat_learning_observations.json"
+    chat_observation_enabled: bool = True
+    chat_max_message_characters: int = 500
+    chat_max_response_characters: int = 1000
     include_rejections_in_history: bool = True
     rejection_window_days: int = 30
     rejection_review_threshold: int = 2
@@ -772,6 +776,10 @@ class LearningConfig:
             raise ValueError("learning numeric policy is invalid")
         if not self.rejection_repository_path.strip():
             raise ValueError("rejection repository path is required")
+        if not self.chat_observation_repository_path.strip():
+            raise ValueError("chat observation repository path is required")
+        if self.chat_max_message_characters <= 0 or self.chat_max_response_characters <= 0:
+            raise ValueError("chat observation text limits are invalid")
         if self.rejection_window_days <= 0 or self.rejection_review_threshold < 2:
             raise ValueError("rejection learning policy is invalid")
 
@@ -781,12 +789,18 @@ def load_learning_config(path: str = _LEARNING_CONFIG) -> LearningConfig:
     with open(path, "r", encoding="utf-8") as fh: raw = json.load(fh)
     val, llm, ret = raw["validation"], raw["llm_narrative"], raw["retrieval"]
     rejection_repo = raw.get("rejection_repository", {})
+    chat_repo = raw.get("chat_observation_repository", {})
+    chat_policy = raw.get("chat_observation", {})
     rejection_policy = raw.get("rejection_learning", {})
     cfg = LearningConfig(raw["repository"]["json_path"], raw["training_export"]["jsonl_path"],
         val["allowed_execution_statuses"], val["require_timezone"], val["require_root_cause"],
         llm["enabled"], llm["max_characters"], ret["minimum_score"], ret["top_k"],
         raw["logging"]["log_learned_cases"],
         rejection_repo.get("json_path", "data/rejection_feedback.json"),
+        chat_repo.get("json_path", "data/chat_learning_observations.json"),
+        chat_policy.get("enabled", True),
+        chat_policy.get("max_message_characters", 500),
+        chat_policy.get("max_response_characters", 1000),
         rejection_policy.get("include_in_history", True),
         rejection_policy.get("consecutive_window_days", 30),
         rejection_policy.get("reliability_review_threshold", 2))

@@ -8,12 +8,12 @@ from pathlib import Path
 
 from src.schemas.execution import ExecutionResult
 from src.schemas.feedback import (
-    FeedbackEvent, LearnedCaseDocument, RejectionFeedback,
+    ChatLearningResult, FeedbackEvent, LearnedCaseDocument, RejectionFeedback,
     RejectionLearningResult,
 )
 from src.tools.config_loader import LearningConfig, load_learning_config
 from src.tools.learned_case_repository import (
-    JSONLearnedCaseRepository, JSONRejectionRepository,
+    JSONChatLearningRepository, JSONLearnedCaseRepository, JSONRejectionRepository,
 )
 
 
@@ -25,6 +25,9 @@ class LearningMemoryAgent:
         self._repo = repository or JSONLearnedCaseRepository(self._cfg.repository_path)
         self._rejections = rejection_repository or JSONRejectionRepository(
             self._cfg.rejection_repository_path
+        )
+        self._chat_observations = JSONChatLearningRepository(
+            self._cfg.chat_observation_repository_path
         )
         self._llm = llm_client
         self._now = now_fn or (lambda: datetime.now(timezone.utc))
@@ -107,6 +110,13 @@ class LearningMemoryAgent:
                 row.get("reliability_review_required", False)
             ),
         } for row in rows]
+
+    def recent_chat_observations(self, limit: int = 3,
+                                 asset_id: str = "") -> list[dict]:
+        """Read useful chat observations captured by Agent 8."""
+        if not hasattr(self._chat_observations, "list_recent"):
+            return []
+        return self._chat_observations.list_recent(limit, asset_id=asset_id)
 
     def matching_cases(self, asset_id: str, fault_mode: str,
                        limit: int = 3) -> list[dict]:
@@ -199,6 +209,103 @@ class LearningMemoryAgent:
             "decided_at": now.isoformat(),
         })
 
+    def observe_chat(self, event: dict, persona_context=None) -> ChatLearningResult:
+        """Observe a chat turn and persist only useful new learning signals."""
+        now = self._now()
+        if not self._cfg.chat_observation_enabled:
+            return ChatLearningResult(
+                status="disabled", reason="chat observation is disabled",
+                created_at=now.isoformat(),
+            )
+        if not isinstance(event, dict):
+            return ChatLearningResult(
+                status="no_new_learning",
+                reason="typed chat event is required",
+                created_at=now.isoformat(),
+            )
+        decision = self._chat_learning_decision(event)
+        if not decision.get("learning_kind"):
+            return ChatLearningResult(
+                status="no_new_learning",
+                reason=decision.get(
+                    "reason", "chat turn contains no durable operational learning"
+                ),
+                intent=str(event.get("intent", "")),
+                created_at=now.isoformat(),
+            )
+        fingerprint = hashlib.sha256(json.dumps({
+            "learning_kind": decision["learning_kind"],
+            "asset_ids": decision.get("asset_ids", []),
+            "intent": decision.get("intent", ""),
+            "evidence": decision.get("evidence", {}),
+        }, sort_keys=True).encode()).hexdigest()
+        observation_id = f"CHAT-{fingerprint[:12].upper()}"
+        if self._chat_observations.exists_fingerprint(fingerprint):
+            return ChatLearningResult(
+                observation_id=observation_id,
+                status="duplicate",
+                learning_recorded=False,
+                learning_kind=decision["learning_kind"],
+                reason="chat observation has already been learned",
+                asset_ids=decision.get("asset_ids", []),
+                intent=decision.get("intent", ""),
+                created_at=now.isoformat(),
+                persistence_status="duplicate_not_stored",
+                summary=decision.get("summary", ""),
+            )
+        row = {
+            "observation_id": observation_id,
+            "fingerprint": fingerprint,
+            "learning_type": "chat_observation",
+            "learning_kind": decision["learning_kind"],
+            "asset_ids": decision.get("asset_ids", []),
+            "asset_id": decision.get("asset_ids", [""])[0]
+                if decision.get("asset_ids") else "",
+            "intent": decision.get("intent", ""),
+            "summary": decision.get("summary", ""),
+            "reason": decision.get("reason", ""),
+            "message": str(event.get("message", ""))[
+                :self._cfg.chat_max_message_characters
+            ],
+            "response": str(event.get("response", ""))[
+                :self._cfg.chat_max_response_characters
+            ],
+            "run_id": str(event.get("run_id", "")),
+            "conversation_id": str(event.get("conversation_id", "")),
+            "persona_id": getattr(persona_context, "id", "")
+                or str(event.get("persona", "")),
+            "created_at": now.isoformat(),
+            "learning_config_version": self._version,
+            "evidence": decision.get("evidence", {}),
+        }
+        try:
+            self._chat_observations.save(row)
+        except Exception as exc:
+            return ChatLearningResult(
+                observation_id=observation_id,
+                status="failed",
+                learning_recorded=False,
+                learning_kind=decision["learning_kind"],
+                reason=f"chat observation persistence failed: {exc}",
+                asset_ids=decision.get("asset_ids", []),
+                intent=decision.get("intent", ""),
+                created_at=now.isoformat(),
+                persistence_status="failed",
+                summary=decision.get("summary", ""),
+            )
+        return ChatLearningResult(
+            observation_id=observation_id,
+            status="learned",
+            learning_recorded=True,
+            learning_kind=decision["learning_kind"],
+            reason=decision.get("reason", ""),
+            asset_ids=decision.get("asset_ids", []),
+            intent=decision.get("intent", ""),
+            created_at=now.isoformat(),
+            persistence_status="stored",
+            summary=decision.get("summary", ""),
+        )
+
     def _input_error(self, execution, feedback):
         if not isinstance(execution, ExecutionResult) or not isinstance(feedback, FeedbackEvent):
             return "typed ExecutionResult and FeedbackEvent are required"
@@ -230,6 +337,106 @@ class LearningMemoryAgent:
             source_execution_schema_version=getattr(execution, "schema_version", ""),
             source_executor_config_version=getattr(execution, "executor_config_version", ""),
             linked_execution_case_id=getattr(execution, "case_id", ""))
+
+    @staticmethod
+    def _chat_learning_decision(event):
+        result = event.get("result", {})
+        if not isinstance(result, dict):
+            result = {}
+        intent = str(event.get("intent") or result.get("intent") or "")
+        asset_ids = sorted({
+            str(value).upper() for value in event.get("asset_ids", [])
+            if isinstance(value, str) and value.strip()
+        })
+        clarification = result.get("clarification", {})
+        if not isinstance(clarification, dict):
+            clarification = {}
+        missing = [
+            str(item) for item in clarification.get("missing_fields", [])
+            if str(item).strip()
+        ]
+        asset_id = str(clarification.get("asset_id", "")).upper()
+        if asset_id:
+            asset_ids = sorted(set(asset_ids + [asset_id]))
+        if result.get("clarification_required") and missing:
+            if "asset_registration" in missing:
+                kind = "asset_registration_gap"
+                summary = f"Unregistered asset blocked analysis for {asset_id or 'requested asset'}."
+            elif "fleet_aggregation_service" in missing:
+                kind = "fleet_evidence_gap"
+                summary = "Fleet question required aggregation evidence before ranking."
+            else:
+                kind = "evidence_gap"
+                summary = f"Chat required clarification for missing {', '.join(missing)}."
+            return {
+                "learning_kind": kind,
+                "asset_ids": asset_ids,
+                "intent": intent,
+                "summary": summary,
+                "reason": "Agent 8 captured a reusable clarification/evidence gap.",
+                "evidence": {"missing_fields": missing},
+            }
+
+        rag = result.get("rag", {})
+        if isinstance(rag, dict) and rag.get("status") in {
+            "no_match", "retrieval_failed", "blocked",
+        }:
+            status = str(rag.get("status", ""))
+            return {
+                "learning_kind": "knowledge_gap",
+                "asset_ids": asset_ids,
+                "intent": intent,
+                "summary": f"RAG could not ground the chat answer: {status}.",
+                "reason": "Agent 8 captured a reusable knowledge retrieval gap.",
+                "evidence": {
+                    "rag_status": status,
+                    "retrieval_query": str(rag.get("retrieval_query", "")),
+                },
+            }
+
+        multi = result.get("multi_asset_results", [])
+        if isinstance(multi, list):
+            unavailable = [
+                str(row.get("asset", "") or row.get("asset_id", "")).upper()
+                for row in multi if isinstance(row, dict)
+                and row.get("status") == "unavailable"
+            ]
+            unavailable = [item for item in unavailable if item]
+            if unavailable:
+                return {
+                    "learning_kind": "partial_multi_asset_gap",
+                    "asset_ids": sorted(set(asset_ids + unavailable)),
+                    "intent": intent,
+                    "summary": (
+                        "Multi-asset answer had evidence for some assets but "
+                        f"not for {', '.join(unavailable)}."
+                    ),
+                    "reason": "Agent 8 captured a reusable partial evidence gap.",
+                    "evidence": {"unavailable_assets": unavailable},
+                }
+
+        for field in (
+            "hitl_required", "hitl_monitoring", "hitl_diagnosis",
+            "hitl_knowledge", "hitl_advisory",
+        ):
+            gate = result.get(field)
+            if isinstance(gate, dict):
+                gate_type = gate.get("type") or field.replace("hitl_", "")
+                return {
+                    "learning_kind": "decision_pending",
+                    "asset_ids": asset_ids,
+                    "intent": intent,
+                    "summary": f"Chat created a pending {gate_type} HITL decision.",
+                    "reason": "Agent 8 captured a pending human decision point.",
+                    "evidence": {"gate": gate_type},
+                }
+
+        return {
+            "learning_kind": "",
+            "asset_ids": asset_ids,
+            "intent": intent,
+            "reason": "no new operational learning signal was detected",
+        }
 
     @staticmethod
     def _template(execution, feedback):
