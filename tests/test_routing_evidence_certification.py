@@ -7,6 +7,7 @@ import src.api.main as api
 from src.orchestrator.graph import (
     _sources_executor, _sources_monitoring, _sources_prescriptive,
 )
+from src.orchestrator.routing import route_after_knowledge
 from src.tools.data_loader import load_telemetry_rows
 
 
@@ -125,6 +126,15 @@ def test_concept_definition_uses_cited_non_asset_evidence_only(client):
     assert data["intent"]=="concept" and data["source_type"]=="approved_rag"
     assert data["pipeline_log"][0]["node"]=="knowledge_rag"
     assert data["sources"]==["knowledge_rag"] and data["citations"]
+
+
+def test_full_analysis_reaches_prescriptive_when_rag_is_unavailable():
+    state = {
+        "intent": "analysis",
+        "knowledge_guidance": SimpleNamespace(guidance_eligible=False),
+        "risk_assessment": SimpleNamespace(risk_eligible=True),
+    }
+    assert route_after_knowledge(state) == "prescriptive"
 
 
 def test_monitoring_source_uses_canonical_motor_current_field():

@@ -2445,7 +2445,14 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
                 ),
             }
             # LLM synthesis: convert structured pipeline results into a direct answer
-            if _CHAT_LLM.is_configured():
+            # Never let conversational synthesis fill gaps when the pipeline
+            # stopped before a valid risk result. An incomplete run must remain
+            # explicit rather than being rewritten as an asset conclusion.
+            _risk_ready = bool(
+                state.get("risk_assessment")
+                and getattr(state.get("risk_assessment"), "risk_eligible", False)
+            )
+            if _CHAT_LLM.is_configured() and _risk_ready:
                 try:
                     _pipe_summary=(
                         f"Headline: {_pipeline_headline}\n"

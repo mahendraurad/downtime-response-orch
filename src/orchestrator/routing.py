@@ -96,6 +96,13 @@ def route_after_knowledge(state: dict) -> str:
     """
     guidance = state.get("knowledge_guidance")
     if guidance is None or not getattr(guidance, "guidance_eligible", False):
+        # RAG guidance is advisory evidence. For an explicit full analysis or
+        # recommendation request, valid Agent 1-4 risk evidence must still
+        # reach Agent 6 so the configured approval/HITL gate is not silently
+        # skipped merely because the knowledge backend is unavailable.
+        if (_intent(state) in {"analysis", "execution", "recommendation"}
+                and getattr(state.get("risk_assessment"), "risk_eligible", False)):
+            return "prescriptive"
         return END
     if _intent(state) == "guidance":
         return END
