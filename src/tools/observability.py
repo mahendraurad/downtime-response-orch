@@ -1,4 +1,4 @@
-"""Optional, failure-isolated Langfuse instrumentation helpers."""
+"""Optional, failure-isolated observability instrumentation helpers."""
 from __future__ import annotations
 
 import functools
@@ -34,6 +34,17 @@ def langfuse_observe(name: str, as_type: str = "span") -> Callable:
 
 def flush_observability() -> None:
     """Flush configured clients during graceful process shutdown."""
+    if os.getenv("LANGSMITH_TRACING", "false").strip().lower() in {
+        "1", "true", "yes", "on",
+    }:
+        try:
+            from langsmith import Client
+            from langsmith import run_helpers
+            client = getattr(run_helpers, "_CLIENT", None) or Client()
+            if hasattr(client, "flush"):
+                client.flush()
+        except Exception as exc:
+            logger.warning("Could not flush LangSmith telemetry: %s", exc)
     if _enabled():
         try:
             from langfuse import get_client

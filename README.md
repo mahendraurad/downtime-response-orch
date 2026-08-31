@@ -16,7 +16,7 @@ The repository is ready for frontend integration in deterministic local mode and
 | Reflexion and graceful error envelopes | Implemented |
 | Governed cited open-ended RAG | Implemented with local and Azure Search backends |
 | Local fallback persistence and mock connectors | Implemented |
-| Automated backend tests | `1045 passed` |
+| Automated backend tests | `1048 passed` |
 | React frontend from `feature/8agents_frontend` | Integrated on `dev` |
 | Real CMMS/ERP/historian adapters | Next phase |
 
@@ -385,7 +385,7 @@ python -m pytest tests/test_agent1_to_agent8_integration.py -q
 Current certification:
 
 ```text
-963 passed
+1048 passed
 0 failed
 ```
 
@@ -404,6 +404,21 @@ tracing only in an organisation-approved LangSmith workspace. A tracing outage
 does not change pipeline decisions or API responses.
 
 PowerShell uses `$env:LANGSMITH_TRACING="true"`; `export` is Bash syntax.
+Set these values before starting the backend or configure them as Azure App
+Service application settings. Frontend-only environment variables do not enable
+backend traces.
+
+Smoke-test LangSmith connectivity:
+
+```powershell
+python scripts\verify_langsmith_tracing.py
+```
+
+Smoke-test `/api/chat` trace wiring in an approved tracing environment:
+
+```powershell
+python scripts\verify_chat_langsmith_tracing.py
+```
 
 Reflexion is bounded by `reflection.max_refinement_iterations` in
 `config/orchestrator_config.json` (default `3`). Every chat response reports
@@ -418,10 +433,10 @@ labelled demo values (`cost_data_status=configured_demo`) and are not presented
 as ERP/accounting facts.
 
 The frontend retrieves fleet projections from `GET /api/dashboard/assets` and
-work orders from `GET /api/workorders`. Both remain development APIs: fleet
-telemetry comes from registered scenarios and work-order storage is in memory.
-The UI labels its fallback and mock states rather than presenting them as live
-enterprise integrations.
+work orders from `GET /api/workorders`. Fleet telemetry comes from registered
+scenarios; work-order storage uses the configured runtime table backend.
+The UI labels fallback and mock connector states rather than presenting them as
+live enterprise integrations.
 
 ### Chat QC and LangSmith evaluation
 

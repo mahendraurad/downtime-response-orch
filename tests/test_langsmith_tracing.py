@@ -45,3 +45,15 @@ def test_example_configuration_contains_no_langsmith_secret():
     assert "LANGSMITH_TRACING=false" in example
     assert "LANGSMITH_PROJECT=DRO" in example
     assert "LANGSMITH_API_KEY=\n" in example.replace("\r\n", "\n")
+
+
+def test_api_requests_flush_observability(monkeypatch):
+    import src.api.main as api
+
+    calls = []
+    monkeypatch.setattr(api, "flush_observability", lambda: calls.append("flush"))
+
+    response = TestClient(app).get("/api/workorders")
+
+    assert response.status_code == 200
+    assert calls == ["flush"]

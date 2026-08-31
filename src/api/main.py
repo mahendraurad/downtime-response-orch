@@ -96,6 +96,14 @@ async def _application_lifespan(_app: FastAPI):
 
 app = FastAPI(title="DRO API", version="1.0.0", lifespan=_application_lifespan)
 
+
+@app.middleware("http")
+async def _flush_trace_after_request(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith("/api/"):
+        flush_observability()
+    return response
+
 _ORCH_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "config", "orchestrator_config.json")
 with open(_ORCH_CONFIG_PATH, "r", encoding="utf-8") as _fh:
     _ORCH_CONFIG = json.load(_fh)
