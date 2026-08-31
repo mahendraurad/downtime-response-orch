@@ -95,7 +95,8 @@ def test_rejection_is_immediately_queryable_by_asset(client,tmp_path,monkeypatch
     assert data["pipeline_log"][0]["asset_id"]=="AST_MTR_001"
     assert len(data["agent_outputs"]["rejection_learnings"])==1
     assert "Inspection evidence disagrees" in data["details"][0]
-    assert "valid Agent 8 closure" in data["details"][0]
+    assert "Learning for" in data["details"][0]
+    assert "fresh telemetry" in data["details"][0]
     assert data["agent_outputs"]["rejection_learnings"][0]["valid_closure"] is True
     assert data["agent_outputs"]["rejection_learnings"][0]["closure_status"]=="rejected"
 

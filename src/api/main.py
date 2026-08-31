@@ -273,15 +273,11 @@ def _learning_history_draft(persona: str, limit: int = 3,
     for record in records:
         case_id = record.get("case_id", "unknown case")
         if record.get("learning_type") == "rejection_feedback":
-            reason = str(record.get("reason_code", "not recorded")).replace("_", " ")
-            note = record.get("free_text") or "no additional comment"
             details.append(
-                f"{case_id}: recommendation for {record.get('fault_mode', 'unknown fault')} "
-                f"was rejected by {record.get('persona_id', 'an operator')} because {reason}; "
-                f"comment: {note}. This rejection is a valid Agent 8 closure and "
-                "learning outcome; a physical post-maintenance outcome can be recorded separately."
+                f"Learning for {label or record.get('asset_id', 'this asset')}: "
+                f"{record.get('lesson', 'verify the recommendation against current evidence before proceeding')}"
             )
-            references.append(f"Rejection decision {case_id}")
+            references.append(f"Agent 8 operational lesson {case_id}")
         elif record.get("learning_type") == "chat_observation":
             details.append(
                 f"{record.get('observation_id', case_id)}: "
@@ -302,10 +298,10 @@ def _learning_history_draft(persona: str, limit: int = 3,
     rejection_count = sum(row.get("learning_type") == "rejection_feedback" for row in records)
     observation_count = sum(row.get("learning_type") == "chat_observation" for row in records)
     if rejection_count:
-        response = (f"{audience}: Agent 8 found {outcome_count} completed "
-                    f"maintenance closure(s) and {rejection_count} rejected "
-                    f"recommendation closure(s)"
-                    f"{' for ' + label if label else ''}.")
+        response = (f"{audience}: Agent 8 has updated the operational guidance"
+                    f"{' for ' + label if label else ''}. "
+                    "Future recommendations will use these lessons and request "
+                    "the required validation before execution.")
     elif observation_count:
         response = (f"{audience}: Agent 8 found {observation_count} useful "
                     f"chat observation(s){' for ' + label if label else ''}.")

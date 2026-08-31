@@ -114,6 +114,9 @@ class LearningMemoryAgent:
             "reliability_review_required": bool(
                 row.get("reliability_review_required", False)
             ),
+            "lesson": row.get("lesson") or self._rejection_lesson(
+                str(row.get("reason_code", "")), str(row.get("free_text", ""))
+            ),
         } for row in rows]
 
     def recent_chat_observations(self, limit: int = 3,
@@ -125,11 +128,30 @@ class LearningMemoryAgent:
 
     def matching_cases(self, asset_id: str, fault_mode: str,
                        limit: int = 3) -> list[dict]:
-        if not hasattr(self._repo, "search_cases"):
-            return []
-        return self._repo.search_cases(
-            asset_id=asset_id, fault_mode=fault_mode, top_k=limit
-        )
+        cases = []
+        if hasattr(self._repo, "search_cases"):
+            cases = self._repo.search_cases(
+                asset_id=asset_id, fault_mode=fault_mode, top_k=limit
+            )
+        # Rejection learning is contextual evidence for future decisions, not
+        # proof that the original diagnosis was false. Surface it as a lesson
+        # so the prescriptive agent can require the appropriate re-check.
+        rejection_rows = self.recent_rejections(limit, asset_id=asset_id)
+        for row in rejection_rows:
+            if row.get("fault_mode") != fault_mode:
+                continue
+            cases.append({
+                "case_id": row.get("case_id", ""),
+                "source": "Agent 8 decision learning",
+                "fault_mode": fault_mode,
+                "action_taken": "review before execution",
+                "outcome": "prior recommendation deferred",
+                "recorded_at": row.get("recorded_at", ""),
+                "relevance_score": 0.8,
+                "content": row.get("lesson", ""),
+                "learning_type": "rejection_learning",
+            })
+        return cases[:limit]
 
     def record_rejection(self, feedback: RejectionFeedback) -> RejectionLearningResult:
         if not isinstance(feedback, RejectionFeedback):
@@ -169,12 +191,14 @@ class LearningMemoryAgent:
                     persistence_status="duplicate_not_stored",
                     review_reason="rejection feedback for this case is already recorded",
                 )
+            lesson = self._rejection_lesson(feedback.reason_code, feedback.free_text)
             self._rejections.append({
                 **feedback.model_dump(), "decision": "rejected",
                 "decided_at": rejected_at.isoformat(),
                 "learning_type": "rejection_feedback",
                 "valid_closure": True,
                 "closure_status": "rejected",
+                "lesson": lesson,
             })
             count = self._rejections.consecutive_rejections(
                 feedback.asset_id, feedback.fault_mode, now,
@@ -442,6 +466,19 @@ class LearningMemoryAgent:
             "intent": intent,
             "reason": "no new operational learning signal was detected",
         }
+
+    @staticmethod
+    def _rejection_lesson(reason_code: str, free_text: str = "") -> str:
+        lessons = {
+            "diagnosis_wrong": "Validate the diagnosis with fresh telemetry and an independent technical review before repeating the action.",
+            "parts_concern": "Confirm part compatibility and availability before scheduling the intervention.",
+            "second_opinion": "Obtain Reliability Engineer review before repeating the recommendation.",
+            "wrong_window": "Recalculate the RUL and maintenance window using current telemetry before deciding.",
+            "other": "Capture the operator concern and verify the recommendation against current evidence before proceeding.",
+        }
+        lesson = lessons.get(str(reason_code), lessons["other"])
+        note = str(free_text or "").strip()
+        return f"{lesson} Operator context: {note}" if note else lesson
 
     @staticmethod
     def _template(execution, feedback):
