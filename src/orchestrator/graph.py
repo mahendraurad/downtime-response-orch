@@ -37,6 +37,12 @@ from src.orchestrator.routing import (
 
 logger = logging.getLogger(__name__)
 
+
+def _runtime_tables_required() -> bool:
+    from src.tools.postgres_runtime import postgres_url, table_backend
+    backend = table_backend()
+    return backend == "postgres" or (backend == "auto" and bool(postgres_url()))
+
 # ── Build agent instances (singleton — shared across all graph runs) ──────────
 
 
@@ -49,13 +55,32 @@ def _build_agents():
     from src.agents.knowledge_agent import KnowledgeAgent
     from src.tools.config_loader import load_monitoring_config, load_risk_config
 
-    dfa = DataFoundationAgent.from_data_files()
+    if _runtime_tables_required():
+        dfa = DataFoundationAgent.with_runtime_repository()
+    else:
+        dfa = DataFoundationAgent.from_data_files()
 
     mon_cfg = load_monitoring_config()
     mon_cfg.ewma_state_file = os.path.join(
         tempfile.gettempdir(), "_dro_api_ewma.json"
     )
-    mon = MonitoringAgent(mon_cfg)
+    try:
+        from src.tools.monitoring_decision_repository import build_monitoring_decision_repository
+        mon = (
+            MonitoringAgent(
+                mon_cfg,
+                decision_repository=build_monitoring_decision_repository(
+                    mon_cfg.decision_repository_path
+                ),
+            )
+            if _runtime_tables_required()
+            else MonitoringAgent(mon_cfg)
+        )
+    except Exception:
+        if _runtime_tables_required():
+            raise
+        logger.exception("runtime monitoring repository unavailable; using stateless Agent 2")
+        mon = MonitoringAgent(mon_cfg)
 
     fia = FailureIntelligenceAgent.from_data_files()
 
@@ -105,10 +130,25 @@ def _get_action_agents():
                 llm_client=optional_llm,
                 historical_case_fn=learning.matching_cases,
             ),
-            ExecutorAgent(),
+            ExecutorAgent(repository=_runtime_execution_repository()),
             learning,
         )
     return _action_agents
+
+
+def _runtime_execution_repository():
+    if not _runtime_tables_required():
+        return None
+    try:
+        from src.tools.config_loader import load_executor_config
+        from src.tools.execution_repository import build_execution_repository
+        cfg = load_executor_config()
+        return build_execution_repository(cfg.repository_path)
+    except Exception:
+        if _runtime_tables_required():
+            raise
+        logger.exception("runtime execution repository unavailable; using stateless Agent 7")
+        return None
 # ***********************
 
 
@@ -221,10 +261,15 @@ def node_data_foundation(state: DROGraphState) -> DROGraphState:
     dfa, *_ = _get_agents()
     log = list(state.get("pipeline_log") or [])
     try:
-        trusted, ms = _timed(
-            dfa.process, deepcopy(state["raw_signal"]),
-            persona_context=state.get("persona_context"),
-        )
+        if getattr(dfa, "_repository", None) is not None:
+            trusted, ms = _timed(
+                dfa.process_and_store, deepcopy(state["raw_signal"])
+            )
+        else:
+            trusted, ms = _timed(
+                dfa.process, deepcopy(state["raw_signal"]),
+                persona_context=state.get("persona_context"),
+            )
         log.append({"node": "data_foundation", "status": "ok", "latency_ms": ms,
                     "data_sources": _sources_data_foundation(trusted)})
         return {**state, "trusted_signal": trusted, "pipeline_log": log}
@@ -239,14 +284,21 @@ def node_monitoring(state: DROGraphState) -> DROGraphState:
     _, mon, *_ = _get_agents()
     log = list(state.get("pipeline_log") or [])
     try:
-        anomaly, ms = _timed(
-            mon.process, state["trusted_signal"],
-            persona_context=state.get("persona_context"),
-        )
+        if getattr(mon, "_decision_repository", None) is not None:
+            monitoring_result, ms = _timed(mon.assess_and_store, state["trusted_signal"])
+            anomaly = monitoring_result.anomaly_event
+        else:
+            anomaly, ms = _timed(
+                mon.process, state["trusted_signal"],
+                persona_context=state.get("persona_context"),
+            )
+            monitoring_result = None
         log.append({"node": "monitoring", "status": "ok", "latency_ms": ms,
                     "triggered": anomaly is not None,
                     "data_sources": _sources_monitoring(state["trusted_signal"])})
-        return {**state, "anomaly_event": anomaly, "pipeline_log": log}
+        return {**state, "anomaly_event": anomaly,
+                "monitoring_result": monitoring_result,
+                "pipeline_log": log}
     except Exception as exc:
         logger.error("monitoring failed: %s", exc)
         log.append({"node": "monitoring", "status": "error", "latency_ms": 0})
@@ -333,11 +385,17 @@ def node_prescriptive(state):
 @traceable(name="Agent 7 - Executor", run_type="tool", tags=["dro", "agent-7"])
 def node_executor(state):
     _, agent, _ = _get_action_agents(); log = list(state.get("pipeline_log") or [])
-    result, ms = _timed(
-        agent.process, state["recommendation"],
-        state.get("approval_status") == "approved",
-        persona_context=state.get("persona_context"),
-    )
+    if getattr(agent, "_repository", None) is not None:
+        result, ms = _timed(
+            agent.process_and_store, state["recommendation"],
+            state.get("approval_status") == "approved",
+        )
+    else:
+        result, ms = _timed(
+            agent.process, state["recommendation"],
+            state.get("approval_status") == "approved",
+            persona_context=state.get("persona_context"),
+        )
     log.append({"node":"executor","status":result.status,"latency_ms":ms,
                 "data_sources":_sources_executor(result)})
     return {**state,"execution_result":result,"pipeline_log":log}

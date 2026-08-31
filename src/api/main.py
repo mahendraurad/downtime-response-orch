@@ -17,7 +17,7 @@ Endpoints:
   GET  /api/notifications/counts unread notification counts for all personas
   GET  /api/notifications/{persona_id}         persona notification inbox
   POST /api/notifications/{persona_id}/read    mark all notifications read
-  GET  /api/workorders           in-memory work-order store
+  GET  /api/workorders           runtime work-order store
   POST /api/workorders           create work order
   PATCH /api/workorders/{wo_id}  update WO status / checklist
   WS   /ws/sensors/{asset_id}    stream simulated live sensor ticks
@@ -79,6 +79,7 @@ from src.agents.reflexion_agent import ReflexionAgent
 from src.tools.orchestrator_audit import write_audit
 from src.tools.llm_client import LLMClient
 from src.tools.hitl_repository import build_hitl_repository
+from src.tools.work_order_repository import build_work_order_repository
 from src.tools.persona_formatter import build_persona_context, persona_response_prompt
 from src.tools.governed_rag import GovernedKnowledgeRAG
 from src.tools.observability import flush_observability
@@ -783,11 +784,11 @@ def auth_me(user: Dict = Depends(get_current_user)):
     }
 
 
-# ── In-memory work-order store ────────────────────────────────────────────────
+# ── Runtime work-order store ─────────────────────────────────────────────────
 # Starts empty; work orders are created in real time by the executor pipeline.
+_WORKORDER_REPOSITORY = build_work_order_repository()
 _WORKORDERS: List[Dict] = []
-
-_WO_INDEX = {wo["id"]: wo for wo in _WORKORDERS}
+_WO_INDEX: Dict[str, Dict] = {}
 
 # In-memory HITL session store — keyed by run_id, holds partial pipeline state
 _HITL_STORE: Dict[str, Dict[str, Any]] = {}
@@ -800,6 +801,20 @@ _HITL_TTL = int(_ORCH_CONFIG.get("hitl",{}).get("session_ttl_seconds",1800))
 _HITL_PERMISSIONS = _ORCH_CONFIG.get("hitl",{}).get("permissions",{})
 _HITL_LEASE_SECONDS = int(_ORCH_CONFIG.get("hitl",{}).get("claim_lease_seconds",120))
 _HITL_REPOSITORY = build_hitl_repository(_ORCH_CONFIG)
+
+
+def _list_workorders() -> List[Dict]:
+    return _WORKORDER_REPOSITORY.list_all()
+
+
+def _get_workorder(wo_id: str) -> Optional[Dict]:
+    return _WORKORDER_REPOSITORY.get(wo_id)
+
+
+def _save_workorder(work_order: Dict[str, Any]) -> Dict[str, Any]:
+    saved = _WORKORDER_REPOSITORY.upsert(work_order)
+    _WO_INDEX[saved["id"]] = saved
+    return saved
 
 
 def _remember_chat_context(conversation_id: str, context: dict) -> None:
@@ -1950,6 +1965,9 @@ def executor_run(req: ExecutorRunRequest, user: Dict = Depends(get_current_user)
     require_persona(req.persona, user)
     from src.schemas.recommendation import MaintenanceRecommendation
     from src.agents.executor_agent import ExecutorAgent
+    from src.tools.config_loader import load_executor_config
+    from src.tools.execution_repository import build_execution_repository
+    from src.tools.postgres_runtime import use_postgres_tables
     from src.orchestrator.graph import (
         graph_checkpointing_enabled, resume_pipeline,
     )
@@ -1977,7 +1995,14 @@ def executor_run(req: ExecutorRunRequest, user: Dict = Depends(get_current_user)
                     409, "The persisted approval workflow did not execute."
                 )
         else:
-            result = ExecutorAgent().process(rec, approved=req.approved)
+            if use_postgres_tables():
+                exec_cfg = load_executor_config()
+                result = ExecutorAgent(
+                    exec_cfg,
+                    repository=build_execution_repository(exec_cfg.repository_path),
+                ).process_and_store(rec, approved=req.approved)
+            else:
+                result = ExecutorAgent().process(rec, approved=req.approved)
         if req.approved and result.status in {"success", "partial"}:
             _learning_agent().record_approval(
                 rec.case_id, rec.asset_id, rec.condition.fault_type
@@ -1985,7 +2010,7 @@ def executor_run(req: ExecutorRunRequest, user: Dict = Depends(get_current_user)
             # Bridge HITL-approved WOs into the work-order store so the frontend
             # picks them up via the /api/workorders poll.
             wo_id = result.work_order_id
-            if wo_id and wo_id not in _WO_INDEX:
+            if wo_id and _get_workorder(wo_id) is None:
                 _ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
                 _new_wo: Dict[str, Any] = {
                     "id": wo_id,
@@ -2021,8 +2046,7 @@ def executor_run(req: ExecutorRunRequest, user: Dict = Depends(get_current_user)
                         }
                     ],
                 }
-                _WORKORDERS.append(_new_wo)
-                _WO_INDEX[wo_id] = _new_wo
+                _save_workorder(_new_wo)
         return result.model_dump()
     except HTTPException:
         raise
@@ -2496,21 +2520,19 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
 
 @app.get("/api/workorders")
 def get_workorders():
-    return {"workorders": _WORKORDERS}
+    return {"workorders": _list_workorders()}
 
 
 @app.post("/api/workorders")
 def create_workorder(payload: Dict[str, Any]):
     wo_id = f"WO-{datetime.now(timezone.utc).strftime('%Y-%m%d-%H%M%S')}"
     wo = {"id": wo_id, "status": "Pending", "created_by": "DRO Agent", **payload}
-    _WORKORDERS.append(wo)
-    _WO_INDEX[wo_id] = wo
-    return wo
+    return _save_workorder(wo)
 
 
 @app.patch("/api/workorders/{wo_id}")
 def update_workorder(wo_id: str, req: WOUpdateRequest):
-    wo = _WO_INDEX.get(wo_id)
+    wo = _get_workorder(wo_id)
     if not wo:
         raise HTTPException(404, f"Work order '{wo_id}' not found.")
     if req.status:
@@ -2530,7 +2552,7 @@ def update_workorder(wo_id: str, req: WOUpdateRequest):
         checklist = wo.get("checklist", [])
         if 0 <= req.checklist_index < len(checklist):
             checklist[req.checklist_index]["done"] = req.checklist_done
-    return wo
+    return _save_workorder(wo)
 
 
 # ── WebSocket: live sensor stream ─────────────────────────────────────────────

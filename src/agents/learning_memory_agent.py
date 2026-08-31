@@ -13,22 +13,27 @@ from src.schemas.feedback import (
 )
 from src.tools.config_loader import LearningConfig, load_learning_config
 from src.tools.learned_case_repository import (
-    JSONChatLearningRepository, JSONLearnedCaseRepository, JSONRejectionRepository,
+    build_chat_learning_repository, build_learned_case_repository,
+    build_rejection_repository,
 )
 
 
 # ************** Added by Prateek Mittal on 20th July 2026 ******************
 class LearningMemoryAgent:
     def __init__(self, cfg: LearningConfig = None, repository=None,
-                 rejection_repository=None, llm_client=None, now_fn=None):
+                 rejection_repository=None, chat_observation_repository=None,
+                 llm_client=None, now_fn=None):
         self._cfg = cfg or load_learning_config(); self._cfg.validate()
-        self._repo = repository or JSONLearnedCaseRepository(self._cfg.repository_path)
-        self._rejections = rejection_repository or JSONRejectionRepository(
+        self._repo = repository or build_learned_case_repository(
+            self._cfg.repository_path
+        )
+        self._rejections = rejection_repository or build_rejection_repository(
             self._cfg.rejection_repository_path
         )
-        self._chat_observations = JSONChatLearningRepository(
+        self._chat_observations = (
+            chat_observation_repository or build_chat_learning_repository(
             self._cfg.chat_observation_repository_path
-        )
+        ))
         self._llm = llm_client
         self._now = now_fn or (lambda: datetime.now(timezone.utc))
         self._version = hashlib.sha256(json.dumps(asdict(self._cfg), sort_keys=True).encode()).hexdigest()[:16]

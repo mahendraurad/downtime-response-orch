@@ -64,6 +64,7 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 from src.schemas.bearing_signal import TrustedBearingSignal, ValidationStatus
+from src.tools.postgres_runtime import ensure_runtime_tables, use_postgres_tables
 
 _HERE    = os.path.dirname(os.path.abspath(__file__))
 _CURATED = os.path.normpath(os.path.join(_HERE, "..", "..", "data", "curated_signals.json"))
@@ -144,6 +145,37 @@ def upsert_curated(rows: List[dict], path: str = _CURATED) -> str:
         INSERT INTO curated_signals (...) VALUES (...)
         ON CONFLICT (telemetry_id) DO UPDATE SET ...;
     """
+    if use_postgres_tables():
+        ensure_runtime_tables(("curated_signals",))
+        from src.tools.postgres_runtime import connect
+        with connect() as db:
+            with db.cursor() as cursor:
+                for row in rows:
+                    cursor.execute(
+                        "INSERT INTO curated_signals "
+                        "(telemetry_id,asset_id,bearing_id,validation_status,"
+                        "remediation_action,curated_at,payload_json) "
+                        "VALUES (%s,%s,%s,%s,%s,%s,%s::jsonb) "
+                        "ON CONFLICT(telemetry_id) DO UPDATE SET "
+                        "asset_id=EXCLUDED.asset_id,"
+                        "bearing_id=EXCLUDED.bearing_id,"
+                        "validation_status=EXCLUDED.validation_status,"
+                        "remediation_action=EXCLUDED.remediation_action,"
+                        "curated_at=EXCLUDED.curated_at,"
+                        "payload_json=EXCLUDED.payload_json",
+                        (
+                            row.get("telemetry_id", ""),
+                            row.get("asset_id", ""),
+                            row.get("bearing_id", ""),
+                            row.get("validation_status", ""),
+                            row.get("remediation_action", ""),
+                            row.get("curated_at") or datetime.now(timezone.utc).isoformat(),
+                            json.dumps(row, sort_keys=True),
+                        ),
+                    )
+            db.commit()
+        return "postgres://curated_signals"
+
     os.makedirs(os.path.dirname(path), exist_ok=True)
 
     # Load existing records (keyed by telemetry_id for O(1) lookup).

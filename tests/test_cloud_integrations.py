@@ -8,7 +8,9 @@ from src.tools.azure_search_retriever import (
     AzureSearchRetriever, _escape_filter, _normalize_search_score,
 )
 from src.tools.checkpointing import build_checkpoint_resources
+from src.tools.postgres_runtime import table_backend, use_postgres_tables
 from src.tools.retrieval_backend import build_retrieval_backend
+from src.tools.work_order_repository import InMemoryWorkOrderRepository, build_work_order_repository
 
 
 def test_environment_template_enables_dro_cloud_resources_without_secrets():
@@ -19,6 +21,9 @@ def test_environment_template_enables_dro_cloud_resources_without_secrets():
     assert "AZURE_SEARCH_INDEX_NAME=ai-search-dro" in example
     assert "RAG_BACKEND=azure" in example and "AZURE_SEARCH_AUTH=rbac" in example
     assert "AZURE_BLOB_CONTAINER=sop-dro" in example
+    assert "DRO_TABLE_BACKEND=auto" in example
+    assert "POSTGRES_TABLE_SETUP=false" in example
+    assert "POSTGRES_CONNECT_TIMEOUT_SECONDS=10" in example
     for secret_name in (
         "AZURE_AI_KEY","AZURE_OPENAI_KEY","AZURE_SEARCH_KEY",
         "AZURE_CLIENT_SECRET","AZURE_BLOB_CONNECTION_STRING","POSTGRES_URL",
@@ -160,3 +165,44 @@ def test_invalid_checkpoint_backend_fails_fast(monkeypatch):
     monkeypatch.setenv("CHECKPOINT_BACKEND", "memory-ish")
     with pytest.raises(RuntimeError, match="none or postgres"):
         build_checkpoint_resources()
+
+
+def test_runtime_table_backend_auto_uses_postgres_only_when_url_exists(monkeypatch):
+    monkeypatch.setenv("DRO_TABLE_BACKEND", "auto")
+    monkeypatch.delenv("POSTGRES_URL", raising=False)
+    assert use_postgres_tables() is False
+    monkeypatch.setenv("POSTGRES_URL", "postgresql://user:pass@example/db")
+    assert use_postgres_tables() is True
+
+
+def test_runtime_table_backend_explicit_postgres_requires_url(monkeypatch):
+    monkeypatch.setenv("DRO_TABLE_BACKEND", "postgres")
+    monkeypatch.delenv("POSTGRES_URL", raising=False)
+    with pytest.raises(RuntimeError, match="POSTGRES_URL"):
+        use_postgres_tables()
+
+
+def test_invalid_runtime_table_backend_fails_fast(monkeypatch):
+    monkeypatch.setenv("DRO_TABLE_BACKEND", "memory-ish")
+    with pytest.raises(RuntimeError, match="DRO_TABLE_BACKEND"):
+        table_backend()
+
+
+def test_runtime_table_migration_covers_mutable_tables():
+    sql = Path("migrations/002_runtime_tables_postgres.sql").read_text(encoding="utf-8")
+    for table in (
+        "trusted_signals", "monitoring_decisions", "executions",
+        "learned_cases", "rejection_feedback", "chat_learning_observations",
+        "work_orders", "curated_signals",
+    ):
+        assert f"CREATE TABLE IF NOT EXISTS {table}" in sql
+
+
+def test_work_order_repository_local_fallback_roundtrip(monkeypatch):
+    monkeypatch.setenv("DRO_TABLE_BACKEND", "local")
+    repo = build_work_order_repository()
+    assert isinstance(repo, InMemoryWorkOrderRepository)
+    repo.upsert({"id": "WO-1", "status": "Pending", "asset_id": "AST_MTR_001"})
+    updated = repo.update("WO-1", {"status": "Closed"})
+    assert updated["status"] == "Closed"
+    assert repo.list_all()[0]["id"] == "WO-1"

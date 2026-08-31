@@ -204,6 +204,27 @@ def load_curated_signals(
     Raises FileNotFoundError if the curated table has not been written yet
     (run `python run_demo.py --remediate` first, or process a batch).
     """
+    try:
+        from src.tools.postgres_runtime import ensure_runtime_tables, use_postgres_tables
+        if use_postgres_tables():
+            ensure_runtime_tables(("curated_signals",))
+            where, args = [], []
+            if remediation_action:
+                where.append("remediation_action=%s"); args.append(remediation_action)
+            if asset_id:
+                where.append("asset_id=%s"); args.append(asset_id)
+            sql = "SELECT payload_json::text FROM curated_signals"
+            if where:
+                sql += " WHERE " + " AND ".join(where)
+            sql += " ORDER BY curated_at"
+            from src.tools.postgres_runtime import connect
+            with connect() as db:
+                with db.cursor() as cursor:
+                    cursor.execute(sql, args)
+                    return [json.loads(row[0]) for row in cursor.fetchall()]
+    except RuntimeError:
+        raise
+
     path = os.path.normpath(os.path.join(_DATA_DIR, "curated_signals.json"))
     if not os.path.exists(path):
         raise FileNotFoundError(

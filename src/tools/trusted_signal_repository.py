@@ -12,6 +12,8 @@ from contextlib import closing
 from pathlib import Path
 from typing import Optional
 
+from src.tools.postgres_runtime import ensure_runtime_tables, use_postgres_tables
+
 
 class SQLiteTrustedSignalRepository:
     """Small durable development repository; replace behind this interface for PostgreSQL."""
@@ -84,5 +86,76 @@ class SQLiteTrustedSignalRepository:
     def count(self) -> int:
         with closing(self._connect()) as connection:
             return int(connection.execute("SELECT COUNT(*) FROM trusted_signals").fetchone()[0])
+
+
+class PostgreSQLTrustedSignalRepository:
+    """PostgreSQL trusted-signal repository for shared runtime deployments."""
+
+    def __init__(self):
+        ensure_runtime_tables(("trusted_signals",))
+
+    def exists(self, telemetry_id: str) -> bool:
+        from src.tools.postgres_runtime import connect
+        with connect() as db:
+            with db.cursor() as cursor:
+                cursor.execute(
+                    "SELECT 1 FROM trusted_signals WHERE telemetry_id=%s",
+                    (telemetry_id,),
+                )
+                return cursor.fetchone() is not None
+
+    def latest_event_epoch(self, bearing_id: str) -> Optional[float]:
+        from src.tools.postgres_runtime import connect
+        with connect() as db:
+            with db.cursor() as cursor:
+                cursor.execute(
+                    "SELECT MAX(event_epoch) FROM trusted_signals WHERE bearing_id=%s",
+                    (bearing_id,),
+                )
+                row = cursor.fetchone()
+        return row[0] if row and row[0] is not None else None
+
+    def save(self, trusted_signal, event_epoch: Optional[float]) -> None:
+        payload = json.dumps(trusted_signal.to_dict(), sort_keys=True)
+        from src.tools.postgres_runtime import connect
+        with connect() as db:
+            with db.cursor() as cursor:
+                cursor.execute(
+                    "INSERT INTO trusted_signals "
+                    "(telemetry_id,bearing_id,event_epoch,validation_status,payload_json) "
+                    "VALUES (%s,%s,%s,%s,%s::jsonb)",
+                    (
+                        trusted_signal.raw.telemetry_id,
+                        trusted_signal.raw.bearing_id,
+                        event_epoch,
+                        trusted_signal.validation_status.value,
+                        payload,
+                    ),
+                )
+            db.commit()
+
+    def get(self, telemetry_id: str) -> Optional[dict]:
+        from src.tools.postgres_runtime import connect
+        with connect() as db:
+            with db.cursor() as cursor:
+                cursor.execute(
+                    "SELECT payload_json::text FROM trusted_signals WHERE telemetry_id=%s",
+                    (telemetry_id,),
+                )
+                row = cursor.fetchone()
+        return json.loads(row[0]) if row else None
+
+    def count(self) -> int:
+        from src.tools.postgres_runtime import connect
+        with connect() as db:
+            with db.cursor() as cursor:
+                cursor.execute("SELECT COUNT(*) FROM trusted_signals")
+                return int(cursor.fetchone()[0])
+
+
+def build_trusted_signal_repository(sqlite_path: str):
+    if use_postgres_tables():
+        return PostgreSQLTrustedSignalRepository()
+    return SQLiteTrustedSignalRepository(sqlite_path)
 
 # ***********************

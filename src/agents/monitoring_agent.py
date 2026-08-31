@@ -100,6 +100,13 @@ class MonitoringAgent:
         cfg = load_monitoring_config()
         repository = SQLiteMonitoringDecisionRepository(path or cfg.decision_repository_path)
         return cls(cfg, decision_repository=repository)
+
+    @classmethod
+    def with_runtime_repository(cls) -> "MonitoringAgent":
+        from src.tools.monitoring_decision_repository import build_monitoring_decision_repository
+        cfg = load_monitoring_config()
+        repository = build_monitoring_decision_repository(cfg.decision_repository_path)
+        return cls(cfg, decision_repository=repository)
     # ***********************
 
     # ------------------------------------------------------------------

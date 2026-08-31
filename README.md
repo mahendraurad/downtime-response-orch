@@ -12,11 +12,11 @@ The repository is ready for frontend integration in deterministic local mode and
 | LangGraph conditional orchestration | Implemented |
 | Persona-aware pipeline and chat APIs | Implemented |
 | Human approval and HITL gates | Implemented |
-| Azure PostgreSQL HITL + LangGraph checkpoints | Connected and live-verified |
+| Azure PostgreSQL runtime tables, HITL + LangGraph checkpoints | Connected and live-verified |
 | Reflexion and graceful error envelopes | Implemented |
 | Governed cited open-ended RAG | Implemented with local and Azure Search backends |
-| Local persistence and mock connectors | Implemented |
-| Automated backend tests | `1040 passed` |
+| Local fallback persistence and mock connectors | Implemented |
+| Automated backend tests | `1045 passed` |
 | React frontend from `feature/8agents_frontend` | Integrated on `dev` |
 | Real CMMS/ERP/historian adapters | Next phase |
 
@@ -143,6 +143,7 @@ resources without committing secrets:
 | Azure AI Search RAG | `AZURE_SEARCH_ENDPOINT`, `AZURE_SEARCH_INDEX_NAME`, `RAG_BACKEND=azure`, search field settings, and either `AZURE_SEARCH_KEY` or RBAC |
 | Azure Search RBAC | App Service or developer identity must have `Search Index Data Reader` on the search service/index |
 | PostgreSQL HITL/checkpoints | `POSTGRES_URL` with SSL enabled, plus `POSTGRES_HITL_SETUP=true` and/or `POSTGRES_CHECKPOINT_SETUP=true` only for first-time table setup |
+| PostgreSQL runtime tables | `DRO_TABLE_BACKEND=postgres` or `auto` with `POSTGRES_URL`; run once with `POSTGRES_TABLE_SETUP=true` |
 | LangSmith tracing | `LANGSMITH_TRACING=true`, `LANGSMITH_ENDPOINT`, `LANGSMITH_API_KEY`, and `LANGSMITH_PROJECT` |
 | Langfuse tracing | `LANGFUSE_TRACING=true`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, and `LANGFUSE_BASE_URL` |
 | Frontend API target | `VITE_API_BASE_URL` only when React is hosted separately from the FastAPI backend |
@@ -151,6 +152,26 @@ For Azure App Service deployment, create these as application settings or Key
 Vault references with the same names. For local development, copy
 `.env.example` to an ignored `.env` and populate only the values the developer
 is approved to use.
+
+Runtime table data uses PostgreSQL when `POSTGRES_URL` is present and
+`DRO_TABLE_BACKEND` is `auto` or `postgres`. This covers trusted telemetry
+decisions, monitoring decisions, executor audit/idempotency, Agent 8 learned
+cases/rejections/chat observations, curated signals, and work orders. Static
+configuration, master data, synthetic telemetry and SOP files remain versioned
+files because they are deployment/reference inputs rather than mutable runtime
+tables.
+
+One-time runtime table setup:
+
+```powershell
+python scripts\verify_postgres_runtime_tables.py --setup
+```
+
+Daily verification after setup:
+
+```powershell
+python scripts\verify_postgres_runtime_tables.py
+```
 
 ## Start the backend
 

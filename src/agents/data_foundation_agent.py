@@ -605,4 +605,13 @@ class DataFoundationAgent:
         cfg = load_config()
         repository = SQLiteTrustedSignalRepository(path or cfg.repository_sqlite_path)
         return cls.from_data_files(repository=repository)
+
+    @classmethod
+    def with_runtime_repository(cls) -> "DataFoundationAgent":
+        """Factory for local or PostgreSQL ingestion based on environment."""
+        from src.tools.trusted_signal_repository import build_trusted_signal_repository
+        cfg = load_config()
+        return cls.from_data_files(
+            repository=build_trusted_signal_repository(cfg.repository_sqlite_path)
+        )
     # ***********************
