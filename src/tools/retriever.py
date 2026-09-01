@@ -319,6 +319,37 @@ def knowledge_index_stats() -> Dict[str, int]:
         "chunks": len(_chunks),
         "documents": len({chunk.get("source", "") for chunk in _chunks if chunk.get("source")}),
     }
+
+
+def index_snapshot() -> tuple[List[Dict], np.ndarray, List[str], np.ndarray, np.ndarray]:
+    """Return a read-only-friendly snapshot for alternative vector indexes.
+
+    The snapshot keeps FAISS (and future vector stores) on the same corpus,
+    tokenisation, metadata, and citation contract as the deterministic local
+    retriever. Callers must not mutate the returned arrays or chunk dictionaries.
+    """
+    if not _index_built:
+        build_index()
+    return _chunks, _doc_vecs, _vocab, _idf, np.array(_doc_vecs, copy=True)
+
+
+def query_vector(query: str) -> np.ndarray:
+    """Build the normalized TF-IDF vector used by the local index."""
+    if not _index_built:
+        build_index()
+    v2i = {t: i for i, t in enumerate(_vocab)}
+    q_vec = np.zeros(len(_vocab), dtype=np.float32)
+    tokens = _tokenize(query)
+    for token in tokens:
+        if token in v2i:
+            q_vec[v2i[token]] += 1.0
+    if tokens:
+        q_vec /= len(tokens)
+    q_vec *= _idf
+    norm = np.linalg.norm(q_vec)
+    if norm > 0:
+        q_vec /= norm
+    return q_vec.astype(np.float32)
 # ***********************
 
 

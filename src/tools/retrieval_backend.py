@@ -7,8 +7,13 @@ from typing import Callable, Tuple
 
 def build_retrieval_backend() -> Tuple[Callable, str]:
     backend = os.getenv("RAG_BACKEND", "local").strip().lower()
-    if backend not in {"local", "azure", "auto"}:
-        raise RuntimeError("RAG_BACKEND must be local, azure, or auto")
+    if backend not in {"local", "faiss", "azure", "auto"}:
+        raise RuntimeError("RAG_BACKEND must be local, faiss, azure, or auto")
+
+    if backend == "faiss":
+        from src.tools.faiss_retriever import FaissRetriever
+        faiss = FaissRetriever()
+        return faiss.retrieve, faiss.version()
 
     if backend in {"azure", "auto"}:
         from src.tools.azure_search_retriever import AzureSearchRetriever

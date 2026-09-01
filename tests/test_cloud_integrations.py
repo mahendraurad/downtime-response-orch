@@ -17,11 +17,11 @@ def test_environment_template_enables_dro_cloud_resources_without_secrets():
     example=Path(".env.example").read_text(encoding="utf-8").replace("\r\n","\n")
     assert "AZURE_AI_ENDPOINT=https://proj-boxai-dro-resource.services.ai.azure.com" in example
     assert "AZURE_AI_DEPLOYMENT=gpt-5.4-mini" in example
-    assert "AZURE_SEARCH_ENDPOINT=https://ai-search-dro.search.windows.net" in example
-    assert "AZURE_SEARCH_INDEX_NAME=ai-search-dro" in example
-    assert "RAG_BACKEND=azure" in example and "AZURE_SEARCH_AUTH=rbac" in example
+    assert "AZURE_SEARCH_ENDPOINT=https://dro-rag.search.windows.net" in example
+    assert "AZURE_SEARCH_INDEX_NAME=rag-1788167386616" in example
+    assert "RAG_BACKEND=faiss" in example and "AZURE_SEARCH_AUTH=key" in example
     assert "AZURE_BLOB_CONTAINER=sop-dro" in example
-    assert "DRO_TABLE_BACKEND=auto" in example
+    assert "DRO_TABLE_BACKEND=local" in example
     assert "POSTGRES_TABLE_SETUP=false" in example
     assert "POSTGRES_CONNECT_TIMEOUT_SECONDS=10" in example
     for secret_name in (
@@ -44,6 +44,12 @@ class _FakeSearchClient:
 
 
 def test_azure_search_maps_results_to_agent_5_contract(monkeypatch):
+    # Isolate the fake legacy payload from any developer .env mappings.
+    monkeypatch.setenv("AZURE_SEARCH_CONTENT_FIELD", "content")
+    monkeypatch.setenv("AZURE_SEARCH_SOURCE_FIELD", "source")
+    monkeypatch.setenv("AZURE_SEARCH_FAULT_MODE_FIELD", "fault_mode")
+    monkeypatch.setenv("AZURE_SEARCH_ASSET_TYPE_FIELD", "asset_type")
+    monkeypatch.setenv("AZURE_SEARCH_ISO_STAGE_FIELD", "iso_stage")
     monkeypatch.delenv("AZURE_SEARCH_VECTOR_FIELD", raising=False)
     adapter = AzureSearchRetriever("https://search.example", "secret", "sops")
     client = _FakeSearchClient([{
@@ -147,6 +153,20 @@ def test_auto_rag_backend_falls_back_to_local(monkeypatch):
     assert len(version) == 16
 
 
+def test_faiss_backend_has_explicit_optional_dependency_contract(monkeypatch):
+    monkeypatch.setenv("RAG_BACKEND", "faiss")
+    try:
+        retriever, version = build_retrieval_backend()
+    except RuntimeError as exc:
+        assert "faiss-cpu" in str(exc)
+    else:
+        hits = retriever(query="outer race bearing replacement", top_k=1,
+                         fault_mode="outer_race_fault", asset_type="motor",
+                         iso_stage=3)
+        assert len(version) == 16
+        assert hits and hits[0]["source"]
+
+
 def test_checkpoint_backend_none_has_no_external_dependency(monkeypatch):
     monkeypatch.setenv("CHECKPOINT_BACKEND", "none")
     resources = build_checkpoint_resources()
@@ -198,10 +218,17 @@ def test_runtime_table_migration_covers_mutable_tables():
         assert f"CREATE TABLE IF NOT EXISTS {table}" in sql
 
 
+def test_sqlite_runtime_schema_exports_all_postgres_tables(tmp_path):
+    from scripts.verify_sqlite_runtime_tables import TABLES, verify
+    found = verify(str(tmp_path / "runtime.db"))
+    assert set(TABLES).issubset(found)
+
+
 def test_work_order_repository_local_fallback_roundtrip(monkeypatch):
     monkeypatch.setenv("DRO_TABLE_BACKEND", "local")
     repo = build_work_order_repository()
-    assert isinstance(repo, InMemoryWorkOrderRepository)
+    from src.tools.work_order_repository import SQLiteWorkOrderRepository
+    assert isinstance(repo, SQLiteWorkOrderRepository)
     repo.upsert({"id": "WO-1", "status": "Pending", "asset_id": "AST_MTR_001"})
     updated = repo.update("WO-1", {"status": "Closed"})
     assert updated["status"] == "Closed"
