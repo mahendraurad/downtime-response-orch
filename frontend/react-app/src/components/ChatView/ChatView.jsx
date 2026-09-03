@@ -720,6 +720,10 @@ export default function ChatView() {
           || (queriedAsset && rawPipelineStore[queriedAsset])
           || null;
         const isFreshRequest = /\bfresh\b|\bre-?run\b|\bre-?analys|\bre-?analyze\b|\boverride\b/i.test(t);
+        // Counterfactual questions must be evaluated by the backend.  The
+        // session cache records what actually happened; it cannot answer what
+        // would have happened under a different HITL decision.
+        const isCounterfactual = /\bwhat\s+(?:would|might)\s+have\s+happened\b|\bwhat\s+if\b|\bif\s+(?:i|we)\s+(?:had\s+)?(?:rejected|approved|deferred|accepted)\b|\bcounterfactual\b/i.test(t);
         const hasSessionState = !isFreshRequest && storedForAsset && (
           storedForAsset.status || storedForAsset.monitoringStatus
           || storedForAsset.diagnosisStatus || storedForAsset.remediationAction
@@ -727,7 +731,7 @@ export default function ChatView() {
         // Multi-asset query where 2+ named assets are all in this session's pipeline store —
         // build a combined session card without hitting the backend (which would fail with
         // "asset names alone are not evidence" when it has no fresh fleet snapshot).
-        if (queryAssetIds.length >= 2 && !isFreshRequest) {
+        if (queryAssetIds.length >= 2 && !isFreshRequest && !isCounterfactual) {
           const _ov = (() => { try { return JSON.parse(sessionStorage.getItem('dro-asset-status') || '{}'); } catch { return {}; } })();
           const sessionPairs = queryAssetIds.map(id => {
             const assetObj = (assets || []).find(a => a.id === id || a.asset_id === id);
@@ -803,7 +807,7 @@ export default function ChatView() {
         // Pipeline re-run queries on actioned assets → session cache (no new pipeline run)
         const isSpecificDataQuery = /\bloto\b|\bppe\b|\bsafety\b|\bcompliance\b|\bpermit\b|\baction\b|\btaken\b|\bengineer\b|\bforward|\bisolat/i.test(t);
         const isPipelineQuery = /\banalys|\binspect|\bcheck|\bdiagnos|\bassess|\brun\b|\bfull\b|\bpipeline\b/i.test(t);
-        if (hasSessionState && queriedAsset && isPipelineQuery && !isSpecificDataQuery) {
+        if (hasSessionState && queriedAsset && isPipelineQuery && !isSpecificDataQuery && !isCounterfactual) {
           const chips = buildDefaultChips(persona, assets || [], queriedAsset);
           setContextChips(chips);
           const _assetStatusOvr1 = (() => { try { return JSON.parse(sessionStorage.getItem('dro-asset-status') || '{}'); } catch { return {}; } })();
@@ -817,7 +821,7 @@ export default function ChatView() {
         // where possible (different answer per question), fall through to LLM otherwise.
         // Replaces the old static-card intercepts so every follow-up gets a tailored response.
         const isFollowUpQuery = /\bhealthy?\b|\bhealth\b|\bstatus\b|\bstill\s+(critical|fault|fail)\b|\b(fixed|resolved|repaired|recovered)\b|\bcurrent\b|\bvibration\b|\btemperature\b|\bsensor\b|\brul\b|\brisk\b|\bexposure\b|\bfault\b|\bfailure\b|\bparts?\b|\bcost\b|\bwhat\s+was\b|\bwhat\s+were\b|\bprobabilit|\bwatch\b|\bwait\b|\bdefer\b|\bnext\s+week\b|\bexpect\b|\bshutdown\b|\bweekend\b|\baction\b|\btaken\b|\bloto\b|\bppe\b|\bsafety\b|\bcompliance\b|\bengineer\b/i.test(t);
-        if (hasSessionState && queriedAsset && isFollowUpQuery) {
+        if (hasSessionState && queriedAsset && isFollowUpQuery && !isCounterfactual) {
           const _statusOvr = (() => { try { return JSON.parse(sessionStorage.getItem('dro-asset-status') || '{}'); } catch { return {}; } })();
           const _assetObj  = (assets || []).find(a => a.id === queriedAsset || a.asset_id === queriedAsset);
           const _health    = _statusOvr[queriedAsset] || _statusOvr[_assetObj?.asset_id] || _assetObj?.st;
