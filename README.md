@@ -14,9 +14,9 @@ The repository is ready for frontend integration in deterministic local mode and
 | Human approval and HITL gates | Implemented |
 | Azure PostgreSQL runtime tables, HITL + LangGraph checkpoints | Connected and live-verified |
 | Reflexion and graceful error envelopes | Implemented |
-| Governed cited open-ended RAG | Implemented with local and Azure Search backends |
+| Governed cited open-ended RAG | Implemented with local, FAISS and Azure Search backends |
 | Local fallback persistence and mock connectors | Implemented |
-| Automated backend tests | `1048 passed` |
+| Automated backend tests | `1051 passed` |
 | React frontend from `feature/8agents_frontend` | Integrated on `dev` |
 | Real CMMS/ERP/historian adapters | Next phase |
 
@@ -44,7 +44,7 @@ The orchestrator stops early when data is ineligible, telemetry is healthy, an u
 ```text
 config/       Configurable agent, orchestration, retrieval and safety policies
 data/         Synthetic masters, telemetry scenarios and SOP corpus
-frontend/     Legacy prototype plus the React/Vite application
+frontend/     Legacy prototype and the React/Vite application
 Reference/    Change records, historical developer docs and legacy diagnostics
 scripts/      Agent and demo runners
 src/agents/   Agents 1–8 plus bounded Reflexion Agent
@@ -124,6 +124,13 @@ Manual setup:
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+For the single-instance demo, install the optional FAISS overlay and set
+`RAG_BACKEND=faiss` in the ignored `.env`:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-faiss.txt
 ```
 
 Do not commit `.env`. Copy `.env.example` for local configuration, or create
