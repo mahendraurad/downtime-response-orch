@@ -20,6 +20,7 @@ def test_environment_template_enables_dro_cloud_resources_without_secrets():
     assert "AZURE_SEARCH_ENDPOINT=https://dro-rag.search.windows.net" in example
     assert "AZURE_SEARCH_INDEX_NAME=rag-1788167386616" in example
     assert "RAG_BACKEND=faiss" in example and "AZURE_SEARCH_AUTH=key" in example
+    assert "faiss-cpu" in Path("requirements.txt").read_text(encoding="utf-8")
     assert "AZURE_BLOB_CONTAINER=sop-dro" in example
     assert "DRO_TABLE_BACKEND=local" in example
     assert "POSTGRES_TABLE_SETUP=false" in example
