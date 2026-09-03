@@ -110,7 +110,7 @@ def test_learning_history_headline_contains_actionable_m104_learning(
         "message":"What did you learn from M-104?", "persona":"supervisor"
     }).json()
     assert data["intent"] == "learning_history"
-    assert "Agent 8 learned for M-104" in data["response"]
+    assert "Learning update for M-104" in data["response"]
     assert "fresh telemetry" in data["response"]
 
 

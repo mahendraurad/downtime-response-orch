@@ -80,6 +80,9 @@ from src.tools.orchestrator_audit import write_audit
 from src.tools.llm_client import LLMClient
 from src.tools.hitl_repository import build_hitl_repository
 from src.tools.work_order_repository import build_work_order_repository
+from src.tools.chat_context_repository import load_context as load_durable_chat_context
+from src.tools.chat_context_repository import save_context as save_durable_chat_context
+from src.tools.chat_context_repository import clear_context as clear_durable_chat_context
 from src.tools.persona_formatter import build_persona_context, persona_response_prompt
 from src.tools.governed_rag import GovernedKnowledgeRAG
 from src.tools.observability import flush_observability
@@ -262,7 +265,7 @@ def _learning_history_draft(persona: str, limit: int = 3,
         return ({"persona": persona_context.id,
             "persona_context": persona_context.model_dump(),
             "response": (f"No completed or rejected closure records are available "
-                f"in Agent 8 memory{scope}. Agent 8 learns from both confirmed "
+                f"in the operational learning history{scope}. The system learns "
                 "maintenance completion and recommendation rejection."),
             "details": [], "actions": [], "case_references": [],
             "call_plan": ["agent_8"], "needs_context": False,
@@ -277,14 +280,14 @@ def _learning_history_draft(persona: str, limit: int = 3,
                 f"Learning for {label or record.get('asset_id', 'this asset')}: "
                 f"{record.get('lesson', 'verify the recommendation against current evidence before proceeding')}"
             )
-            references.append(f"Agent 8 operational lesson {case_id}")
+            references.append(f"Operational lesson {case_id}")
         elif record.get("learning_type") == "chat_observation":
             details.append(
                 f"{record.get('observation_id', case_id)}: "
                 f"{record.get('summary', 'chat observation recorded')}"
             )
             references.append(
-                f"Agent 8 chat observation {record.get('observation_id', case_id)}"
+                f"Chat learning observation {record.get('observation_id', case_id)}"
             )
         else:
             details.append(
@@ -307,7 +310,7 @@ def _learning_history_draft(persona: str, limit: int = 3,
              and str(row.get("lesson", "")).strip()),
             "verify the recommendation against current evidence before proceeding",
         )
-        response = (f"{audience}: Agent 8 learned{' for ' + label if label else ''} "
+        response = (f"{audience}: Learning update{' for ' + label if label else ''}: "
                     f"that {lesson} Future recommendations will apply this "
                     "guidance and request the required validation before execution.")
     elif observation_count:
@@ -317,7 +320,7 @@ def _learning_history_draft(persona: str, limit: int = 3,
             and str(row.get("summary", "")).strip()
         ]
         observed = "; ".join(summaries[:3]) if summaries else "a reusable operational pattern"
-        response = (f"{audience}: Agent 8 learned{' for ' + label if label else ''} "
+        response = (f"{audience}: Learning update{' for ' + label if label else ''} "
                     f"from {observation_count} recent observation(s): {observed}")
     else:
         response = (f"{audience}: the last {outcome_count} validated closed failure "
@@ -842,15 +845,15 @@ def _remember_chat_context(conversation_id: str, context: dict) -> None:
     meta=stored.setdefault("_meta",{})
     meta["updated_at"]=time.time()
     meta["turns"]=min(int(meta.get("turns",0))+1,_MAX_CHAT_TURNS+1)
-    _CHAT_CONTEXT_STORE[conversation_id] = stored
+    save_durable_chat_context(conversation_id, stored, _CHAT_CONTEXT_STORE)
 
 
 def _load_chat_context(conversation_id: str) -> dict:
-    context=deepcopy(_CHAT_CONTEXT_STORE.get(conversation_id,{}))
+    context=load_durable_chat_context(conversation_id, _CHAT_CONTEXT_STORE)
     meta=context.get("_meta",{})
     if context and (time.time()-float(meta.get("updated_at",0))>_CHAT_CONTEXT_TTL
                     or int(meta.get("turns",0))>=_MAX_CHAT_TURNS):
-        _CHAT_CONTEXT_STORE.pop(conversation_id,None)
+        clear_durable_chat_context(conversation_id, _CHAT_CONTEXT_STORE)
         return {}
     return context
 
@@ -2250,7 +2253,7 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
     if len(conversation_id)>80 or not re.fullmatch(r"[A-Za-z0-9_.:-]+",conversation_id):
         raise HTTPException(422,"conversation_id contains unsupported characters or is too long.")
     if req.message.strip().lower() in {"reset","start over","new conversation","cancel this request"}:
-        _CHAT_CONTEXT_STORE.pop(conversation_id,None)
+        clear_durable_chat_context(conversation_id, _CHAT_CONTEXT_STORE)
         _reset={"run_id":run_id,"conversation_id":conversation_id,"intent":"reset",
             "persona":selected_persona.id,"persona_context":selected_persona.model_dump(),
             "response":"Conversation context has been cleared.",

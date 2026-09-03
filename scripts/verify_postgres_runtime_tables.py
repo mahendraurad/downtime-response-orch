@@ -28,6 +28,7 @@ RUNTIME_TABLES = (
     "chat_learning_observations",
     "work_orders",
     "curated_signals",
+    "chat_contexts",
 )
 
 

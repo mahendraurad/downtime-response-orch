@@ -702,14 +702,12 @@ export default function ChatView() {
         // Session cache — resolve BEFORE calling backend so we never re-fire HITL gates
         // for assets that have already been actioned in this session.
         const queriedAssetExplicit = queryAssetIds[0] || null;
-        // Fall back to the last explicitly queried asset so follow-up questions
-        // without an asset ID (e.g. "what is the health status now?") still resolve
-        // to the correct asset and hit the session intercept / context injection.
-        const queriedAsset = queriedAssetExplicit || (() => {
-          try { return sessionStorage.getItem('dro-last-queried-asset'); } catch { return null; }
-        })();
+        // Asset answers must come from the backend, not browser session state.
+        // The backend owns durable context and runtime records in PostgreSQL.
+        const queriedAsset = queriedAssetExplicit || null;
         // Only persist when the asset was explicitly named — don't overwrite with the fallback value.
-        if (queriedAssetExplicit) { try { sessionStorage.setItem('dro-last-queried-asset', queriedAssetExplicit); } catch {} }
+        // Do not persist asset identity as an answer source. The backend receives
+        // explicit asset IDs and resolves durable state from PostgreSQL.
         const backendAssetId = queriedAsset ? (assets || []).find(a => a.id === queriedAsset)?.asset_id : null;
         // Read from sessionStorage directly so we always get the latest value regardless of
         // React closure staleness (state batch may not have committed to this render yet).
@@ -731,7 +729,8 @@ export default function ChatView() {
         // Multi-asset query where 2+ named assets are all in this session's pipeline store —
         // build a combined session card without hitting the backend (which would fail with
         // "asset names alone are not evidence" when it has no fresh fleet snapshot).
-        if (queryAssetIds.length >= 2 && !isFreshRequest && !isCounterfactual) {
+        const useSessionAnswerCache = false;
+        if (useSessionAnswerCache && queryAssetIds.length >= 2 && !isFreshRequest && !isCounterfactual) {
           const _ov = (() => { try { return JSON.parse(sessionStorage.getItem('dro-asset-status') || '{}'); } catch { return {}; } })();
           const sessionPairs = queryAssetIds.map(id => {
             const assetObj = (assets || []).find(a => a.id === id || a.asset_id === id);
@@ -807,7 +806,7 @@ export default function ChatView() {
         // Pipeline re-run queries on actioned assets → session cache (no new pipeline run)
         const isSpecificDataQuery = /\bloto\b|\bppe\b|\bsafety\b|\bcompliance\b|\bpermit\b|\baction\b|\btaken\b|\bengineer\b|\bforward|\bisolat/i.test(t);
         const isPipelineQuery = /\banalys|\binspect|\bcheck|\bdiagnos|\bassess|\brun\b|\bfull\b|\bpipeline\b/i.test(t);
-        if (hasSessionState && queriedAsset && isPipelineQuery && !isSpecificDataQuery && !isCounterfactual) {
+        if (useSessionAnswerCache && hasSessionState && queriedAsset && isPipelineQuery && !isSpecificDataQuery && !isCounterfactual) {
           const chips = buildDefaultChips(persona, assets || [], queriedAsset);
           setContextChips(chips);
           const _assetStatusOvr1 = (() => { try { return JSON.parse(sessionStorage.getItem('dro-asset-status') || '{}'); } catch { return {}; } })();
@@ -821,7 +820,7 @@ export default function ChatView() {
         // where possible (different answer per question), fall through to LLM otherwise.
         // Replaces the old static-card intercepts so every follow-up gets a tailored response.
         const isFollowUpQuery = /\bhealthy?\b|\bhealth\b|\bstatus\b|\bstill\s+(critical|fault|fail)\b|\b(fixed|resolved|repaired|recovered)\b|\bcurrent\b|\bvibration\b|\btemperature\b|\bsensor\b|\brul\b|\brisk\b|\bexposure\b|\bfault\b|\bfailure\b|\bparts?\b|\bcost\b|\bwhat\s+was\b|\bwhat\s+were\b|\bprobabilit|\bwatch\b|\bwait\b|\bdefer\b|\bnext\s+week\b|\bexpect\b|\bshutdown\b|\bweekend\b|\baction\b|\btaken\b|\bloto\b|\bppe\b|\bsafety\b|\bcompliance\b|\bengineer\b/i.test(t);
-        if (hasSessionState && queriedAsset && isFollowUpQuery && !isCounterfactual) {
+        if (useSessionAnswerCache && hasSessionState && queriedAsset && isFollowUpQuery && !isCounterfactual) {
           const _statusOvr = (() => { try { return JSON.parse(sessionStorage.getItem('dro-asset-status') || '{}'); } catch { return {}; } })();
           const _assetObj  = (assets || []).find(a => a.id === queriedAsset || a.asset_id === queriedAsset);
           const _health    = _statusOvr[queriedAsset] || _statusOvr[_assetObj?.asset_id] || _assetObj?.st;
@@ -844,7 +843,7 @@ export default function ChatView() {
         // True when the query explicitly names an asset OR when we resolved via fallback
         // so that status-override context injection applies to follow-up questions too.
         const isAssetQuery = queryAssetIds.length > 0 || !!queriedAsset;
-        if (isAssetQuery) {
+        if (useSessionAnswerCache && isAssetQuery) {
           const statusOverrides = (() => {
             try { return JSON.parse(sessionStorage.getItem('dro-asset-status') || '{}'); } catch { return {}; }
           })();
@@ -865,7 +864,7 @@ export default function ChatView() {
           // Inject resolved action context for follow-up questions (RUL, fault details,
           // cost) on assets that were already actioned — prevents the LLM from pulling
           // raw critical-state data and presenting it as the current situation.
-          if (hasSessionState && queriedAsset) {
+          if (useSessionAnswerCache && hasSessionState && queriedAsset) {
             const actionNote = buildResolvedActionNote(queriedAsset, storedForAsset);
             if (actionNote) conversationHistory.unshift({ role: 'assistant', content: actionNote });
           }
@@ -876,7 +875,7 @@ export default function ChatView() {
         // regardless of how the backend routes the request (history may be ignored on
         // certain intent paths). The user already sees the original message via appendU(t).
         let effectiveMessage = t;
-        if (isAssetQuery) {
+        if (useSessionAnswerCache && isAssetQuery) {
           const statusOverridesForMsg = (() => {
             try { return JSON.parse(sessionStorage.getItem('dro-asset-status') || '{}'); } catch { return {}; }
           })();
@@ -2129,7 +2128,7 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
           html += `<div style="font-size:9px;font-weight:700;color:#ef4444;font-family:var(--m);margin-bottom:8px">✗ REJECTED · EXECUTOR RESULT</div>`;
           html += `<div style="font-size:12px;color:var(--t2);margin-bottom:8px">Recommendation rejected — no action taken.</div>`;
           html += `<div style="font-size:11px;color:var(--t3);padding:6px 10px;background:rgba(239,68,68,.04);border-radius:5px;border-left:2px solid rgba(239,68,68,.3)"><strong style="color:var(--t2)">${selectedLabel}</strong></div>`;
-          html += `<div style="font-size:10.5px;color:var(--t2);margin-top:8px">Agent 8 feedback: <strong>${data.status}</strong> · stored: ${data.persistence_status} · consecutive rejections: ${data.consecutive_rejections}</div>`;
+          html += `<div style="font-size:10.5px;color:var(--t2);margin-top:8px">Learning feedback: <strong>${data.status}</strong> · stored: ${data.persistence_status} · consecutive rejections: ${data.consecutive_rejections}</div>`;
           if (data.reliability_review_required) html += `<div style="font-size:11px;color:#f97316;margin-top:6px;font-weight:700">Reliability Engineer review required — ${data.review_reason}</div>`;
           html += `</div>`;
           updateAssetPipelineState(rec.asset_id, {
@@ -2148,7 +2147,7 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
             : `<div style="border:1.5px solid #ef4444;border-radius:8px;padding:10px 12px"><div style="font-size:9px;font-weight:700;color:#ef4444;font-family:var(--m);margin-bottom:5px">✗ FORWARDED REQUEST — REJECTED</div><strong style="color:var(--t)">Your forwarded request for ${rec.asset_id} was rejected by ${actorName}.</strong></div>`;
           pushNotification(msg.requestingPersona, { id: mkId(), type: 'agent', html: notifHtml, routes: ['executor · forwarded result'], chips: [], time: ts() });
         }
-        appendA(html, approved ? ['executor · result'] : ['agent 8 · rejection learning']);
+        appendA(html, approved ? ['executor · result'] : ['learning feedback']);
       } catch (err) {
         const msg403 = err.message?.includes('403')
           ? 'This persona does not have execution authority. Switch to a persona with approval rights (Supervisor, Manager, or Maintenance Planner).'

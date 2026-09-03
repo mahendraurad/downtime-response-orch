@@ -90,3 +90,11 @@ CREATE TABLE IF NOT EXISTS curated_signals (
 );
 CREATE INDEX IF NOT EXISTS ix_curated_signals_asset
     ON curated_signals(asset_id, curated_at DESC);
+
+CREATE TABLE IF NOT EXISTS chat_contexts (
+    conversation_id TEXT PRIMARY KEY,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    payload_json JSONB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_chat_contexts_updated
+    ON chat_contexts(updated_at DESC);
