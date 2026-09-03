@@ -279,9 +279,10 @@ never change deterministic risk or RUL facts. These capability checks use the
 selected persona only; production authentication and trusted RBAC remain a
 separate security requirement.
 
-HITL sessions are durable and atomically claimed. Local development uses
-SQLite; Azure PostgreSQL is supported through `POSTGRES_URL` and
-`HITL_REPOSITORY=postgres`. Configure TTL, claim lease, repository backend,
+HITL sessions are durable and atomically claimed. The deployment baseline uses
+Azure PostgreSQL through `POSTGRES_URL`, `DRO_TABLE_BACKEND=postgres`, and
+`HITL_REPOSITORY=postgres`; SQLite remains available only as an explicit local
+fallback. Configure TTL, claim lease, repository backend,
 SQLite path, and gate permissions under `hitl` in
 `config/orchestrator_config.json`. PostgreSQL schema DDL is versioned in
 `migrations/001_hitl_postgres.sql`.
