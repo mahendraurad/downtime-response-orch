@@ -298,13 +298,27 @@ def _learning_history_draft(persona: str, limit: int = 3,
     rejection_count = sum(row.get("learning_type") == "rejection_feedback" for row in records)
     observation_count = sum(row.get("learning_type") == "chat_observation" for row in records)
     if rejection_count:
-        response = (f"{audience}: Agent 8 has updated the operational guidance"
-                    f"{' for ' + label if label else ''}. "
-                    "Future recommendations will use these lessons and request "
-                    "the required validation before execution.")
+        # Put the lesson in the headline as well as in ``details``.  The
+        # frontend and API consumers are allowed to render only ``response``;
+        # a count-only headline made a valid Agent 8 learning look empty.
+        lesson = next(
+            (str(row.get("lesson", "")).strip() for row in records
+             if row.get("learning_type") == "rejection_feedback"
+             and str(row.get("lesson", "")).strip()),
+            "verify the recommendation against current evidence before proceeding",
+        )
+        response = (f"{audience}: Agent 8 learned{' for ' + label if label else ''} "
+                    f"that {lesson} Future recommendations will apply this "
+                    "guidance and request the required validation before execution.")
     elif observation_count:
-        response = (f"{audience}: Agent 8 found {observation_count} useful "
-                    f"chat observation(s){' for ' + label if label else ''}.")
+        summaries = [
+            str(row.get("summary", "")).strip() for row in records
+            if row.get("learning_type") == "chat_observation"
+            and str(row.get("summary", "")).strip()
+        ]
+        observed = "; ".join(summaries[:3]) if summaries else "a reusable operational pattern"
+        response = (f"{audience}: Agent 8 learned{' for ' + label if label else ''} "
+                    f"from {observation_count} recent observation(s): {observed}")
     else:
         response = (f"{audience}: the last {outcome_count} validated closed failure "
                     f"case{'s' if outcome_count != 1 else ''} are summarized below.")

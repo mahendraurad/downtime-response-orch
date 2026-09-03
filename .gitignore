@@ -17,6 +17,7 @@ env/
 # Environment variables — never commit
 .env
 .env.local
+appservice-settings.local.json
 
 # VS Code
 .vscode/settings.json

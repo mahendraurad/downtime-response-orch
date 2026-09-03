@@ -101,6 +101,19 @@ def test_rejection_is_immediately_queryable_by_asset(client,tmp_path,monkeypatch
     assert data["agent_outputs"]["rejection_learnings"][0]["closure_status"]=="rejected"
 
 
+def test_learning_history_headline_contains_actionable_m104_learning(
+        client,tmp_path,monkeypatch):
+    agent=_agent(tmp_path)
+    _reject(agent, "REC-M104-HEADLINE", "AST_MTR_001", "diagnosis_wrong")
+    monkeypatch.setattr(api, "_learning_agent", lambda: agent)
+    data=client.post("/api/chat", json={
+        "message":"What did you learn from M-104?", "persona":"supervisor"
+    }).json()
+    assert data["intent"] == "learning_history"
+    assert "Agent 8 learned for M-104" in data["response"]
+    assert "fresh telemetry" in data["response"]
+
+
 def test_asset_learning_query_does_not_leak_other_assets(client,tmp_path,monkeypatch):
     agent=_agent(tmp_path)
     _reject(agent,"REC-M104","AST_MTR_001")
