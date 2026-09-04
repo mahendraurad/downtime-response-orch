@@ -838,6 +838,36 @@ def _save_workorder(work_order: Dict[str, Any]) -> Dict[str, Any]:
     return saved
 
 
+def _asset_lifecycle(asset_id: str) -> Optional[Dict[str, Any]]:
+    """Return the latest backend work-order lifecycle for an asset.
+
+    Chat status answers must reflect durable work-order state, not browser
+    session overrides.  A pending/scheduled/in-progress intervention means
+    the asset is under controlled maintenance (warning); a closed intervention
+    means the repair is complete (healthy).
+    """
+    key = str(asset_id or "").strip().upper()
+    if not key:
+        return None
+    rows = []
+    for row in _list_workorders():
+        candidates = (row.get("asset_id"), row.get("asset_display"), row.get("as"))
+        if any(str(value or "").strip().upper() == key for value in candidates):
+            rows.append(row)
+    if not rows:
+        return None
+    row = max(rows, key=lambda item: str(item.get("updated_at", "")))
+    status = str(row.get("status", "")).strip().lower()
+    if status == "closed":
+        lifecycle = "healthy"
+    elif status in {"pending", "scheduled", "in progress", "in_progress"}:
+        lifecycle = "warning"
+    else:
+        return None
+    return {"status": lifecycle, "work_order_id": row.get("id", ""),
+            "work_order_status": row.get("status", "")}
+
+
 def _remember_chat_context(conversation_id: str, context: dict) -> None:
     if conversation_id not in _CHAT_CONTEXT_STORE and len(_CHAT_CONTEXT_STORE) >= _MAX_CHAT_CONTEXTS:
         _CHAT_CONTEXT_STORE.pop(next(iter(_CHAT_CONTEXT_STORE)))
@@ -2444,6 +2474,16 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
             )
             context.setdefault("per_asset_signals", {})[signal.get("asset_id", "")] = deepcopy(signal)
             formatted=format_for_persona(state,req.persona)
+            lifecycle = _asset_lifecycle(supplied_asset or signal.get("asset_id", ""))
+            if lifecycle and plan.intent == "status":
+                lifecycle_label = "healthy after the completed maintenance" if lifecycle["status"] == "healthy" else "warning while the approved maintenance is pending"
+                formatted["headline"] = (
+                    f"{supplied_asset or signal.get('asset_id', '')} — Current status is {lifecycle_label}. "
+                    f"Work order {lifecycle['work_order_id'] or 'on record'} is {lifecycle['work_order_status'] or 'active'}."
+                )
+                formatted["actions"] = [] if lifecycle["status"] == "healthy" else [
+                    "Complete the approved maintenance work order and verify post-repair readings"
+                ]
             _pipeline_headline=formatted.get("headline","Analysis complete.")
             _persona_context = build_persona_context(req.persona)
             draft={"persona":_persona_context.id,"persona_context":_persona_context.model_dump(),"response":_pipeline_headline,"details":formatted.get("details",[]),"actions":formatted.get("actions",[]),"call_plan":list(plan.agents),"needs_context":False,"clarification_required":False,
