@@ -712,21 +712,16 @@ export default function ChatView() {
         const backendAssetId = queriedAsset ? (assets || []).find(a => a.id === queriedAsset)?.asset_id : null;
         // Read from sessionStorage directly so we always get the latest value regardless of
         // React closure staleness (state batch may not have committed to this render yet).
-        const rawPipelineStore = (() => {
-          try { const r = sessionStorage.getItem('dro-asset-pipeline'); return r ? JSON.parse(r) : {}; } catch { return {}; }
-        })();
-        const storedForAsset = (backendAssetId && rawPipelineStore[backendAssetId])
-          || (queriedAsset && rawPipelineStore[queriedAsset])
-          || null;
+        // Browser pipeline state is UI history only. It must never suppress a
+        // backend response, rewrite its wording, or decide whether HITL runs.
+        const rawPipelineStore = {};
+        const storedForAsset = null;
         const isFreshRequest = /\bfresh\b|\bre-?run\b|\bre-?analys|\bre-?analyze\b|\boverride\b/i.test(t);
         // Counterfactual questions must be evaluated by the backend.  The
         // session cache records what actually happened; it cannot answer what
         // would have happened under a different HITL decision.
         const isCounterfactual = /\bwhat\s+(?:would|might)\s+have\s+happened\b|\bwhat\s+if\b|\bif\s+(?:i|we)\s+(?:had\s+)?(?:rejected|approved|deferred|accepted)\b|\bcounterfactual\b/i.test(t);
-        const hasSessionState = !isFreshRequest && storedForAsset && (
-          storedForAsset.status || storedForAsset.monitoringStatus
-          || storedForAsset.diagnosisStatus || storedForAsset.remediationAction
-        );
+        const hasSessionState = false;
         // Multi-asset query where 2+ named assets are all in this session's pipeline store —
         // build a combined session card without hitting the backend (which would fail with
         // "asset names alone are not evidence" when it has no fresh fleet snapshot).
