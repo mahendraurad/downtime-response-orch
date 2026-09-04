@@ -9,7 +9,9 @@ import { activeEscalationStep, remainingSeconds } from '../utils/escalationTimer
 
 export const AppContext = createContext(null);
 
-const SESSION_KEY = 'dro-chat';
+// Bump the UI history key whenever response authority changes. This prevents
+// cards rendered by older bundles from reappearing after deployment.
+const SESSION_KEY = 'dro-chat-v2';
 const ASSET_PIPELINE_KEY = 'dro-asset-pipeline';
 const ASSET_STATUS_KEY = 'dro-asset-status';
 const WO_STATUS_KEY = 'dro-wo-status';
