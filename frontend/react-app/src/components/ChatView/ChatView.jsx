@@ -665,8 +665,9 @@ export default function ChatView() {
 
     // All queries go to /api/chat. The backend LLM classifier decides whether
     // this is a new pipeline request, a conversational follow-up, or general knowledge.
-    // Conversation history is included so the classifier understands follow-up context.
-    // (Future: swap this history source for a Cosmos DB episode fetch.)
+    // The backend conversation ID is the sole context authority. Do not send
+    // browser-restored messages back as evidence; stale session history must not
+    // influence a fresh response.
     // For asset-specific queries keep 8 turns of history for full context.
     // For general/fleet questions keep only 2 turns — otherwise prior asset analysis
     // bleeds into unrelated answers (e.g. "what do 16 alerts mean?" getting answered
@@ -914,7 +915,7 @@ export default function ChatView() {
               ? { last_referenced_document: lastKnowledgeRef.current.sop_id }
               : {}),
           },
-          conversationHistory,
+          conversationHistory: [],
         });
         conversationIdRef.current = d.conversation_id || conversationIdRef.current;
         const pl = withFallbackTimings(d.pipeline_log || []);
