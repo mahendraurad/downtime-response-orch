@@ -23,6 +23,26 @@ def _agent(tmp_path):
     return LearningMemoryAgent(cfg)
 
 
+def test_asset_lifecycle_reads_backend_work_order_state(monkeypatch):
+    monkeypatch.setattr(api, "_list_workorders", lambda: [
+        {"id": "WO-1", "asset_id": "AST_MTR_001", "status": "Pending",
+         "updated_at": "2026-09-04T10:00:00+00:00"},
+    ])
+    assert api._asset_lifecycle("AST_MTR_001") == {
+        "status": "warning", "work_order_id": "WO-1", "work_order_status": "Pending",
+    }
+
+
+def test_asset_lifecycle_marks_closed_work_order_healthy(monkeypatch):
+    monkeypatch.setattr(api, "_list_workorders", lambda: [
+        {"id": "WO-1", "asset_id": "AST_MTR_001", "status": "Pending",
+         "updated_at": "2026-09-04T09:00:00+00:00"},
+        {"id": "WO-1", "asset_id": "AST_MTR_001", "status": "Closed",
+         "updated_at": "2026-09-04T10:00:00+00:00"},
+    ])
+    assert api._asset_lifecycle("AST_MTR_001")["status"] == "healthy"
+
+
 def _reject(agent, case_id="REC-1", asset_id="AST_MTR_001",
             fault_mode="outer_race_fault", rejected_at="2026-08-26T10:00:00Z"):
     return agent.record_rejection(RejectionFeedback(
