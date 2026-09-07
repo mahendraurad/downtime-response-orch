@@ -11,6 +11,7 @@ const WO_ASSIGNEES = {
   'Pending':     'Plant Supervisor / Plant Manager / VP Operations',
   'Scheduled':   'Plant Supervisor',
   'In Progress': 'Plant Supervisor / Maintenance Planner',
+  'Rejected':    'None (Rejected)',
 };
 
 // actions — real system actions (status transitions, export). Rendered as buttons.
