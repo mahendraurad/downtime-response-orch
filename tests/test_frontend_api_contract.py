@@ -118,6 +118,8 @@ def test_frontend_uses_backend_contracts_for_group_a():
     assert "buildExecutionSteps" not in chat
     assert "fetchChatHistory" in chat
     assert "dro-conversation-v1-" in chat
+    assert "SessionStorage is presentation-only" in chat
+    assert "setMessages([])" in chat
 
 
 def test_pipeline_approval_contract_includes_timed_persona_escalation(client):

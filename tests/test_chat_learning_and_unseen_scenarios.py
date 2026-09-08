@@ -43,6 +43,58 @@ def test_asset_lifecycle_marks_closed_work_order_healthy(monkeypatch):
     assert api._asset_lifecycle("AST_MTR_001")["status"] == "healthy"
 
 
+@pytest.mark.parametrize("work_order_status", [
+    "Approved", "Open", "Active", "Scheduled", "In Progress", "in_progress",
+])
+def test_asset_lifecycle_keeps_approved_work_order_warning_after_restart(
+        monkeypatch, work_order_status):
+    """A persisted active WO must override the raw pre-intervention projection."""
+    monkeypatch.setattr(api, "_list_workorders", lambda: [{
+        "id": "WO-ACTIVE", "asset_id": "AST_MTR_001", "status": work_order_status,
+        "updated_at": "2026-09-08T10:00:00+00:00",
+    }])
+    lifecycle = api._asset_lifecycle("M-104")
+    assert lifecycle["status"] == "warning"
+    assert lifecycle["work_order_id"] == "WO-ACTIVE"
+
+
+def test_asset_lifecycle_preserves_latest_rejection_as_unresolved_risk(monkeypatch):
+    """Rejection is a valid Agent 8 closure, not evidence of a repaired asset."""
+    class Agent:
+        def recent_rejections(self, limit=1, asset_id=""):
+            assert asset_id == "M-104"
+            return [{
+                "case_id": "CASE-REJECTED", "asset_id": "M-104",
+                "fault_mode": "outer_race_fault", "recorded_at": "2026-09-08T11:00:00+00:00",
+            }]
+
+    monkeypatch.setattr(api, "_list_workorders", lambda: [])
+    monkeypatch.setattr(api, "_learning_agent", lambda: Agent())
+    lifecycle = api._asset_lifecycle("M-104")
+    assert lifecycle["status"] == "critical"
+    assert lifecycle["decision"] == "rejected"
+    assert lifecycle["work_order_status"] == "Rejected"
+
+
+def test_chat_status_after_rejection_does_not_claim_asset_healthy(client, monkeypatch):
+    """The next status question must use durable decision state, not raw DFA text."""
+    monkeypatch.setattr(api, "_asset_lifecycle", lambda asset_id: {
+        "status": "critical", "work_order_id": "", "work_order_status": "Rejected",
+        "decision": "rejected",
+    })
+    monkeypatch.setattr(api, "format_for_persona", lambda state, persona: {
+        "headline": "M-104 — No fault detected. Asset healthy.",
+        "details": [], "actions": [],
+    })
+    data = client.post("/api/chat", json={
+        "message": "What is the current status of M-104?",
+        "persona": "supervisor",
+    }).json()
+    assert "critical" in data["response"].lower()
+    assert "rejected" in data["response"].lower()
+    assert "healthy" not in data["response"].lower()
+
+
 def _reject(agent, case_id="REC-1", asset_id="AST_MTR_001",
             fault_mode="outer_race_fault", rejected_at="2026-08-26T10:00:00Z"):
     return agent.record_rejection(RejectionFeedback(

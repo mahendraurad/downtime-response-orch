@@ -852,20 +852,90 @@ def _asset_lifecycle(asset_id: str) -> Optional[Dict[str, Any]]:
     key = str(asset_id or "").strip().upper()
     if not key:
         return None
+    lookup_keys = {key}
+    for display_id, (canonical_id, _) in _MULTI_ASSET_SCENARIOS.items():
+        if str(display_id).strip().upper() == key:
+            lookup_keys.add(str(canonical_id).strip().upper())
     rows = []
     for row in _list_workorders():
         candidates = (row.get("asset_id"), row.get("asset_display"), row.get("as"))
-        if any(str(value or "").strip().upper() == key for value in candidates):
+        if any(str(value or "").strip().upper() in lookup_keys for value in candidates):
             rows.append(row)
-    if not rows:
-        return None
-    row = max(rows, key=lambda item: str(item.get("updated_at", "")))
-    status = str(row.get("status", "")).strip().lower()
-    if status == "closed":
+    row = max(rows, key=lambda item: str(item.get("updated_at", ""))) if rows else {}
+
+    # A recommendation can be approved before the executor/CMMS reports its
+    # first operational status.  Treat all known active states consistently so
+    # a restart cannot expose the raw pre-intervention critical projection.
+    status = str(row.get("status", "")).strip().lower().replace("-", " ")
+    closed_statuses = {"closed", "completed", "complete", "done"}
+    active_statuses = {
+        "pending", "approved", "open", "active", "queued", "assigned",
+        "scheduled", "in progress", "in_progress", "in review",
+    }
+    if status in closed_statuses:
         lifecycle = "healthy"
-    elif status in {"pending", "scheduled", "in progress", "in_progress"}:
+    elif status in active_statuses:
         lifecycle = "warning"
+    elif status in {"rejected", "declined", "deferred", "cancelled", "canceled"}:
+        # Some CMMS adapters materialise a rejected decision as a non-action
+        # work-order row.  It is not a repair and must not be shown healthy.
+        return {
+            "status": "critical", "work_order_id": row.get("id", ""),
+            "work_order_status": row.get("status", ""),
+            "decision": "rejected",
+        }
     else:
+        lifecycle = None
+
+    # A rejection is a valid Agent 8 closure, but it is not a physical repair.
+    # If it is newer than the last work-order state, preserve the unresolved
+    # risk in status answers rather than allowing the status-depth pipeline to
+    # turn it into a false healthy result.
+    rejection_rows = []
+    try:
+        learning_agent = _learning_agent()
+        for rejection_key in lookup_keys:
+            try:
+                rows_for_key = learning_agent.recent_rejections(
+                    limit=1, asset_id=rejection_key
+                )
+            except Exception:
+                # A repository may support only one identifier form; continue
+                # with the display/canonical aliases that are available.
+                rows_for_key = []
+            rejection_rows.extend(
+                rows_for_key
+            )
+    except Exception:
+        rejection_rows = []
+    rejection_rows.sort(
+        key=lambda item: str(
+            item.get("recorded_at")
+            or item.get("decided_at")
+            or item.get("rejected_at")
+            or ""
+        ),
+        reverse=True,
+    )
+    latest_rejection = rejection_rows[0] if rejection_rows else None
+    if latest_rejection:
+        row_time = str(row.get("updated_at", ""))
+        rejection_time = str(
+            latest_rejection.get("recorded_at")
+            or latest_rejection.get("decided_at")
+            or latest_rejection.get("rejected_at")
+            or ""
+        )
+        if not row_time or rejection_time >= row_time:
+            return {
+                "status": "critical", "work_order_id": row.get("id", "") if lifecycle else "",
+                "work_order_status": row.get("status", "") if lifecycle else "Rejected",
+                "decision": "rejected",
+                "fault_mode": latest_rejection.get("fault_mode", ""),
+                "decision_at": rejection_time,
+            }
+
+    if lifecycle is None:
         return None
     return {"status": lifecycle, "work_order_id": row.get("id", ""),
             "work_order_status": row.get("status", "")}
@@ -2536,14 +2606,31 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
             formatted=format_for_persona(state,req.persona)
             lifecycle = _asset_lifecycle(supplied_asset or signal.get("asset_id", ""))
             if lifecycle and plan.intent == "status":
-                lifecycle_label = "healthy after the completed maintenance" if lifecycle["status"] == "healthy" else "warning while the approved maintenance is pending"
+                asset_label = supplied_asset or signal.get("asset_id", "")
+                if lifecycle.get("decision") == "rejected":
+                    lifecycle_label = (
+                        "critical — the latest maintenance recommendation was rejected "
+                        "and the underlying risk remains unresolved"
+                    )
+                    lifecycle_action = (
+                        "Obtain fresh telemetry or Reliability Engineer review before "
+                        "continuing operation"
+                    )
+                elif lifecycle["status"] == "healthy":
+                    lifecycle_label = "healthy after the completed maintenance"
+                    lifecycle_action = None
+                else:
+                    lifecycle_label = "warning while the approved maintenance is pending"
+                    lifecycle_action = (
+                        "Complete the approved maintenance work order and verify "
+                        "post-repair readings"
+                    )
                 formatted["headline"] = (
-                    f"{supplied_asset or signal.get('asset_id', '')} — Current status is {lifecycle_label}. "
-                    f"Work order {lifecycle['work_order_id'] or 'on record'} is {lifecycle['work_order_status'] or 'active'}."
+                    f"{asset_label} — Current status is {lifecycle_label}. "
+                    f"Work order {lifecycle['work_order_id'] or 'on record'} is "
+                    f"{lifecycle['work_order_status'] or 'active'}."
                 )
-                formatted["actions"] = [] if lifecycle["status"] == "healthy" else [
-                    "Complete the approved maintenance work order and verify post-repair readings"
-                ]
+                formatted["actions"] = [lifecycle_action] if lifecycle_action else []
             _pipeline_headline=formatted.get("headline","Analysis complete.")
             _persona_context = build_persona_context(req.persona)
             draft={"persona":_persona_context.id,"persona_context":_persona_context.model_dump(),"response":_pipeline_headline,"details":formatted.get("details",[]),"actions":formatted.get("actions",[]),"call_plan":list(plan.agents),"needs_context":False,"clarification_required":False,

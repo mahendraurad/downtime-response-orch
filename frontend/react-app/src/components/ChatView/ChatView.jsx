@@ -533,10 +533,13 @@ export default function ChatView() {
     let storedConversation = null;
     try { storedConversation = localStorage.getItem(conversationStorageKey); } catch {}
     conversationIdRef.current = storedConversation;
+    // SessionStorage is presentation-only. Clear it before restoring so an
+    // old browser transcript cannot appear when the backend has no durable
+    // conversation for this user/persona.
+    setMessages([]);
     setUsedChips(new Set());
     setContextChips(buildDefaultChips(persona, assets || []));
-    if (storedConversation || !messages || messages.length === 0) {
-      if (storedConversation) {
+    if (storedConversation) {
         fetchChatHistory(storedConversation).then(payload => {
           if (!active) return;
           const restored = [];
@@ -561,10 +564,9 @@ export default function ChatView() {
             });
           });
           if (restored.length) setMessages(restored); else renderChatHome();
-        }).catch(() => { if (!messages || messages.length === 0) renderChatHome(); });
-      } else {
-        renderChatHome();
-      }
+        }).catch(() => { if (active) renderChatHome(); });
+    } else {
+      renderChatHome();
     }
     if (inpRef.current) {
       inpRef.current.placeholder = `Ask as ${p.nm.split(' — ')[0]}: faults, risk, decisions, what-if…`;
