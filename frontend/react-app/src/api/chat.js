@@ -34,3 +34,9 @@ export async function askChat({
   }
   return resp.json();
 }
+
+export async function fetchChatHistory(conversationId) {
+  const resp = await authedFetch(`${API}/api/chat/history/${encodeURIComponent(conversationId)}`);
+  if (!resp.ok) throw new Error(`Chat history request failed (HTTP ${resp.status}).`);
+  return resp.json();
+}

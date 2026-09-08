@@ -13,8 +13,6 @@ export const AppContext = createContext(null);
 // cards rendered by older bundles from reappearing after deployment.
 const SESSION_KEY = 'dro-chat-v2';
 const ASSET_PIPELINE_KEY = 'dro-asset-pipeline';
-const ASSET_STATUS_KEY = 'dro-asset-status';
-const WO_STATUS_KEY = 'dro-wo-status';
 
 const WO_FALLBACK = Object.fromEntries(WOS.map(wo => [wo.id, wo]));
 
@@ -29,24 +27,6 @@ function saveAssetPipeline(map) {
   try {
     sessionStorage.setItem(ASSET_PIPELINE_KEY, JSON.stringify(map));
   } catch {}
-}
-
-// Persists asset status overrides (e.g. critical → healthy after WO closure) so they
-// survive a page refresh — the backend re-fetch would otherwise reset them.
-function loadAssetStatusOverrides() {
-  try { return JSON.parse(sessionStorage.getItem(ASSET_STATUS_KEY) || '{}'); } catch { return {}; }
-}
-function saveAssetStatusOverrides(map) {
-  try { sessionStorage.setItem(ASSET_STATUS_KEY, JSON.stringify(map)); } catch {}
-}
-
-// Persists WO status overrides as a safety net in case patchWorkOrder doesn't reach
-// the backend (or the backend doesn't persist between restarts).
-function loadWOStatusOverrides() {
-  try { return JSON.parse(sessionStorage.getItem(WO_STATUS_KEY) || '{}'); } catch { return {}; }
-}
-function saveWOStatusOverrides(map) {
-  try { sessionStorage.setItem(WO_STATUS_KEY, JSON.stringify(map)); } catch {}
 }
 
 // Enrichment data saved at executor HITL approval time — carries risk, cost, RUL,
@@ -140,8 +120,6 @@ export function AppProvider({ children }) {
   }, []);
 
   const updateAssetStatus = useCallback((assetId, newStatus) => {
-    const overrides = loadAssetStatusOverrides();
-    saveAssetStatusOverrides({ ...overrides, [assetId]: newStatus });
     const applyStatus = a =>
       (a.id === assetId || a.asset_id === assetId) ? { ...a, st: newStatus } : a;
     setAssets(prev => prev.map(applyStatus));
@@ -184,15 +162,10 @@ export function AppProvider({ children }) {
         };
       });
       if (rows.length) {
-        // Re-apply any status changes made during the session (e.g. asset marked healthy
-        // after WO closure) that the backend doesn't know about yet.
-        const statusOverrides = loadAssetStatusOverrides();
-        const finalRows = rows.map(r => {
-          const override = statusOverrides[r.asset_id] || statusOverrides[r.id];
-          return override ? { ...r, st: override } : r;
-        });
-        setAssets(finalRows);
-        setSelectedAsset(current => finalRows.find(a => a.id === current?.id) || finalRows[0]);
+        // The dashboard API is authoritative. Lifecycle status is derived from
+        // the durable work-order repository; session state must not overwrite it.
+        setAssets(rows);
+        setSelectedAsset(current => rows.find(a => a.id === current?.id) || rows[0]);
         setDataStatus(current => ({ ...current, assets: payload.source || 'backend' }));
       }
       setAssetsLoaded(true);
@@ -205,14 +178,10 @@ export function AppProvider({ children }) {
       if (!active) return;
       const rows = mergeWOs(payload);
       if (rows.length) {
-        // Re-apply WO status changes in case the backend didn't persist them.
-        const woOverrides = loadWOStatusOverrides();
-        const finalRows = rows.map(wo => {
-          const override = woOverrides[wo.id];
-          return override ? { ...wo, st: override } : wo;
-        });
-        setWorkOrders(finalRows);
-        setSelectedWO(current => finalRows.find(wo => wo.id === current?.id) || finalRows[0]);
+        // Work-order status comes from the backend repository. Do not let
+        // browser session state mask a failed or stale persistence update.
+        setWorkOrders(rows);
+        setSelectedWO(current => rows.find(wo => wo.id === current?.id) || rows[0]);
         setDataStatus(current => ({ ...current, workOrders: 'backend' }));
       }
     }).catch(() => setDataStatus(current => ({ ...current, workOrders: 'fallback' })));
@@ -224,19 +193,14 @@ export function AppProvider({ children }) {
         if (!active) return;
         const rows = mergeWOs(payload);
         if (rows.length) {
-          const woOverrides = loadWOStatusOverrides();
-          const finalRows = rows.map(wo => {
-            const override = woOverrides[wo.id];
-            return override ? { ...wo, st: override } : wo;
-          });
           setWorkOrders(prev => {
             // Only update if something actually changed (new WO count or status diff)
-            const hasNew = finalRows.length !== prev.length ||
-              finalRows.some(r => {
+            const hasNew = rows.length !== prev.length ||
+              rows.some(r => {
                 const existing = prev.find(p => p.id === r.id);
                 return !existing || existing.st !== r.st;
               });
-            return hasNew ? finalRows : prev;
+            return hasNew ? rows : prev;
           });
         }
       }).catch(() => {});
@@ -400,10 +364,6 @@ export function AppProvider({ children }) {
       ? { ...wo, st: newStatus, tl: [timeEntry, ...(wo.tl || [])] }
       : wo;
 
-    // Persist WO status so it survives a page refresh
-    const woOverrides = loadWOStatusOverrides();
-    saveWOStatusOverrides({ ...woOverrides, [id]: newStatus });
-
     setWorkOrders(prev => {
       // When WO is closed, mark the associated asset as healthy (maintenance complete)
       if (newStatus === 'Closed') {
@@ -412,14 +372,6 @@ export function AppProvider({ children }) {
           const applyHealthy = a =>
             (a.id === wo.as || a.asset_id === wo.as) ? { ...a, st: 'healthy' } : a;
           setAssets(currentAssets => {
-            // Save under BOTH the backend ID (wo.as) and the frontend ID (e.g. 'M-124').
-            // Approval wrote 'warning' under the frontend ID — closing must overwrite that
-            // same key with 'healthy', otherwise the chat status lookup returns stale data.
-            const frontendId = currentAssets.find(a => a.id === wo.as || a.asset_id === wo.as)?.id;
-            const statusOverrides = loadAssetStatusOverrides();
-            const updated = { ...statusOverrides, [wo.as]: 'healthy' };
-            if (frontendId && frontendId !== wo.as) updated[frontendId] = 'healthy';
-            saveAssetStatusOverrides(updated);
             return currentAssets.map(applyHealthy);
           });
           setSelectedAsset(sel => sel ? applyHealthy(sel) : sel);

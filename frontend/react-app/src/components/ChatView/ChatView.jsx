@@ -1,5 +1,6 @@
 import React, { useContext, useEffect, useRef, useState, useCallback } from 'react';
 import { AppContext, saveWOEnrichment } from '../../context/AppContext';
+import { useAuth } from '../../context/AuthContext';
 import { PD, resolvePersonaData } from '../../data/personas';
 import { ts } from '../../utils/helpers';
 import {
@@ -163,7 +164,7 @@ function buildCorrelation(newRec, existingRecs) {
   }
   return null;
 }
-import { askChat } from '../../api/chat';
+import { askChat, fetchChatHistory } from '../../api/chat';
 import { resolveHITLRemediation, resolveHITLMonitoring, resolveHITLDiagnosis, resolveHITLKnowledge, resolveHITLAdvisory, runExecutor, rejectRecommendation } from '../../api/pipeline';
 import ChatSidebar from './ChatSidebar';
 
@@ -500,6 +501,7 @@ function buildComparisonHtml(a1, a2, persona) {
 
 export default function ChatView() {
   const { persona, messages, setMessages, addMessage, assets, workOrders, assetPipelineState, updateAssetPipelineState, updateAssetStatus } = useContext(AppContext);
+  const { user } = useAuth();
   const fleetSummary = {
     total: assets?.length || 0,
     critical: assets?.filter(asset => asset.st === 'critical').length || 0,
@@ -514,6 +516,7 @@ export default function ChatView() {
   const msgsRef = useRef(null);
   const inpRef = useRef(null);
   const conversationIdRef = useRef(null);
+  const conversationStorageKey = `dro-conversation-v1-${user?.username || 'anonymous'}-${persona}`;
   const shownExecRecsRef = useRef([]);
   // Caches the latest knowledge_guidance so document names survive across follow-up queries
   const lastKnowledgeRef = useRef(null);
@@ -526,17 +529,49 @@ export default function ChatView() {
 
   // On persona switch: reset conversation, restore stored history or show home
   useEffect(() => {
-    conversationIdRef.current = null;
+    let active = true;
+    let storedConversation = null;
+    try { storedConversation = localStorage.getItem(conversationStorageKey); } catch {}
+    conversationIdRef.current = storedConversation;
     setUsedChips(new Set());
     setContextChips(buildDefaultChips(persona, assets || []));
-    if (!messages || messages.length === 0) {
-      renderChatHome();
+    if (storedConversation || !messages || messages.length === 0) {
+      if (storedConversation) {
+        fetchChatHistory(storedConversation).then(payload => {
+          if (!active) return;
+          const restored = [];
+          (payload.messages || []).forEach((row, index) => {
+            const result = row.response || {};
+            restored.push({
+              id: `${row.run_id || storedConversation}-user-${index}`,
+              type: 'user', text: row.user_message || '', time: row.created_at || ts(),
+            });
+            const details = Array.isArray(result.details) && result.details.length
+              ? '<br><br>' + result.details.map(x => '• ' + x).join('<br>') : '';
+            const actions = Array.isArray(result.actions) && result.actions.length
+              ? '<br><br><strong>Actions:</strong><br>' + result.actions.map(x => '→ ' + x).join('<br>') : '';
+            const learning = result.learning_observation
+              ? buildLearningHtml(result.learning_observation) : '';
+            restored.push({
+              id: `${row.run_id || storedConversation}-agent-${index}`,
+              type: 'agent',
+              html: sanitizeResponse(result.response || '') + details + actions + learning,
+              routes: (result.pipeline_log || []).map(n => n.node || ''),
+              pipelineLog: result.pipeline_log || [], time: row.created_at || ts(),
+            });
+          });
+          if (restored.length) setMessages(restored); else renderChatHome();
+        }).catch(() => { if (!messages || messages.length === 0) renderChatHome(); });
+      } else {
+        renderChatHome();
+      }
     }
     if (inpRef.current) {
       inpRef.current.placeholder = `Ask as ${p.nm.split(' — ')[0]}: faults, risk, decisions, what-if…`;
     }
+    return () => { active = false; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [persona]);
+  }, [persona, user?.username]);
 
   // Replace fallback counts when the backend fleet arrives, but do not
   // overwrite contextual chips after the user has started a conversation.
@@ -913,6 +948,9 @@ export default function ChatView() {
           conversationHistory: [],
         });
         conversationIdRef.current = d.conversation_id || conversationIdRef.current;
+        if (conversationIdRef.current) {
+          try { localStorage.setItem(conversationStorageKey, conversationIdRef.current); } catch {}
+        }
         const pl = withFallbackTimings(d.pipeline_log || []);
         const routes = pl.map(n => n.node ? n.node.replace(/_/g, ' ') : '');
 
@@ -970,7 +1008,11 @@ export default function ChatView() {
           const actions = d.actions && d.actions.length ? '<br><br><strong>Actions:</strong><br>' + d.actions.map(x => '→ ' + x).join('<br>') : '';
           responseBody = sanitizeResponse(d.response) + details + actions + questions + dSopLine;
         }
-        appendA(responseBody, routes, chips, pl);
+        // Agent 8 observes every chat turn. Keep its outcome visible so operators
+        // can distinguish newly learned patterns from deliberate no-ops.
+        const learningHtml = d.learning_observation
+          ? buildLearningHtml(d.learning_observation) : '';
+        appendA(responseBody + learningHtml, routes, chips, pl);
 
         // Non-blocking gates shown alongside the response
         if (d.hitl_advisory?.advisory_note) {
@@ -1905,11 +1947,11 @@ const REJECT_CODES = [
 ];
 
 function buildLearningHtml(lr) {
-  const statusColors = { learned: '#10b981', duplicate: '#3b82f6', invalid_input: '#ef4444', persistence_failed: '#f59e0b' };
-  const statusLabels = { learned: 'CASE LEARNED & STORED', duplicate: 'DUPLICATE — ALREADY KNOWN', invalid_input: 'INVALID INPUT — NOT STORED', persistence_failed: 'STORAGE ERROR' };
-  const color = statusColors[lr.learning_status] || '#6b7280';
-  const label = statusLabels[lr.learning_status] || lr.learning_status?.toUpperCase() || 'UNKNOWN';
-
+  const status = lr.learning_status || lr.status || 'unknown';
+  const statusColors = { learned: '#10b981', duplicate: '#3b82f6', no_new_learning: '#6b7280', disabled: '#6b7280', failed: '#f59e0b', invalid_input: '#ef4444', persistence_failed: '#f59e0b' };
+  const learningStatusLabels = { learned: 'NEW LEARNING STORED', duplicate: 'DUPLICATE - ALREADY KNOWN', no_new_learning: 'NO NEW LEARNING', disabled: 'LEARNING DISABLED', failed: 'STORAGE ERROR', invalid_input: 'INVALID INPUT - NOT STORED', persistence_failed: 'STORAGE ERROR' };
+  const color = statusColors[status] || '#6b7280';
+  const label = learningStatusLabels[status] || status.toUpperCase().replace(/_/g, ' ');
   let tagsHtml = '';
   if (lr.tags && lr.tags.length) {
     tagsHtml = `<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px">`
@@ -1922,10 +1964,16 @@ function buildLearningHtml(lr) {
   if (lr.fault_mode) metaHtml += `Fault mode: <strong>${lr.fault_mode}</strong><br/>`;
   if (lr.outcome) metaHtml += `Outcome: <strong>${lr.outcome}</strong><br/>`;
   if (lr.persistence_status && lr.persistence_status !== 'not_requested') metaHtml += `Persistence: <strong>${lr.persistence_status}</strong><br/>`;
-  if (lr.status_reason) metaHtml += `<span style="color:#6b7280;font-size:11px">${lr.status_reason}</span><br/>`;
+  if (lr.status_reason || lr.reason) metaHtml += `<span style="color:#6b7280;font-size:11px">${lr.status_reason || lr.reason}</span><br/>`;
   metaHtml += `</div>`;
 
-  const bodyText = lr.content || '';
+  const bodyText = lr.content || lr.summary || (
+    status === 'no_new_learning'
+      ? 'Agent 8 reviewed this turn; no new durable operational pattern was identified, so nothing was stored.'
+      : status === 'disabled'
+        ? 'Agent 8 observation is disabled by configuration; no learning record was written.'
+        : ''
+  );
 
   return `<div style="border:1.5px solid ${color};border-radius:10px;padding:14px;background:rgba(59,130,246,0.03);margin-top:2px">`
     + `<div style="font-size:9px;font-weight:700;color:${color};font-family:var(--m);margin-bottom:10px">PHASE 10 · LEARNING & MEMORY AGENT · ${label}</div>`

@@ -3,6 +3,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from src.api.main import app
+import src.api.main as api
 from src.tools.notification_mock_service import PERSONAS, clear_inbox, send_notifications
 
 
@@ -18,6 +19,7 @@ def test_swagger_and_openapi_surfaces_are_available(client):
     assert schema.status_code == 200
     paths = schema.json()["paths"]
     assert "/api/chat" in paths
+    assert "/api/chat/history/{conversation_id}" in paths
     assert "/api/pipeline/run" in paths
     assert "/api/recommendations/reject" in paths
     assert "/api/dashboard/assets" in paths
@@ -76,6 +78,19 @@ def test_dashboard_asset_contract_is_backed_by_agent_pipeline(client):
     assert all(row["pipeline_log"] for row in payload["assets"])
 
 
+def test_dashboard_status_comes_from_durable_work_order_lifecycle(client, monkeypatch):
+    monkeypatch.setattr(api, "_list_workorders", lambda: [{
+        "id": "WO-DASH-1", "asset_id": "AST_MTR_001", "status": "Pending",
+        "updated_at": "2026-09-04T10:00:00+00:00",
+    }])
+    payload = client.get("/api/dashboard/assets").json()
+    row = next(item for item in payload["assets"] if item["asset_id"] == "AST_MTR_001")
+    assert row["status"] == "warning"
+    assert row["lifecycle_source"] == "work_order_repository"
+    assert row["work_order_id"] == "WO-DASH-1"
+    assert row["work_order_status"] == "Pending"
+
+
 def test_frontend_uses_backend_contracts_for_group_a():
     from pathlib import Path
     root = Path(__file__).resolve().parents[1] / "frontend" / "react-app" / "src"
@@ -101,6 +116,8 @@ def test_frontend_uses_backend_contracts_for_group_a():
     assert "transferId" in app_context
     assert "FOR: Plant Supervisor" not in chat
     assert "buildExecutionSteps" not in chat
+    assert "fetchChatHistory" in chat
+    assert "dro-conversation-v1-" in chat
 
 
 def test_pipeline_approval_contract_includes_timed_persona_escalation(client):

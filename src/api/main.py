@@ -83,6 +83,9 @@ from src.tools.work_order_repository import build_work_order_repository
 from src.tools.chat_context_repository import load_context as load_durable_chat_context
 from src.tools.chat_context_repository import save_context as save_durable_chat_context
 from src.tools.chat_context_repository import clear_context as clear_durable_chat_context
+from src.tools.chat_context_repository import append_history as append_chat_history
+from src.tools.chat_context_repository import load_history as load_chat_history
+from src.tools.chat_context_repository import clear_history as clear_chat_history
 from src.tools.persona_formatter import build_persona_context, persona_response_prompt
 from src.tools.governed_rag import GovernedKnowledgeRAG
 from src.tools.observability import flush_observability
@@ -883,9 +886,34 @@ def _load_chat_context(conversation_id: str) -> dict:
     meta=context.get("_meta",{})
     if context and (time.time()-float(meta.get("updated_at",0))>_CHAT_CONTEXT_TTL
                     or int(meta.get("turns",0))>=_MAX_CHAT_TURNS):
+        # Expire only transient pipeline context. The durable transcript must
+        # remain available for the history view and audit trail.
+        history = context.get("_history", [])
         clear_durable_chat_context(conversation_id, _CHAT_CONTEXT_STORE)
-        return {}
+        if isinstance(history, list) and history:
+            save_durable_chat_context(
+                conversation_id, {"_history": history}, _CHAT_CONTEXT_STORE
+            )
+        return {"_history": history} if isinstance(history, list) else {}
     return context
+
+
+def _persist_chat_turn(conversation_id: str, req: "ChatRequest",
+                       user: Dict[str, Any], response: Dict[str, Any]) -> None:
+    """Persist the visible transcript independently of short-lived context."""
+    append_chat_history(
+        conversation_id,
+        str(user.get("sub", "")),
+        {
+            "run_id": response.get("run_id", ""),
+            "persona": req.persona,
+            "user_message": req.message,
+            "response": response,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        },
+        _CHAT_CONTEXT_STORE,
+        max_turns=int(_ORCH_CONFIG["chat"].get("max_history_turns", 500)),
+    )
 
 
 def _public_context(context: Optional[Dict]) -> dict:
@@ -2262,15 +2290,35 @@ def export_pre_repair_data(asset_id: str, user: Dict = Depends(get_current_user)
 def dashboard_assets(user: Dict = Depends(get_current_user)):
     """Return frontend-ready fleet health derived from backend agent evidence."""
     from src.tools.dashboard_service import build_asset_dashboard
-    return build_asset_dashboard(
+    payload = build_asset_dashboard(
         load_asset_master(), _MULTI_ASSET_SCENARIOS, load_telemetry_rows,
         lambda signal, intent: run_pipeline(
             signal, intent=intent, persona="supervisor"
         ),
     )
+    # Work-order lifecycle is the durable source of post-intervention status.
+    # Overlay it on the analytical projection so the registry and chat agree
+    # after approval or closure, without browser session overrides.
+    for row in payload.get("assets", []):
+        lifecycle = _asset_lifecycle(row.get("asset_id") or row.get("id"))
+        if lifecycle:
+            row["status"] = lifecycle["status"]
+            row["lifecycle_source"] = "work_order_repository"
+            row["work_order_id"] = lifecycle["work_order_id"]
+            row["work_order_status"] = lifecycle["work_order_status"]
+    return payload
 
 
 # ── Chat endpoint ─────────────────────────────────────────────────────────────
+
+@app.get("/api/chat/history/{conversation_id}")
+def get_chat_history(conversation_id: str, user: Dict = Depends(get_current_user)):
+    """Return the durable transcript for the authenticated user's conversation."""
+    if len(conversation_id) > 80 or not re.fullmatch(r"[A-Za-z0-9_.:-]+", conversation_id):
+        raise HTTPException(422, "conversation_id contains unsupported characters or is too long.")
+    rows = load_chat_history(conversation_id, str(user.get("sub", "")), _CHAT_CONTEXT_STORE)
+    return {"conversation_id": conversation_id, "messages": rows}
+
 
 @app.post("/api/chat")
 @traceable(name="DRO Chat API", run_type="chain", tags=["dro", "chat-api"])
@@ -2284,15 +2332,24 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
         raise HTTPException(422,"conversation_id contains unsupported characters or is too long.")
     if req.message.strip().lower() in {"reset","start over","new conversation","cancel this request"}:
         clear_durable_chat_context(conversation_id, _CHAT_CONTEXT_STORE)
+        clear_chat_history(conversation_id, str(user.get("sub", "")), _CHAT_CONTEXT_STORE)
         _reset={"run_id":run_id,"conversation_id":conversation_id,"intent":"reset",
             "persona":selected_persona.id,"persona_context":selected_persona.model_dump(),
             "response":"Conversation context has been cleared.",
             "details":[],"actions":[],"call_plan":[],"pipeline_log":[],"sources":[],
             "needs_context":False,"clarification_required":False,"reflection_status":"accepted"}
-        return _attach_chat_learning(
+        _reset_result = _attach_chat_learning(
             _reset, req, run_id, conversation_id, "reset", selected_persona
         )
+        _persist_chat_turn(conversation_id, req, user, _reset_result)
+        return _reset_result
     context=_load_chat_context(conversation_id)
+    owner_id = str(user.get("sub", ""))
+    if context.get("_owner_id") not in {None, owner_id}:
+        # Conversation identifiers are client-held; never reuse another user's
+        # transient context if an identifier is copied or guessed.
+        context = {}
+    context["_owner_id"] = owner_id
     incoming=_public_context(req.context)
     explicit_asset=req.asset_id or _asset_from_message(req.message)
     existing_signal=context.get("signal")
@@ -2355,10 +2412,12 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
               "details":[],"actions":[],"call_plan":[],"pipeline_log":[],
               "needs_context":False,"clarification_required":False}
         _remember_chat_context(conversation_id,context)
-        return _attach_chat_learning(
+        _soc_result = _attach_chat_learning(
             _soc, req, run_id, conversation_id, "conversational",
             selected_persona, requested_assets, supplied_asset or "",
         )
+        _persist_chat_turn(conversation_id, req, user, _soc_result)
+        return _soc_result
 
     # ── Intent classification ─────────────────────────────────────────────────
     # LLM reads message + conversation history to distinguish:
@@ -2383,6 +2442,7 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
         )
         try: _conv_result["audit"]=write_audit(_AUDIT_PATH,event="chat",run_id=run_id,status="ok",intent="conversational",agents=())
         except Exception: _conv_result["audit"]={"status":"audit_write_failed"}
+        _persist_chat_turn(conversation_id, req, user, _conv_result)
         return _conv_result
 
     _hitl_fields: Dict = {}  # populated when pipeline runs inline
@@ -2581,6 +2641,7 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
     )
     try: result["audit"]=write_audit(_AUDIT_PATH,event="chat",run_id=run_id,status="ok",intent=plan.intent,agents=draft.get("call_plan",plan.agents))
     except Exception: result["audit"]={"status":"audit_write_failed"}
+    _persist_chat_turn(conversation_id, req, user, result)
     return result
 
 

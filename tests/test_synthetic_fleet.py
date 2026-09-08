@@ -230,8 +230,12 @@ def test_scenario_api_exposes_full_catalog():
                for row in scenarios)
 
 
-def test_dashboard_api_projects_all_assets_with_varied_statuses():
+def test_dashboard_api_projects_all_assets_with_varied_statuses(monkeypatch):
     from src.api.main import app
+    # Keep the synthetic projection deterministic; lifecycle overrides are
+    # covered separately when a durable work order is present.
+    import src.api.main as api
+    monkeypatch.setattr(api, "_list_workorders", lambda: [])
 
     response = TestClient(app).get("/api/dashboard/assets")
     assert response.status_code == 200
