@@ -139,3 +139,30 @@ Full repository regression result:
 ```text
 1029 passed, 1 deprecation warning
 ```
+
+## 2026-09-09 - Work-order rejection feedback
+
+### Change
+
+Rejection from the Work Orders view now follows the same Agent 8 learning
+contract as rejection from the HITL card. Executor-created work orders retain
+their recommendation case, fault mode and bearing identity. A first transition
+to `Rejected` records a typed reason, operator context, persona and timestamp
+through `LearningMemoryAgent.record_rejection()` and stores the result with the
+work order. Repeating the same status update is idempotent.
+
+The Work Orders UI now asks for one of the five configured reason codes and
+optional free text (required for `Other`). The persisted Agent 8 outcome is
+shown in the work-order detail, including when a Reliability Engineer review is
+required after consecutive rejections.
+
+If Agent 8 persistence is unavailable, the work-order rejection is still
+retained and the response explicitly reports `persistence_failed`; a decision
+is never silently lost.
+
+### Tests
+
+`tests/test_work_order_agent8_learning.py` covers successful recording,
+idempotent repeated rejection, legacy work orders without recommendation
+metadata and learning-store failure handling. Frontend contract assertions
+cover the reason form and learning result display.

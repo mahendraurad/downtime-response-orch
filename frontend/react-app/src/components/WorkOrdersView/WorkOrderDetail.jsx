@@ -21,7 +21,7 @@ const WO_PERSONA_ACTS = {
     pending:     {
       actions: [
         { l: '✓ Approve WO',  cls: 'wpablu', newSt: 'Scheduled' },
-        { l: '✗ Reject WO',   cls: 'wpared', newSt: 'Rejected'  },
+        { l: '✗ Reject WO',   cls: 'wpared', reject: true  },
       ],
       chips:   ['Why did DRO create this WO? Explain the fault evidence and urgency rating', 'What further evidence or conditions are needed before approving?'],
     },
@@ -81,7 +81,7 @@ const WO_PERSONA_ACTS = {
     pending:     {
       actions: [
         { l: '✓ Approve from Ops Level', cls: 'wpablu', newSt: 'Scheduled' },
-        { l: '✗ Reject WO',             cls: 'wpared', newSt: 'Rejected'  },
+        { l: '✗ Reject WO',             cls: 'wpared', reject: true  },
       ],
       chips:   ['Full cost-benefit: planned vs emergency — detailed breakdown and net avoidance case'],
     },
@@ -161,6 +161,9 @@ const WO_PERSONA_ACTS = {
 export default function WorkOrderDetail({ wo }) {
   const { persona, updateWOStatus, updateAssetPipelineState, updateAssetStatus } = useContext(AppContext);
   const [exporting, setExporting] = useState(false);
+  const [showRejectForm, setShowRejectForm] = useState(false);
+  const [rejectCode, setRejectCode] = useState('');
+  const [rejectReason, setRejectReason] = useState('');
 
   async function handleExport(assetId) {
     if (exporting) return;
@@ -203,6 +206,8 @@ export default function WorkOrderDetail({ wo }) {
   const personaActs = (WO_PERSONA_ACTS[persona] || WO_PERSONA_ACTS.supervisor)[stateKey]
                    || { actions: [] };
   const { actions } = personaActs;
+  const canConfirmReject = Boolean(rejectCode)
+    && (rejectCode !== 'other' || Boolean(rejectReason.trim()));
 
   return (
     <>
@@ -228,6 +233,10 @@ export default function WorkOrderDetail({ wo }) {
                   title={act.newSt ? `Move this work order to "${act.newSt}"` : act.export ? 'Download pre-repair sensor data as CSV' : act.l}
                   style={alreadyApplied ? { opacity: 0.35, cursor: 'not-allowed' } : {}}
                   onClick={() => {
+                    if (act.reject) {
+                      setShowRejectForm(true);
+                      return;
+                    }
                     if (act.newSt) {
                       updateWOStatus(wo.id, act.newSt, persona);
                       if (act.newSt === 'Closed' && wo.as) {
@@ -245,9 +254,44 @@ export default function WorkOrderDetail({ wo }) {
           </div>
         )}
 
+        {showRejectForm && wo.st === 'Pending' && (
+          <div className="wo-reject-form" style={{ marginTop: '10px', padding: '10px', border: '1px solid var(--rd)', borderRadius: '6px', background: 'var(--rdm)' }}>
+            <div style={{ fontSize: '10px', fontWeight: 700, color: 'var(--rd)', marginBottom: '6px' }}>
+              REJECTION REASON · AGENT 8 LEARNING
+            </div>
+            <select value={rejectCode} onChange={e => setRejectCode(e.target.value)} style={{ width: '100%', marginBottom: '6px' }}>
+              <option value="">Select a reason…</option>
+              <option value="diagnosis_wrong">Diagnosis or evidence concern</option>
+              <option value="parts_concern">Parts or compatibility concern</option>
+              <option value="second_opinion">Need a second opinion</option>
+              <option value="wrong_window">Maintenance window concern</option>
+              <option value="other">Other</option>
+            </select>
+            <textarea value={rejectReason} onChange={e => setRejectReason(e.target.value)} placeholder="Optional context (required for Other)" maxLength={1000} rows={2} style={{ width: '100%', resize: 'vertical', marginBottom: '6px' }} />
+            <div style={{ display: 'flex', gap: '6px' }}>
+              <button className="wpa wpared" disabled={!canConfirmReject} onClick={() => {
+                updateWOStatus(wo.id, 'Rejected', persona, { reasonCode: rejectCode, freeText: rejectReason });
+                setShowRejectForm(false);
+              }}>Confirm Reject</button>
+              <button className="wpa" onClick={() => setShowRejectForm(false)}>Cancel</button>
+            </div>
+          </div>
+        )}
+
       </div>
 
       <div className="wodbody">
+        {wo.st === 'Rejected' && wo.agent8_learning && (
+          <div className="dsec" style={{ border: '1px solid var(--am)', background: 'var(--adm)' }}>
+            <div className="sttl">Agent 8 Learning</div>
+            <div style={{ fontSize: '11px', color: 'var(--t2)', lineHeight: 1.6 }}>
+              {wo.agent8_learning.learning_recorded
+                ? `Rejection recorded as valid closure (${wo.agent8_learning.status || 'recorded'}).`
+                : `Learning was not stored: ${wo.agent8_learning.review_reason || wo.agent8_learning.status || 'unknown reason'}`}
+              {wo.agent8_learning.reliability_review_required && <><br /><strong style={{ color: 'var(--rd)' }}>Reliability Engineer review required after consecutive rejections.</strong></>}
+            </div>
+          </div>
+        )}
         <div className="dsec">
           <div className="sttl">Work Order Summary</div>
           <div className="dg3">

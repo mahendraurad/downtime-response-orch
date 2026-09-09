@@ -96,6 +96,8 @@ def test_frontend_uses_backend_contracts_for_group_a():
     root = Path(__file__).resolve().parents[1] / "frontend" / "react-app" / "src"
     app_context = (root / "context" / "AppContext.jsx").read_text(encoding="utf-8")
     chat = (root / "components" / "ChatView" / "ChatView.jsx").read_text(encoding="utf-8")
+    work_orders = (root / "components" / "WorkOrdersView" / "WorkOrderDetail.jsx").read_text(encoding="utf-8")
+    work_order_list = (root / "components" / "WorkOrdersView" / "WorkOrderList.jsx").read_text(encoding="utf-8")
     escalation_timer = (root / "utils" / "escalationTimer.js").read_text(encoding="utf-8")
     assert "fetchDashboardAssets" in app_context
     assert "fetchWorkOrders" in app_context
@@ -120,6 +122,11 @@ def test_frontend_uses_backend_contracts_for_group_a():
     assert "dro-conversation-v1-" in chat
     assert "SessionStorage is presentation-only" in chat
     assert "setMessages([])" in chat
+    assert "REJECTION REASON" in work_orders
+    assert "Confirm Reject" in work_orders
+    assert "reasonCode" in app_context
+    assert "agent8_learning" in work_orders
+    assert "Rejected (" in work_order_list
 
 
 def test_pipeline_approval_contract_includes_timed_persona_escalation(client):

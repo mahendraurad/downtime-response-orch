@@ -9,6 +9,7 @@ const WO_ASSIGNEES = {
   'Pending':     'Plant Supervisor / Plant Manager / VP Operations',
   'Scheduled':   'Plant Supervisor',
   'In Progress': 'Plant Supervisor / Maintenance Planner',
+  'Rejected':    'None (Rejected)',
 };
 
 export default function WorkOrderList({ workOrders = [], selectedWO, onSelect }) {
@@ -31,6 +32,7 @@ export default function WorkOrderList({ workOrders = [], selectedWO, onSelect })
           { id: 'scheduled',   lbl: `Scheduled (${workOrders.filter(x => x.st === 'Scheduled').length})` },
           { id: 'in progress', lbl: `In Progress (${workOrders.filter(x => x.st === 'In Progress').length})` },
           { id: 'closed',      lbl: `Closed (${workOrders.filter(x => x.st === 'Closed').length})` },
+          { id: 'rejected',    lbl: `Rejected (${workOrders.filter(x => x.st === 'Rejected').length})` },
         ].map(f => (
           <button
             key={f.id}

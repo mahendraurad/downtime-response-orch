@@ -8,9 +8,11 @@ export async function fetchWorkOrders() {
 }
 
 export async function patchWorkOrder(id, data) {
-  await authedFetch(`${API}/api/workorders/${id}`, {
+  const resp = await authedFetch(`${API}/api/workorders/${id}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  return resp.json();
 }

@@ -1336,6 +1336,15 @@ class WOUpdateRequest(BaseModel):
     checklist_index: Optional[int] = None
     checklist_done: Optional[bool] = None
     updated_by: Optional[str] = None
+    # Work-order rejection is also a learning event. Keep the same typed
+    # reason contract used by the HITL rejection endpoint so Agent 8 can learn
+    # from decisions made after execution has already created a WO.
+    reason_code: Optional[Literal[
+        "diagnosis_wrong", "parts_concern", "second_opinion",
+        "wrong_window", "other",
+    ]] = None
+    free_text: str = ""
+    persona: Optional[Persona] = None
 
 
 class ExecutorRunRequest(BaseModel):
@@ -2165,6 +2174,11 @@ def executor_run(req: ExecutorRunRequest, user: Dict = Depends(get_current_user)
                     "id": wo_id,
                     "priority": (rec.urgency or "medium").upper(),
                     "status": "Pending",
+                    # Preserve decision identity so a later WO rejection is
+                    # traceable to its recommendation for Agent 8 learning.
+                    "case_id": rec.case_id,
+                    "fault_mode": rec.condition.fault_type or "",
+                    "bearing_id": rec.bearing_id,
                     "title": (
                         (rec.recommended_action.description if rec.recommended_action else None)
                         or rec.condition.fault_type
@@ -2752,16 +2766,68 @@ def update_workorder(wo_id: str, req: WOUpdateRequest):
     if not wo:
         raise HTTPException(404, f"Work order '{wo_id}' not found.")
     if req.status:
+        previous_status = str(wo.get("status", "")).strip().lower()
         wo["status"] = req.status
         if req.updated_by:
             from datetime import datetime, timezone
+            decision_at = datetime.now(timezone.utc).isoformat()
             wo["updated_by"] = req.updated_by
-            wo["updated_at"] = datetime.now(timezone.utc).isoformat()
+            wo["updated_at"] = decision_at
             wo.setdefault("status_log", []).append({
                 "status": req.status,
                 "by": req.updated_by,
                 "at": wo["updated_at"],
             })
+        else:
+            from datetime import datetime, timezone
+            decision_at = datetime.now(timezone.utc).isoformat()
+            wo["updated_at"] = decision_at
+
+        # A Work Orders rejection is a valid Agent 8 closure, just like a
+        # rejection on the HITL card. Record it once per status transition;
+        # repeat PATCH requests remain idempotent and do not add duplicates.
+        if str(req.status).strip().lower() == "rejected" and previous_status != "rejected":
+            from src.schemas.feedback import RejectionFeedback
+            case_id = str(
+                wo.get("case_id") or wo.get("recommendation_case_id") or wo_id
+            ).strip()
+            asset_id = str(
+                wo.get("asset_id") or wo.get("asset_display") or wo.get("as") or ""
+            ).strip()
+            fault_mode = str(
+                wo.get("fault_mode") or wo.get("condition") or "work_order_action"
+            ).strip()
+            reason_code = req.reason_code or "other"
+            free_text = str(req.free_text or "").strip()
+            if not free_text:
+                free_text = "Work order rejected from the Work Orders section."
+            persona_id = req.persona or "supervisor"
+            try:
+                feedback = RejectionFeedback(
+                    case_id=case_id,
+                    asset_id=asset_id,
+                    fault_mode=fault_mode,
+                    reason_code=reason_code,
+                    free_text=free_text,
+                    persona_id=persona_id,
+                    rejected_at=decision_at,
+                )
+                learning = _learning_agent().record_rejection(feedback).model_dump()
+            except Exception as exc:
+                learning = {
+                    "case_id": case_id,
+                    "status": "persistence_failed",
+                    "learning_type": "rejection_feedback",
+                    "learning_recorded": False,
+                    "valid_closure": True,
+                    "closure_status": "rejected",
+                    "persistence_status": "failed",
+                    "review_reason": str(exc),
+                }
+            wo["rejection_reason_code"] = reason_code
+            wo["rejection_reason"] = free_text
+            wo["rejected_at"] = decision_at
+            wo["agent8_learning"] = learning
     if req.assigned_to:
         wo["assigned_to"] = req.assigned_to
     if req.checklist_index is not None and req.checklist_done is not None:

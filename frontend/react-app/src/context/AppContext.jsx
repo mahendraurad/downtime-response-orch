@@ -68,6 +68,11 @@ function mergeWOs(payload) {
       tl: wo.timeline?.length
         ? wo.timeline.map(ev => ({ dot: ev.dot || 'var(--t3)', ev: ev.ev, tm: ev.tm }))
         : (fb.tl || []),
+      case_id: wo.case_id || '',
+      fault_mode: wo.fault_mode || '',
+      rejection_reason_code: wo.rejection_reason_code || '',
+      rejection_reason: wo.rejection_reason || '',
+      agent8_learning: wo.agent8_learning || null,
       backend_source: 'api/workorders',
     };
   });
@@ -352,7 +357,7 @@ export function AppProvider({ children }) {
     md:          'Managing Director',
   };
 
-  const updateWOStatus = useCallback((id, newStatus, actingPersona) => {
+  const updateWOStatus = useCallback((id, newStatus, actingPersona, decision = {}) => {
     const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const personaLabel = _PERSONA_DISPLAY[actingPersona] || actingPersona || 'Unknown';
     const dotColor = newStatus === 'Scheduled'   ? 'var(--gn)'
@@ -394,7 +399,29 @@ export function AppProvider({ children }) {
       return prev.map(applyUpdate);
     });
     setSelectedWO(prev => prev?.id === id ? applyUpdate(prev) : prev);
-    patchWorkOrder(id, { status: newStatus, updated_by: personaLabel }).catch(() => {});
+    patchWorkOrder(id, {
+      status: newStatus,
+      updated_by: personaLabel,
+      persona: actingPersona,
+      ...(newStatus === 'Rejected' ? {
+        reason_code: decision.reasonCode || 'other',
+        free_text: decision.freeText || '',
+      } : {}),
+    }).then(serverRow => {
+      // Keep Agent 8's decision visible after the asynchronous backend update
+      // and after the next work-order poll/reload.
+      if (!serverRow || !serverRow.agent8_learning) return;
+      setWorkOrders(prev => prev.map(row => row.id === id
+        ? { ...row, agent8_learning: serverRow.agent8_learning,
+            rejection_reason_code: serverRow.rejection_reason_code || row.rejection_reason_code,
+            rejection_reason: serverRow.rejection_reason || row.rejection_reason }
+        : row));
+      setSelectedWO(prev => prev?.id === id
+        ? { ...prev, agent8_learning: serverRow.agent8_learning,
+            rejection_reason_code: serverRow.rejection_reason_code || prev.rejection_reason_code,
+            rejection_reason: serverRow.rejection_reason || prev.rejection_reason }
+        : prev);
+    }).catch(() => {});
   }, []);
 
   return (
