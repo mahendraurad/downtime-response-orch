@@ -185,3 +185,52 @@ def test_frontend_advisory_and_execution_calls_send_persona():
     assert "runExecutor(rec, true, persona)" in chat
     assert "rejectRecommendation(rec, rejectCode, reason || '', persona)" in chat
     assert "resolveHITLAdvisory(h.run_id, action, persona)" in chat
+
+
+def test_hitl_decision_is_persisted_for_follow_up_chat(client):
+    conversation_id = "CONV-HITL-AUDIT"
+    trusted = type("Trusted", (), {
+        "raw": type("Raw", (), {"asset_id": "AST_MTR_001"})(),
+    })()
+    # Exercise the same persistence helper used by the HITL claim path without
+    # constructing an invalid serialized pipeline payload for the repository.
+    api._record_hitl_decision(
+        {"trusted": trusted, "conversation_id": conversation_id,
+         "owner_id": "pytest-admin"},
+        "DECISION-1", "diagnosis", "CONFIRM", "engineer",
+        "Reviewed the spectral evidence",
+    )
+    # The durable decision must be queryable by the chat audit path.
+    assert api._CHAT_CONTEXT_STORE[conversation_id]["hitl_decisions"][0]["action"] == "CONFIRM"
+    data = client.post("/api/chat", json={
+        "message": "What action did the Reliability Engineer take on M-104?",
+        "persona": "supervisor", "conversation_id": conversation_id,
+    }).json()
+    assert data["intent"] == "hitl_decision"
+    assert "Reliability Engineer" in data["response"]
+    assert "CONFIRM" in data["response"]
+
+
+def test_anomaly_response_exposes_score_and_trigger(client, monkeypatch):
+    from src.schemas.anomaly import AnomalyEvent
+    anomaly = AnomalyEvent(
+        asset_id="AST_PMP_002", bearing_id="BRG_007", anomaly_score=0.61,
+        confidence_score=0.73, triggered_features=["vib_rms_mm_s"],
+        reason="vibration exceeded its configured baseline threshold",
+    )
+    state = {"anomaly_event": anomaly, "trusted_signal": None}
+    result = api.format_for_persona(state, "supervisor")
+    assert "Anomaly detected" in result["headline"]
+    assert any("0.61" in row for row in result["details"])
+    assert any("vib_rms_mm_s" in row for row in result["details"])
+
+
+def test_frontend_has_durable_forwarding_and_notification_hydration():
+    from pathlib import Path
+    chat = Path("frontend/react-app/src/components/ChatView/ChatView.jsx").read_text(encoding="utf-8")
+    context = Path("frontend/react-app/src/context/AppContext.jsx").read_text(encoding="utf-8")
+    pipeline = Path("frontend/react-app/src/api/pipeline.js").read_text(encoding="utf-8")
+    assert "forwardHITL" in chat
+    assert "getNotifs" in context and "postPersonaNotification" in context
+    assert "/api/pipeline/hitl/forward" in pipeline
+    assert "/api/notifications" in pipeline

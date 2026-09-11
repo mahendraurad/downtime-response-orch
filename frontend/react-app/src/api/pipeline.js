@@ -1,5 +1,5 @@
-import { API } from '../config/api';
-import { authedFetch } from './http';
+import { API } from '../config/api.js';
+import { authedFetch } from './http.js';
 
 async function throwApiError(resp) {
   let detail;
@@ -84,6 +84,20 @@ export async function getHITLStatus(runId, persona) {
   return resp.json();
 }
 
+export async function forwardHITL(runId, gate, fromPersona, toPersona, rationale = '', assetId = '', conversationId = null) {
+  const resp = await authedFetch(`${API}/api/pipeline/hitl/forward`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      run_id: runId, gate, from_persona: fromPersona,
+      to_persona: toPersona || null, rationale,
+      asset_id: assetId || null, conversation_id: conversationId || null,
+    }),
+  });
+  if (!resp.ok) await throwApiError(resp);
+  return resp.json();
+}
+
 export async function runExecutor(recommendation, approved, persona = 'supervisor') {
   const resp = await authedFetch(`${API}/api/executor/run`, {
     method: 'POST',
@@ -111,6 +125,7 @@ export async function rejectRecommendation(recommendation, reasonCode, freeText 
       reason_code: reasonCode,
       free_text: freeText,
       persona,
+      conversation_id: recommendation.conversation_id || null,
     }),
   });
   if (!response.ok) await throwApiError(response);
@@ -119,6 +134,25 @@ export async function rejectRecommendation(recommendation, reasonCode, freeText 
 
 export async function getNotifs(personaId) {
   const resp = await fetch(`${API}/api/notifications/${personaId}`);
+  if (!resp.ok) await throwApiError(resp);
+  return resp.json();
+}
+
+export async function postPersonaNotification(personaId, msg = {}) {
+  const resp = await authedFetch(`${API}/api/notifications`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      persona_id: personaId,
+      title: msg.title || 'DRO notification',
+      message: msg.message || msg.text || 'A new DRO action requires your attention.',
+      notification_type: msg.type || 'agent',
+      asset_id: msg.asset_id || msg.data?.asset_id || msg.rec?.asset_id || '',
+      work_order_id: msg.work_order_id || msg.rec?.work_order_id || '',
+      run_id: msg.run_id || msg.data?.run_id || '',
+      metadata: msg.metadata || {},
+    }),
+  });
   if (!resp.ok) await throwApiError(resp);
   return resp.json();
 }

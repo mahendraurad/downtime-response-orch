@@ -208,5 +208,50 @@
     "fault_mode": "outer_race_fault",
     "decision": "approved",
     "decided_at": "2026-08-20T06:30:39.086332+00:00"
+  },
+  {
+    "case_id": "ANOM-BRG_001-2026-05-20T12:00:00Z",
+    "asset_id": "AST_MTR_001",
+    "fault_mode": "outer_race_fault",
+    "reason_code": "second_opinion",
+    "free_text": "",
+    "persona_id": "supervisor",
+    "rejected_at": "2026-09-03T14:11:46.665775+00:00",
+    "decision": "rejected",
+    "decided_at": "2026-09-03T14:11:46.665775+00:00",
+    "learning_type": "rejection_feedback",
+    "valid_closure": true,
+    "closure_status": "rejected",
+    "lesson": "Obtain Reliability Engineer review before repeating the recommendation.",
+    "consecutive_rejections": 1,
+    "reliability_review_required": false
+  },
+  {
+    "case_id": "ANOM-BRG_001-2026-05-20T12:00:00Z",
+    "asset_id": "AST_MTR_001",
+    "fault_mode": "outer_race_fault",
+    "decision": "approved",
+    "decided_at": "2026-09-09T16:12:30.790589+00:00"
+  },
+  {
+    "case_id": "ANOM-BRG_001-2026-05-20T12:00:00Z",
+    "asset_id": "AST_MTR_001",
+    "fault_mode": "outer_race_fault",
+    "decision": "approved",
+    "decided_at": "2026-09-09T16:14:21.661553+00:00"
+  },
+  {
+    "case_id": "ANOM-BRG_001-2026-05-20T12:00:00Z",
+    "asset_id": "AST_MTR_001",
+    "fault_mode": "outer_race_fault",
+    "decision": "approved",
+    "decided_at": "2026-09-09T16:38:53.458100+00:00"
+  },
+  {
+    "case_id": "ANOM-BRG_001-2026-05-20T12:00:00Z",
+    "asset_id": "AST_MTR_001",
+    "fault_mode": "outer_race_fault",
+    "decision": "approved",
+    "decided_at": "2026-09-10T04:03:21.202816+00:00"
   }
 ]

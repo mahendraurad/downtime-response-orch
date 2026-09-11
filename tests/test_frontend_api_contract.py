@@ -4,7 +4,9 @@ from fastapi.testclient import TestClient
 
 from src.api.main import app
 import src.api.main as api
-from src.tools.notification_mock_service import PERSONAS, clear_inbox, send_notifications
+from src.tools.notification_mock_service import (
+    PERSONAS, clear_inbox, send_notifications, send_custom_notification,
+)
 
 
 @pytest.fixture
@@ -56,6 +58,49 @@ def test_notification_list_and_mark_read_contract(client):
     marked = client.post("/api/notifications/supervisor/read")
     assert marked.status_code == 200
     assert client.get("/api/notifications/counts").json()["supervisor"] == 0
+
+
+def test_custom_notification_is_durable_and_survives_module_cache_reset(client, tmp_path, monkeypatch):
+    path = tmp_path / "notifications.db"
+    monkeypatch.setenv("NOTIFICATION_SQLITE_PATH", str(path))
+    clear_inbox()
+    item = send_custom_notification(
+        "engineer", title="Forwarded HITL", message="Review P-208 anomaly",
+        notification_type="hitl_monitoring", asset_id="P-208", run_id="RUN-1",
+    )
+    assert item["read"] is False
+    # Simulate a process refresh by clearing only the compatibility cache.
+    import src.tools.notification_mock_service as notifications
+    notifications._INBOX["engineer"].clear()
+    listed = client.get("/api/notifications/engineer").json()
+    assert listed["count"] == 1
+    assert listed["notifications"][0]["message"] == "Review P-208 anomaly"
+    assert client.get("/api/notifications/counts").json()["engineer"] == 1
+
+
+def test_notification_api_accepts_forwarded_persona_event(client, tmp_path, monkeypatch):
+    monkeypatch.setenv("NOTIFICATION_SQLITE_PATH", str(tmp_path / "notifications.db"))
+    clear_inbox()
+    response = client.post("/api/notifications", json={
+        "persona_id": "engineer", "title": "HITL hand-off",
+        "message": "Review P-208", "notification_type": "hitl_monitoring",
+        "asset_id": "P-208", "run_id": "RUN-22",
+    })
+    assert response.status_code == 200
+    assert response.json()["persona_id"] == "engineer"
+    assert client.get("/api/notifications/engineer").json()["count"] == 1
+
+
+def test_execution_forward_can_be_recorded_without_blocking_gate_session(client, tmp_path, monkeypatch):
+    monkeypatch.setenv("NOTIFICATION_SQLITE_PATH", str(tmp_path / "notifications.db"))
+    clear_inbox()
+    response = client.post("/api/pipeline/hitl/forward", json={
+        "run_id": "CASE-EXEC-1", "gate": "execution",
+        "from_persona": "supervisor", "to_persona": "manager",
+        "asset_id": "AST_MTR_001", "conversation_id": "CONV-EXEC-1",
+    })
+    assert response.status_code == 200
+    assert response.json()["to_persona"] == "manager"
 
 
 def test_unknown_persona_is_graceful(client):

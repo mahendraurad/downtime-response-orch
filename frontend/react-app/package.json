@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "test": "node --test src/utils/escalationTimer.test.js",
+    "test": "node --test src/utils/escalationTimer.test.js src/utils/frontend_contract_stress.test.js src/utils/frontend_edge_cases.test.js",
+    "test:e2e": "node --test browser.e2e.test.js",
+    "test:live": "node --test live_smoke.test.js",
+    "test:live-browser": "node --test browser_live.e2e.test.js",
     "preview": "vite preview"
   },
   "dependencies": {

@@ -1,11 +1,12 @@
 import React, { createContext, useState, useCallback, useEffect } from 'react';
 import { ASSETS } from '../data/assets';
 import { WOS } from '../data/workOrders';
-import { getNotifCounts } from '../api/pipeline';
+import { getNotifCounts, getNotifs, postPersonaNotification } from '../api/pipeline';
 import { fetchDashboardAssets } from '../api/dashboard';
 import { fetchWorkOrders, patchWorkOrder } from '../api/workOrders';
 import { useAuth } from './AuthContext';
 import { activeEscalationStep, remainingSeconds } from '../utils/escalationTimer';
+import { ts } from '../utils/helpers';
 
 export const AppContext = createContext(null);
 
@@ -96,6 +97,12 @@ function saveSession(map) {
   }
 }
 
+function escapeNotificationText(value) {
+  return String(value || '').replace(/[&<>"']/g, character => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[character]));
+}
+
 export function AppProvider({ children }) {
   const { user } = useAuth();
   const defaultPersona = user?.allowed_personas?.[0] || 'supervisor';
@@ -159,6 +166,7 @@ export function AppProvider({ children }) {
           br: a.bearing_model, kw: a.power_kw, rpm: a.rpm, ln: a.line,
           st: a.status, rul: a.rul, vib: a.vibration, tmp: a.temperature,
           bpfo: a.bpfo, iso: `Zone ${a.iso_zone}`, trend: a.trend || [],
+          scenario: a.scenario || null,
           faults: (a.faults || []).map(f => ({
             dt: f.date, ty: f.type, st: `${f.stage} ${f.status}`,
             sc: a.status === 'critical' ? 'var(--rd)' : 'var(--am)',
@@ -216,6 +224,38 @@ export function AppProvider({ children }) {
 
   // Per-persona message store, backed by sessionStorage so history survives persona switches
   const [messagesMap, setMessagesMap] = useState(loadSession);
+
+  // Hydrate backend-delivered notifications into the selected persona's chat
+  // stream.  Cross-persona actions therefore remain visible after a refresh
+  // instead of existing only in the originating browser tab.
+  useEffect(() => {
+    let active = true;
+    getNotifs(persona).then(payload => {
+      if (!active) return;
+      const remote = (payload.notifications || []).map(item => ({
+        id: `remote-${item.id}`,
+        type: 'agent',
+        html: `<strong>${escapeNotificationText(item.title || 'DRO notification')}</strong><br>${escapeNotificationText(item.message || '')}`,
+        routes: ['notifications', item.type || 'agent'],
+        chips: [],
+        time: item.sent_at || ts(),
+      }));
+      if (!remote.length) return;
+      setMessagesMap(previous => {
+        const current = previous[persona] || [];
+        const known = new Set(current.map(message => message.id));
+        const additions = remote.filter(message => !known.has(message.id));
+        if (!additions.length) return previous;
+        const next = {
+          ...previous,
+          [persona]: [...current, ...additions].slice(-MAX_MSGS_PER_PERSONA),
+        };
+        saveSession(next);
+        return next;
+      });
+    }).catch(() => {});
+    return () => { active = false; };
+  }, [persona]);
 
   // A4 escalation worker scans every persona inbox, not only the card currently
   // visible on screen. Expired approvals therefore transfer after persona
@@ -322,6 +362,9 @@ export function AppProvider({ children }) {
       ...prev,
       [targetPersona]: (prev[targetPersona] || 0) + 1,
     }));
+    // The local message gives immediate feedback; the backend copy makes the
+    // notification available to another persona/browser after refresh.
+    postPersonaNotification(targetPersona, msg).catch(() => {});
   }, [_update]);
 
   const setTheme = useCallback((t) => {
@@ -370,6 +413,15 @@ export function AppProvider({ children }) {
       : wo;
 
     setWorkOrders(prev => {
+      // Keep the visible fleet state aligned with the durable WO lifecycle
+      // immediately; the next dashboard poll rehydrates the same value.
+      if (newStatus === 'Rejected') {
+        const wo = prev.find(w => w.id === id);
+        if (wo?.as) updateAssetStatus(wo.as, 'critical');
+      } else if (['Pending', 'Scheduled', 'In Progress', 'Approved'].includes(newStatus)) {
+        const wo = prev.find(w => w.id === id);
+        if (wo?.as) updateAssetStatus(wo.as, 'warning');
+      }
       // When WO is closed, mark the associated asset as healthy (maintenance complete)
       if (newStatus === 'Closed') {
         const wo = prev.find(w => w.id === id);

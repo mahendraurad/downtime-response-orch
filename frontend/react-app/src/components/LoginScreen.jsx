@@ -57,8 +57,9 @@ export default function LoginScreen() {
         {/* Form */}
         <form onSubmit={handleSubmit} style={styles.form}>
           <div style={styles.field}>
-            <label style={styles.label}>Username</label>
+            <label htmlFor="login-username" style={styles.label}>Username</label>
             <input
+              id="login-username"
               style={styles.input}
               type="text"
               value={username}
@@ -71,8 +72,9 @@ export default function LoginScreen() {
           </div>
 
           <div style={styles.field}>
-            <label style={styles.label}>Password</label>
+            <label htmlFor="login-password" style={styles.label}>Password</label>
             <input
+              id="login-password"
               style={styles.input}
               type="password"
               value={password}

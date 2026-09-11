@@ -131,6 +131,32 @@ def format_for_persona(state: Dict[str, Any], persona: str) -> Dict[str, Any]:
         evidence=evidence, total_ms=total_ms, state=state,
         recommendation=recommendation,
     )
+    # Monitoring can emit a statistically meaningful anomaly before Failure
+    # Intelligence has enough evidence to classify a fault.  Do not collapse
+    # that state into the generic “healthy” fallback used when diagnosis is
+    # absent; the response must agree with the Monitoring Agent and expose the
+    # score/triggers that explain the warning.
+    if anomaly is not None and diagnosis is None:
+        score = float(getattr(anomaly, "anomaly_score", 0.0) or 0.0)
+        confidence_score = float(getattr(anomaly, "confidence_score", 0.0) or 0.0)
+        triggered = list(getattr(anomaly, "triggered_features", []) or [])
+        reason = str(getattr(anomaly, "reason", "") or "").strip()
+        result["headline"] = (
+            f"{asset_id} — Anomaly detected. Monitoring review required "
+            f"(score {score:.0%}, confidence {confidence_score:.0%})."
+        )
+        anomaly_details = [
+            f"Anomaly score: {score:.2f} · confidence: {confidence_score:.0%}",
+            f"Triggered signals: {', '.join(triggered) if triggered else 'detector threshold exceeded'}",
+        ]
+        if reason:
+            anomaly_details.append(f"Why it was flagged: {reason}")
+        result["details"] = anomaly_details + list(result.get("details") or [])
+        result["actions"] = [
+            f"Review the anomaly evidence for {asset_id} with Reliability Engineering",
+            f"Confirm or suppress the monitoring alert before fault diagnosis",
+        ] + list(result.get("actions") or [])
+        result["tags"] = ["ANOMALY", f"Score:{score:.0%}"] + list(result.get("tags") or [])
     result["persona_context"] = persona_context.model_dump()
     return result
 

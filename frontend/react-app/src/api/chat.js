@@ -1,5 +1,5 @@
-import { API } from '../config/api';
-import { authedFetch } from './http';
+import { API } from '../config/api.js';
+import { authedFetch } from './http.js';
 
 /** Natural-language questions always enter through the backend orchestrator. */
 export async function askChat({

@@ -1,5 +1,5 @@
-import { API } from '../config/api';
-import { authedFetch } from './http';
+import { API } from '../config/api.js';
+import { authedFetch } from './http.js';
 
 export async function fetchWorkOrders() {
   const resp = await authedFetch(`${API}/api/workorders`);

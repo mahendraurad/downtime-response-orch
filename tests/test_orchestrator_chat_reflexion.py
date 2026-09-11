@@ -45,6 +45,17 @@ def test_chat_scenario_runs_required_agents_and_reflects(client):
     data=client.post("/api/chat",json={"message":"What is the RUL risk?","context":{"scenario":"outer_race_fault"}}).json()
     expected=["data_foundation","monitoring","failure_intelligence","predictive_risk"]
     assert [x["node"] for x in data["pipeline_log"]]==expected and data["sources"]==expected
+
+
+def test_chat_asset_data_quality_question_runs_data_foundation(client):
+    data = client.post("/api/chat", json={
+        "message": "Why is C-301 data quality suspect?",
+    }).json()
+    assert data["intent"] == "data_quality"
+    assert data["call_plan"] == ["agent_1"]
+    assert data["pipeline_log"]
+    assert data["pipeline_log"][0]["node"] == "data_foundation"
+    assert "quality" in data["response"].lower() or "dropout" in data["response"].lower()
 def test_chat_execution_request_never_auto_approves(client):
     data=client.post("/api/chat",json={"message":"Execute and create work order","context":{"scenario":"outer_race_fault"}}).json()
     assert "executor" not in [x["node"] for x in data["pipeline_log"]] and data["pipeline_log"][-1]["node"]=="prescriptive"

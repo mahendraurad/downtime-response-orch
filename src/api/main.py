@@ -941,6 +941,154 @@ def _asset_lifecycle(asset_id: str) -> Optional[Dict[str, Any]]:
             "work_order_status": row.get("status", "")}
 
 
+def _apply_lifecycle_overlay(formatted: Dict[str, Any], lifecycle: Optional[Dict[str, Any]],
+                             asset_label: str, intent: str) -> Dict[str, Any]:
+    """Make every asset answer agree with the durable work-order lifecycle.
+
+    Analytical agents intentionally continue to expose the evidence that led
+    to a recommendation.  Once an intervention is approved, rejected, or
+    completed, however, that evidence is historical and must not be presented
+    as the current asset state.  This overlay is applied to status, risk,
+    diagnosis, and full-analysis responses alike (not only to ``status``).
+    """
+    if not lifecycle:
+        return formatted
+    result = dict(formatted)
+    original = str(result.get("headline") or "Analysis complete.")
+    status = str(lifecycle.get("status") or "").lower()
+    wo_id = str(lifecycle.get("work_order_id") or "on record")
+    wo_status = str(lifecycle.get("work_order_status") or "active")
+    if status == "healthy":
+        prefix = (
+            f"{asset_label} — Current status is healthy after completed maintenance "
+            f"(work order {wo_id})."
+        )
+        lifecycle_detail = (
+            f"Current lifecycle: healthy after completed maintenance ({wo_id}). "
+            "Any measurements or risk values below are pre-repair evidence; obtain "
+            "fresh post-repair telemetry for a new assessment."
+        )
+    elif lifecycle.get("decision") == "rejected" or status == "critical":
+        prefix = (
+            f"{asset_label} — Current status is critical: latest maintenance "
+            "recommendation was rejected; the underlying risk remains unresolved."
+        )
+        lifecycle_detail = (
+            f"Current lifecycle: critical after rejection ({wo_id}). The recommendation "
+            "was not executed, so the analytical values below remain operationally relevant."
+        )
+    else:
+        prefix = (
+            f"{asset_label} — Maintenance work order {wo_id} is {wo_status}; "
+            "the asset is in a controlled warning state."
+        )
+        lifecycle_detail = (
+            f"Current lifecycle: warning while work order {wo_id} is {wo_status}. "
+            "Analytical values below describe the pre-intervention condition."
+        )
+
+    # Status already has a concise lifecycle-specific headline.  For all other
+    # intents retain the detailed analytical headline, but clearly label it as
+    # historical/current context so follow-ups cannot contradict the dashboard.
+    if intent == "status":
+        result["headline"] = prefix
+    else:
+        result["headline"] = f"{prefix} Historical analytical result: {original}"
+    details = list(result.get("details") or [])
+    if lifecycle_detail not in details:
+        details.insert(0, lifecycle_detail)
+    result["details"] = details
+    result["lifecycle"] = {
+        "status": status,
+        "work_order_id": lifecycle.get("work_order_id", ""),
+        "work_order_status": lifecycle.get("work_order_status", ""),
+        "decision": lifecycle.get("decision", ""),
+    }
+    return result
+
+
+def _hydrate_hitl_decisions(conversation_id: str, owner_id: str, context: dict) -> None:
+    """Recover resolved HITL actions from the durable transcript after restart."""
+    existing = context.get("hitl_decisions") or context.get("action_events")
+    if isinstance(existing, list) and existing:
+        return
+    try:
+        rows = load_chat_history(conversation_id, owner_id, _CHAT_CONTEXT_STORE)
+    except Exception:
+        return
+    decisions = []
+    for row in rows:
+        response = row.get("response") if isinstance(row, dict) else None
+        event = response.get("hitl_decision") if isinstance(response, dict) else None
+        if isinstance(event, dict):
+            decisions.append(event)
+    if decisions:
+        context["hitl_decisions"] = decisions[-20:]
+
+
+def _hitl_decision_followup(message: str, context: dict,
+                            requested_assets: list[tuple[str, str, str]],
+                            supplied_asset: str = "") -> Optional[dict]:
+    """Answer explicit questions about a recorded human action, not telemetry."""
+    text = str(message or "").lower()
+    asks_action = bool(re.search(
+        r"\b(action|decision|approval|confirmation|rejection|forward(?:ed)?|sent)\b"
+        r".*\b(taken|made|recorded|approved|confirmed|rejected|sent|forwarded|by|did)\b"
+        r"|\bwho\s+(approved|confirmed|rejected|took)\b", text,
+    ))
+    if not asks_action:
+        return None
+    rows = [row for row in (context.get("hitl_decisions") or []) if isinstance(row, dict)]
+    if not rows:
+        return None
+    requested = {str(asset_id).upper() for _, asset_id, _ in requested_assets if asset_id}
+    if supplied_asset:
+        requested.add(str(supplied_asset).upper())
+    if requested:
+        rows = [row for row in rows if str(row.get("asset_id", "")).upper() in requested
+                or str(row.get("asset_display_id", "")).upper() in requested]
+    if not rows:
+        return None
+    event = rows[-1]
+    asset = event.get("asset_display_id") or event.get("asset_id") or "the asset"
+    actor = event.get("persona_name") or event.get("persona") or "an authorized user"
+    gate = str(event.get("gate") or "HITL").replace("_", " ")
+    action = str(event.get("action") or "decision").replace("_", " ")
+    rationale = str(event.get("rationale") or "").strip()
+    response = f"{asset}: {actor} recorded {action.upper()} at the {gate} gate."
+    details = [f"Decision recorded at {event.get('decided_at', 'the recorded time')}."]
+    if rationale:
+        details.append(f"Rationale: {rationale}")
+    return {
+        "persona": context.get("persona", ""),
+        "response": response,
+        "details": details,
+        "actions": [],
+        "call_plan": ["hitl_audit"],
+        "needs_context": False,
+        "clarification_required": False,
+        "hitl_decision": event,
+        "agent_outputs": {"hitl_decision": event},
+    }
+
+
+def _lifecycle_response_prefix(lifecycle: Optional[Dict[str, Any]], asset_label: str) -> str:
+    """Return one short, deterministic sentence for synthesized answers."""
+    if not lifecycle:
+        return ""
+    status = str(lifecycle.get("status") or "").lower()
+    wo_id = str(lifecycle.get("work_order_id") or "on record")
+    wo_status = str(lifecycle.get("work_order_status") or "active")
+    if status == "healthy":
+        return (f"Current status for {asset_label} is healthy after completed maintenance "
+                f"({wo_id}); any figures below are pre-repair evidence. ")
+    if lifecycle.get("decision") == "rejected" or status == "critical":
+        return (f"Current status for {asset_label} remains critical because the latest "
+                f"recommendation was rejected ({wo_id}); the risk is unresolved. ")
+    return (f"Current status for {asset_label} is warning while work order {wo_id} is "
+            f"{wo_status}; figures below describe the pre-intervention condition. ")
+
+
 def _remember_chat_context(conversation_id: str, context: dict) -> None:
     if conversation_id not in _CHAT_CONTEXT_STORE and len(_CHAT_CONTEXT_STORE) >= _MAX_CHAT_CONTEXTS:
         _CHAT_CONTEXT_STORE.pop(next(iter(_CHAT_CONTEXT_STORE)))
@@ -1033,7 +1181,8 @@ def _with_hitl_access(payload: Optional[Dict], gate: str,
     return result
 
 
-def _recommendation_payload(recommendation, persona: str) -> Optional[Dict]:
+def _recommendation_payload(recommendation, persona: str,
+                            conversation_id: str = "") -> Optional[Dict]:
     """Serialize a recommendation and attach its execution-gate permissions."""
     if recommendation is None:
         return None
@@ -1049,6 +1198,8 @@ def _recommendation_payload(recommendation, persona: str) -> Optional[Dict]:
     except Exception:
         return None
     result["hitl_access"] = _hitl_access("execution", persona)
+    if conversation_id:
+        result["conversation_id"] = conversation_id
     return result
 
 
@@ -1082,6 +1233,7 @@ def _claim_hitl(run_id: str, gate: str, action: str, allowed_actions: set[str],
     if not _HITL_REPOSITORY.complete(run_id,claim["claim_token"],gate,action,persona,
                                      rationale[:1000]):
         raise HTTPException(409,f"HITL session '{run_id}' lost its decision lease.")
+    _record_hitl_decision(stored, run_id, gate, action, persona, rationale)
     _HITL_STORE.pop(run_id,None)
     _HITL_RESOLVED[run_id]=time.time()
     return stored
@@ -1111,6 +1263,112 @@ def _hitl_public_session(session: dict) -> dict:
     )}
 
 
+def _record_hitl_decision(stored: Dict[str, Any], run_id: str, gate: str,
+                          action: str, persona: str, rationale: str = "") -> Dict[str, Any]:
+    """Persist a human decision as durable chat context and transcript data.
+
+    HITL repositories already retain the technical decision audit.  This
+    companion record makes the action visible to subsequent chat questions and
+    to a restored conversation, instead of leaving only the final pipeline
+    response in the browser.
+    """
+    trusted = stored.get("trusted")
+    raw = getattr(trusted, "raw", None)
+    canonical_asset = str(getattr(raw, "asset_id", "") or "")
+    display_asset = canonical_asset
+    for display, (canonical, _) in _MULTI_ASSET_SCENARIOS.items():
+        if canonical == canonical_asset:
+            display_asset = display
+            break
+    event = {
+        "run_id": run_id,
+        "gate": gate,
+        "action": action.upper(),
+        "persona": persona,
+        "persona_name": _PERSONA_LABELS.get(persona, persona),
+        "asset_id": canonical_asset,
+        "asset_display_id": display_asset,
+        "rationale": str(rationale or "").strip(),
+        "decided_at": datetime.now(timezone.utc).isoformat(),
+    }
+    stored["_hitl_decision"] = event
+    conversation_id = str(stored.get("conversation_id") or "").strip()
+    if not conversation_id:
+        return event
+    try:
+        context = _load_chat_context(conversation_id)
+        decisions = context.setdefault("hitl_decisions", [])
+        if not isinstance(decisions, list):
+            decisions = []
+            context["hitl_decisions"] = decisions
+        decisions[:] = [row for row in decisions
+                        if not (isinstance(row, dict) and row.get("run_id") == run_id)]
+        decisions.append(event)
+        _remember_chat_context(conversation_id, context)
+        owner_id = str(stored.get("owner_id") or "")
+        append_chat_history(
+            conversation_id, owner_id,
+            {
+                "run_id": f"{run_id}-HITL-{action.upper()}",
+                "persona": persona,
+                "user_message": f"HITL {gate} decision: {action.upper()}",
+                "response": {
+                    "response": (
+                        f"{display_asset or 'Asset'}: {event['persona_name']} "
+                        f"recorded a {action.upper()} decision at the {gate} gate."
+                    ),
+                    "details": ([event["rationale"]] if event["rationale"] else []),
+                    "actions": [], "pipeline_log": [{
+                        "node": f"hitl_{gate}", "status": "resolved", "latency_ms": 0,
+                    }], "intent": "hitl_decision", "hitl_decision": event,
+                },
+                "created_at": event["decided_at"],
+            }, _CHAT_CONTEXT_STORE,
+            max_turns=int(_ORCH_CONFIG["chat"].get("max_history_turns", 500)),
+        )
+    except Exception:
+        # Technical HITL resolution must not fail because transcript enrichment
+        # is unavailable.  The repository decision remains authoritative.
+        pass
+    return event
+
+
+def _record_chat_action_event(conversation_id: str, owner_id: str, event: Dict[str, Any],
+                              response_text: str) -> None:
+    """Persist an execution/forwarding action in context and visible history."""
+    if not conversation_id:
+        return
+    context = _load_chat_context(conversation_id)
+    actions = context.setdefault("action_events", [])
+    if not isinstance(actions, list):
+        actions = []
+        context["action_events"] = actions
+    event_key = (event.get("run_id"), event.get("gate"), event.get("action"))
+    actions[:] = [row for row in actions
+                  if (row.get("run_id"), row.get("gate"), row.get("action")) != event_key]
+    actions.append(dict(event))
+    context["action_events"] = actions[-30:]
+    _remember_chat_context(conversation_id, context)
+    append_chat_history(
+        conversation_id, owner_id,
+        {
+            "run_id": f"{event.get('run_id', '')}-ACTION-{event.get('action', 'EVENT')}",
+            "persona": event.get("persona", ""),
+            "user_message": f"HITL {event.get('gate', 'execution')} action: {event.get('action', '')}",
+            "response": {
+                "response": response_text,
+                "details": ([event["rationale"]] if event.get("rationale") else []),
+                "actions": [], "pipeline_log": [{
+                    "node": f"hitl_{event.get('gate', 'execution')}",
+                    "status": "resolved", "latency_ms": 0,
+                }], "intent": "hitl_decision", "hitl_decision": event,
+            },
+            "created_at": event.get("decided_at") or datetime.now(timezone.utc).isoformat(),
+        }, _CHAT_CONTEXT_STORE,
+        max_turns=int(_ORCH_CONFIG["chat"].get("max_history_turns", 500)),
+    )
+
+
 def _create_advisory_gate(run_id: str, risk, persona: str, blocked: bool = False):
     if (blocked or risk is None
             or getattr(risk,"assessment_source","")!="rules+llm_fallback"
@@ -1127,7 +1385,8 @@ def _create_advisory_gate(run_id: str, risk, persona: str, blocked: bool = False
 _DIAGNOSIS_CONFIDENCE_THRESHOLD = 0.60
 
 
-def _build_hitl_gates(state: Dict, run_id: str, persona: str, intent: str) -> Dict:
+def _build_hitl_gates(state: Dict, run_id: str, persona: str, intent: str,
+                      conversation_id: str = "", owner_id: str = "") -> Dict:
     """Compute HITL gate payloads from raw pipeline state and register with _HITL_STORE.
     Used by both /api/pipeline/run and inline pipeline execution in /api/chat."""
     trusted  = state.get("trusted_signal")
@@ -1142,7 +1401,9 @@ def _build_hitl_gates(state: Dict, run_id: str, persona: str, intent: str) -> Di
             from src.tools.remediation import missing_critical_fields as _mcf, imputable_fields as _impf
             from src.tools.config_loader import load_config as _lcfg
             _dfa_cfg = _lcfg()
-            _HITL_STORE[run_id] = {"type":"remediation","trusted":trusted,"persona":persona,"intent":intent}
+            _HITL_STORE[run_id] = {"type":"remediation","trusted":trusted,"persona":persona,
+                                   "intent":intent,"conversation_id":conversation_id,
+                                   "owner_id":owner_id}
             hitl_required = {
                 "type":"remediation","run_id":run_id,
                 "missing_fields":_mcf(trusted,_dfa_cfg),
@@ -1157,7 +1418,8 @@ def _build_hitl_gates(state: Dict, run_id: str, persona: str, intent: str) -> Di
         _ewma = _ev.get("ewma", {})
         if _ewma.get("fired", False) and not _ev.get("t2_fired", True):
             _HITL_STORE[run_id] = {"type":"monitoring","trusted":trusted,
-                                   "anomaly_event":anomaly,"persona":persona,"intent":intent}
+                                   "anomaly_event":anomaly,"persona":persona,"intent":intent,
+                                   "conversation_id":conversation_id,"owner_id":owner_id}
             hitl_monitoring = {
                 "type":"monitoring","run_id":run_id,
                 "anomaly_score":anomaly.anomaly_score,
@@ -1171,7 +1433,8 @@ def _build_hitl_gates(state: Dict, run_id: str, persona: str, intent: str) -> Di
     if hitl_required is None and hitl_monitoring is None and diagnosis is not None:
         if diagnosis.confidence < _DIAGNOSIS_CONFIDENCE_THRESHOLD:
             _HITL_STORE[run_id] = {"type":"diagnosis","trusted":trusted,"anomaly_event":anomaly,
-                                   "fault_diagnosis":diagnosis,"persona":persona,"intent":intent}
+                                   "fault_diagnosis":diagnosis,"persona":persona,"intent":intent,
+                                   "conversation_id":conversation_id,"owner_id":owner_id}
             hitl_diagnosis = {
                 "type":"diagnosis","run_id":run_id,
                 "fault_mode":diagnosis.fault_mode,"fault_code":diagnosis.fault_code,
@@ -1185,7 +1448,8 @@ def _build_hitl_gates(state: Dict, run_id: str, persona: str, intent: str) -> Di
         if not knowledge.source_documents:
             _HITL_STORE[run_id] = {"type":"knowledge","trusted":trusted,"anomaly_event":anomaly,
                                    "fault_diagnosis":diagnosis,"risk_assessment":state.get("risk_assessment"),
-                                   "knowledge_guidance":knowledge,"persona":persona,"intent":intent}
+                                   "knowledge_guidance":knowledge,"persona":persona,"intent":intent,
+                                   "conversation_id":conversation_id,"owner_id":owner_id}
             hitl_knowledge = {
                 "type":"knowledge","run_id":run_id,
                 "fault_mode":diagnosis.fault_mode if diagnosis else "unknown",
@@ -1196,7 +1460,11 @@ def _build_hitl_gates(state: Dict, run_id: str, persona: str, intent: str) -> Di
     hitl_advisory = _create_advisory_gate(run_id, _risk, persona,
                     blocked=any((hitl_required,hitl_monitoring,hitl_diagnosis,hitl_knowledge)))
 
-    recommendation = _recommendation_payload(state.get("recommendation"), persona)
+    recommendation = _recommendation_payload(
+        state.get("recommendation"), persona, conversation_id=conversation_id
+    )
+    if recommendation is not None:
+        recommendation["hitl_run_id"] = run_id
 
     return {
         "hitl_required":  _with_hitl_access(hitl_required,"remediation",persona),
@@ -1289,6 +1557,30 @@ class RecommendationRejectionRequest(BaseModel):
     ]
     free_text: str = ""
     persona: Persona = "supervisor"
+    conversation_id: Optional[str] = None
+
+
+class HITLForwardRequest(BaseModel):
+    run_id: str
+    gate: Literal["remediation", "monitoring", "diagnosis", "knowledge", "advisory", "execution"]
+    from_persona: Persona
+    to_persona: Optional[Persona] = None
+    rationale: str = ""
+    # Execution recommendations are not represented by a blocking repository
+    # session; carry their durable conversation/asset identity explicitly.
+    asset_id: Optional[str] = None
+    conversation_id: Optional[str] = None
+
+
+class PersonaNotificationRequest(BaseModel):
+    persona_id: Persona
+    title: str = "DRO notification"
+    message: str = ""
+    notification_type: str = "agent"
+    asset_id: str = ""
+    work_order_id: str = ""
+    run_id: str = ""
+    metadata: Dict[str, Any] = {}
 
 
 @app.get("/api/pipeline/hitl/pending")
@@ -2132,6 +2424,7 @@ def executor_run(req: ExecutorRunRequest, user: Dict = Depends(get_current_user)
     if req.approved:
         _authorize_hitl(req.persona,"execution")
     try:
+        recommendation_payload = dict(req.recommendation or {})
         rec = MaintenanceRecommendation(**req.recommendation)
         if (
             req.approved and rec.checkpoint_thread_id
@@ -2186,6 +2479,7 @@ def executor_run(req: ExecutorRunRequest, user: Dict = Depends(get_current_user)
                     )[:120],
                     "asset_id": rec.asset_id,
                     "asset_display": rec.asset_id,
+                    "conversation_id": str(recommendation_payload.get("conversation_id") or ""),
                     "type": "Corrective",
                     "est_hours": None,
                     "parts": ", ".join(
@@ -2210,6 +2504,26 @@ def executor_run(req: ExecutorRunRequest, user: Dict = Depends(get_current_user)
                     ],
                 }
                 _save_workorder(_new_wo)
+        conversation_id = str(recommendation_payload.get("conversation_id") or "")
+        if conversation_id:
+            action_name = "APPROVE" if req.approved else "REJECT"
+            event = {
+                "run_id": str(rec.case_id or result.work_order_id or uuid.uuid4().hex[:8]),
+                "gate": "execution", "action": action_name,
+                "persona": req.persona,
+                "persona_name": _PERSONA_LABELS.get(req.persona, req.persona),
+                "asset_id": rec.asset_id,
+                "asset_display_id": next((display for display, (canonical, _) in _MULTI_ASSET_SCENARIOS.items()
+                                           if canonical == rec.asset_id), rec.asset_id),
+                "work_order_id": result.work_order_id or "",
+                "rationale": "",
+                "decided_at": datetime.now(timezone.utc).isoformat(),
+            }
+            _record_chat_action_event(
+                conversation_id, str(user.get("sub", "")), event,
+                f"{event['asset_display_id']}: {event['persona_name']} recorded "
+                f"{action_name} at the execution gate."
+            )
         return result.model_dump()
     except HTTPException:
         raise
@@ -2232,7 +2546,90 @@ def reject_recommendation(
         free_text=req.free_text, persona_id=build_persona_context(req.persona).id,
         rejected_at=datetime.now(timezone.utc).isoformat(),
     )
-    return _learning_agent().record_rejection(feedback).model_dump()
+    result = _learning_agent().record_rejection(feedback).model_dump()
+    if req.conversation_id:
+        event = {
+            "run_id": req.case_id, "gate": "execution", "action": "REJECT",
+            "persona": req.persona,
+            "persona_name": _PERSONA_LABELS.get(req.persona, req.persona),
+            "asset_id": canonical_asset,
+            "asset_display_id": _asset_from_message(req.asset_id) or req.asset_id,
+            "work_order_id": "", "rationale": req.free_text,
+            "decided_at": datetime.now(timezone.utc).isoformat(),
+        }
+        _record_chat_action_event(
+            req.conversation_id, str(user.get("sub", "")), event,
+            f"{event['asset_display_id']}: {event['persona_name']} recorded REJECT at the execution gate."
+        )
+    return result
+
+
+@app.post("/api/pipeline/hitl/forward")
+def hitl_forward(req: HITLForwardRequest, user: Dict = Depends(get_current_user)):
+    """Record a cross-persona HITL hand-off.
+
+    Forwarding does not consume the gate. It records who sent it and validates
+    that the recipient is allowed to resolve the gate. The frontend then posts
+    the user-facing notification through ``/api/notifications``.
+    """
+    require_persona(req.from_persona, user)
+    session = _HITL_REPOSITORY.get_session(req.run_id)
+    if session and session.get("gate") != req.gate:
+        raise HTTPException(409, f"HITL session '{req.run_id}' is for {session.get('gate')}, not {req.gate}.")
+    if not session and req.gate != "execution":
+        raise HTTPException(404, f"HITL session '{req.run_id}' was not found.")
+    target = req.to_persona or next(iter(_HITL_PERMISSIONS.get(req.gate, [])), None)
+    if not target or target not in set(_HITL_PERMISSIONS.get(req.gate, [])):
+        raise HTTPException(422, f"Persona is not authorized to resolve the {req.gate} gate.")
+    payload = (session.get("payload") if session else {}) or {}
+    trusted = payload.get("trusted")
+    raw = getattr(trusted, "raw", None)
+    asset_id = str(getattr(raw, "asset_id", "") or req.asset_id or "")
+    asset_display = asset_id
+    for display, (canonical, _) in _MULTI_ASSET_SCENARIOS.items():
+        if canonical == asset_id:
+            asset_display = display
+            break
+    conversation_id = str(payload.get("conversation_id") or req.conversation_id or "")
+    if conversation_id:
+        context = _load_chat_context(conversation_id)
+        forwards = context.setdefault("hitl_forwards", [])
+        if not isinstance(forwards, list):
+            forwards = []
+            context["hitl_forwards"] = forwards
+        forwards.append({
+            "run_id": req.run_id, "gate": req.gate,
+            "from_persona": req.from_persona, "to_persona": target,
+            "asset_id": asset_id, "asset_display_id": asset_display,
+            "forwarded_at": datetime.now(timezone.utc).isoformat(),
+        })
+        _remember_chat_context(conversation_id, context)
+    return {"status": "forwarded", "run_id": req.run_id,
+            "gate": req.gate, "from_persona": req.from_persona,
+            "to_persona": target, "asset_id": asset_id,
+            "asset_display_id": asset_display}
+
+
+@app.post("/api/notifications")
+def create_persona_notification(req: PersonaNotificationRequest,
+                                user: Dict = Depends(get_current_user)):
+    """Persist a frontend-originated cross-persona notification."""
+    # The sender may be forwarding to a different persona, so authorise the
+    # request through the authenticated user but do not require that the
+    # sender also has the recipient's role.
+    if not user:
+        raise HTTPException(401, "Authentication required.")
+    from src.tools.notification_mock_service import send_custom_notification
+    try:
+        item = send_custom_notification(
+            req.persona_id, title=req.title, message=req.message,
+            notification_type=req.notification_type, asset_id=req.asset_id,
+            work_order_id=req.work_order_id, run_id=req.run_id,
+            metadata=req.metadata,
+        )
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return item
 
 
 @app.get("/api/notifications/counts")
@@ -2434,6 +2831,7 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
         # transient context if an identifier is copied or guessed.
         context = {}
     context["_owner_id"] = owner_id
+    _hydrate_hitl_decisions(conversation_id, owner_id, context)
     incoming=_public_context(req.context)
     explicit_asset=req.asset_id or _asset_from_message(req.message)
     existing_signal=context.get("signal")
@@ -2508,6 +2906,39 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
     #   "pipeline"       → new analysis requested → evidence-gated routing below
     #   "conversational" → follow-up on a prior result → LLM answers with history context
     #   "general"        → conceptual question → falls through to plan_query routing below
+    # Explicit questions about a completed HITL action must read the durable
+    # decision record, not re-run Agent 1 and repeat a telemetry headline.
+    _decision_draft = _hitl_decision_followup(
+        effective_message, context, requested_assets, supplied_asset or ""
+    )
+    if _decision_draft is not None:
+        _decision_draft["persona"] = selected_persona.id
+        _decision_draft["persona_context"] = selected_persona.model_dump()
+        _remember_chat_context(conversation_id, context)
+        _decision_result = {
+            **_decision_draft,
+            "run_id": run_id,
+            "conversation_id": conversation_id,
+            "intent": "hitl_decision",
+            "reflection_status": "accepted",
+            "reflection_iterations": 0,
+            "reflection_termination_reason": "deterministic_hitl_audit",
+            "pipeline_log": [{"node": "hitl_audit", "status": "read", "latency_ms": 0}],
+        }
+        _decision_result = _attach_chat_learning(
+            _decision_result, req, run_id, conversation_id, "hitl_decision",
+            selected_persona, requested_assets, supplied_asset or "",
+        )
+        try:
+            _decision_result["audit"] = write_audit(
+                _AUDIT_PATH, event="chat", run_id=run_id, status="ok",
+                intent="hitl_decision", agents=("hitl_audit",),
+            )
+        except Exception:
+            _decision_result["audit"] = {"status": "audit_write_failed"}
+        _persist_chat_turn(conversation_id, req, user, _decision_result)
+        return _decision_result
+
     _intent_class=_llm_chat_classify(effective_message,req.conversation_history)
     _classified=_intent_class.get("intent_type","pipeline")
 
@@ -2550,6 +2981,16 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
                 if canonical==signal_asset and display not in _snapshot:
                     _snapshot[display]={"signal":deepcopy(signal)}
                     break
+        # For explicit multi-asset requests, use the configured registered
+        # scenario map as backend evidence for known assets when no snapshot
+        # was supplied by the caller. This is a query-time lookup (never a
+        # page-load fixture); unknown assets remain unavailable and are never
+        # inferred from their names.
+        if (not _snapshot
+                and _ORCH_CONFIG["chat"].get("auto_load_registered_demo_scenarios", False)):
+            for display, canonical, mapped_scenario in requested_assets:
+                if mapped_scenario:
+                    _snapshot[display] = {"scenario": mapped_scenario}
         if _snapshot:
             context["fleet_snapshot"]=_snapshot
     if len(requested_assets)>1 and not context.get("fleet_snapshot"):
@@ -2619,32 +3060,41 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
             context.setdefault("per_asset_signals", {})[signal.get("asset_id", "")] = deepcopy(signal)
             formatted=format_for_persona(state,req.persona)
             lifecycle = _asset_lifecycle(supplied_asset or signal.get("asset_id", ""))
-            if lifecycle and plan.intent == "status":
-                asset_label = supplied_asset or signal.get("asset_id", "")
-                if lifecycle.get("decision") == "rejected":
-                    lifecycle_label = (
-                        "critical — the latest maintenance recommendation was rejected "
-                        "and the underlying risk remains unresolved"
-                    )
-                    lifecycle_action = (
-                        "Obtain fresh telemetry or Reliability Engineer review before "
-                        "continuing operation"
-                    )
-                elif lifecycle["status"] == "healthy":
-                    lifecycle_label = "healthy after the completed maintenance"
-                    lifecycle_action = None
-                else:
-                    lifecycle_label = "warning while the approved maintenance is pending"
-                    lifecycle_action = (
-                        "Complete the approved maintenance work order and verify "
-                        "post-repair readings"
-                    )
-                formatted["headline"] = (
-                    f"{asset_label} — Current status is {lifecycle_label}. "
-                    f"Work order {lifecycle['work_order_id'] or 'on record'} is "
-                    f"{lifecycle['work_order_status'] or 'active'}."
+            asset_label = next(
+                (display for display, canonical, _ in requested_assets
+                 if canonical == signal.get("asset_id")),
+                supplied_asset or signal.get("asset_id", ""),
+            )
+            # A data-quality question needs a data-quality answer even when
+            # the selected persona is not OT. Do not let the generic persona
+            # formatter reduce a dropout/quality result to “asset healthy”.
+            if plan.intent == "data_quality":
+                trusted_result = state.get("trusted_signal")
+                validation = getattr(trusted_result, "validation", None)
+                quality = getattr(trusted_result, "data_quality_score", None)
+                validation_status = getattr(trusted_result, "validation_status", "UNKNOWN")
+                status_name = getattr(validation_status, "name", str(validation_status))
+                reasons = list(getattr(validation, "reasons", []) or [])
+                score_text = (
+                    f"{float(quality):.0%}" if isinstance(quality, (int, float)) else "unavailable"
                 )
-                formatted["actions"] = [lifecycle_action] if lifecycle_action else []
+                formatted["headline"] = (
+                    f"{asset_label} — Data quality {status_name}. "
+                    f"Quality score {score_text}; review is required before relying on this signal."
+                )
+                formatted["details"] = [
+                    f"Validation status: {status_name}",
+                    f"Data quality score: {score_text}",
+                    *(reasons[:4] or ["No specific validation reason was returned."]),
+                ]
+                formatted["actions"] = [
+                    f"Review and remediate the telemetry quality for {asset_label}",
+                    "Confirm historian coverage and sensor/dropout status",
+                    "Re-run the analysis after validated telemetry is available",
+                ]
+            formatted = _apply_lifecycle_overlay(
+                formatted, lifecycle, asset_label, plan.intent
+            )
             _pipeline_headline=formatted.get("headline","Analysis complete.")
             _persona_context = build_persona_context(req.persona)
             draft={"persona":_persona_context.id,"persona_context":_persona_context.model_dump(),"response":_pipeline_headline,"details":formatted.get("details",[]),"actions":formatted.get("actions",[]),"call_plan":list(plan.agents),"needs_context":False,"clarification_required":False,
@@ -2656,6 +3106,7 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
                 "headline": _pipeline_headline,
                 "details": formatted.get("details", []),
                 "actions": formatted.get("actions", []),
+                "lifecycle": formatted.get("lifecycle"),
                 "summary": (
                     f"Headline: {_pipeline_headline}\n"
                     f"Details: {'; '.join(formatted.get('details', []))}\n"
@@ -2680,6 +3131,14 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
                     _synthesis_q = re.sub(
                         r'\s*\[(?:Session context|Context for)[^\]]*\]', '', req.message
                     ).strip()
+                    _lifecycle_note = ""
+                    if lifecycle:
+                        _lifecycle_note = (
+                            "\n\nDURABLE LIFECYCLE OVERRIDE: "
+                            + str(formatted.get("lifecycle"))
+                            + ". Never describe a completed work order as an active "
+                            "critical condition; label pipeline measurements as pre-repair."
+                        )
                     _synth=_CHAT_LLM.complete_json(
                         system_prompt=(
                             "You are the DRO plant-maintenance assistant. "
@@ -2692,6 +3151,7 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
                             "Never fabricate data not in the pipeline result. "
                             'Return JSON: {"answer": "<synthesized plain-text answer>"}.\n\n'
                             + persona_response_prompt(_persona_context)
+                            + _lifecycle_note
                         ),
                         user_prompt=f"User question: {_synthesis_q}\n\nPipeline data:\n{_pipe_summary}",
                         temperature=0.2,
@@ -2707,11 +3167,27 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
                             draft["actions"] = []
                 except Exception:
                     pass  # keep structured headline on LLM failure
+            # The LLM may phrase an answer from pre-repair measurements.  Keep
+            # the durable lifecycle sentence in front of it so a completed or
+            # rejected work order can never be mistaken for the current state.
+            if lifecycle:
+                _prefix = _lifecycle_response_prefix(lifecycle, asset_label)
+                existing_response = str(draft.get("response", ""))
+                already_states_lifecycle = bool(re.search(
+                    r"\bcurrent status\b|\bwork order\b.{0,80}\b(?:pending|approved|closed|completed|rejected|active)\b|"
+                    r"\brecommendation was rejected\b",
+                    existing_response, re.IGNORECASE,
+                ))
+                if _prefix and not already_states_lifecycle:
+                    draft["response"] = _prefix + str(draft.get("response", ""))
             # Only engage HITL gates for explicit full-pipeline requests
             # (e.g. "Analyse M-104"). Targeted questions (risk, status, diagnosis)
             # get a synthesized answer without operator interruption.
             if plan.pipeline_intent == "full":
-                _hitl_fields = _build_hitl_gates(state, run_id, req.persona, plan.pipeline_intent)
+                _hitl_fields = _build_hitl_gates(
+                    state, run_id, req.persona, plan.pipeline_intent,
+                    conversation_id=conversation_id, owner_id=owner_id,
+                )
         plan_intent=plan.intent
     else:
         draft=_clarification_draft(req.persona,"general",["objective","timeframe"],

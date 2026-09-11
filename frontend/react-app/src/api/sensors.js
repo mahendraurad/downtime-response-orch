@@ -1,4 +1,4 @@
-import { API } from '../config/api';
+import { API } from '../config/api.js';
 
 let _sensorWS = null;
 

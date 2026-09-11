@@ -165,7 +165,7 @@ function buildCorrelation(newRec, existingRecs) {
   return null;
 }
 import { askChat, fetchChatHistory } from '../../api/chat';
-import { resolveHITLRemediation, resolveHITLMonitoring, resolveHITLDiagnosis, resolveHITLKnowledge, resolveHITLAdvisory, runExecutor, rejectRecommendation } from '../../api/pipeline';
+import { resolveHITLRemediation, resolveHITLMonitoring, resolveHITLDiagnosis, resolveHITLKnowledge, resolveHITLAdvisory, runExecutor, rejectRecommendation, forwardHITL } from '../../api/pipeline';
 import ChatSidebar from './ChatSidebar';
 
 function mkId() { return `m-${Date.now()}-${Math.floor(Math.random() * 1000)}`; }
@@ -936,6 +936,13 @@ export default function ChatView() {
         // Only pass the last referenced document as context when the query explicitly
         // asks about a document / SOP — otherwise it biases every follow-up answer.
         const isDocQuery = /\bdocument\b|\brefer\b|\bsop\b|\bsource\b|\bprocedure\b|\bmanual\b|\bwhich doc/i.test(t);
+        // Provide registered backend evidence for each named asset in a fleet
+        // plan. Unknown assets remain absent and are reported as unavailable.
+        const fleetSnapshot = {};
+        queryAssetIds.forEach(assetId => {
+          const row = (assets || []).find(a => a.id === assetId || a.asset_id === assetId);
+          if (row?.scenario) fleetSnapshot[assetId] = { scenario: row.scenario };
+        });
 
         const d = await askChat({
           message: effectiveMessage,
@@ -945,6 +952,9 @@ export default function ChatView() {
             ...(options.scenario ? { scenario: options.scenario } : {}),
             ...(isDocQuery && lastKnowledgeRef.current?.sop_id
               ? { last_referenced_document: lastKnowledgeRef.current.sop_id }
+              : {}),
+            ...(queryAssetIds.length > 1 && Object.keys(fleetSnapshot).length
+              ? { fleet_snapshot: fleetSnapshot }
               : {}),
           },
           conversationHistory: [],
@@ -1319,10 +1329,15 @@ function HITLRemediationMsg({ msg, onSq, doThink, appendA, addMessage, persona }
   const canResolve = canResolveHITL(h.access, persona);
   const rid = h.run_id;
 
-  function handleForward() {
+  async function handleForward() {
     const targetPersona = h.access?.allowed_personas?.[0];
     const targetPersonaName = h.access?.allowed_persona_names?.[0] || targetPersona || 'Responsible Approver';
     const senderName = PERSONA_DISPLAY_NAMES[persona] || persona;
+    if (targetPersona) {
+      try { await forwardHITL(rid, 'remediation', persona, targetPersona); } catch (err) {
+        console.warn('Durable remediation hand-off failed:', err);
+      }
+    }
     setForwarded(true);
     patchMessage(msg.id, { forwarded: true, forwardedTo: targetPersonaName });
     if (targetPersona) {
@@ -1513,10 +1528,15 @@ function HITLMonitoringMsg({ msg, onSq, doThink, appendA, addMessage, persona })
   const scorePct = h.anomaly_score != null ? (h.anomaly_score * 100).toFixed(0) + '%' : '—';
   const ewmaSignals = (h.ewma_triggered && h.ewma_triggered.length > 0) ? h.ewma_triggered.join(', ') : 'multiple signals';
 
-  function handleForward() {
+  async function handleForward() {
     const targetPersona = h.access?.allowed_personas?.[0];
     const targetPersonaName = h.access?.allowed_persona_names?.[0] || targetPersona || 'Responsible Approver';
     const senderName = PERSONA_DISPLAY_NAMES[persona] || persona;
+    if (targetPersona) {
+      try { await forwardHITL(rid, 'monitoring', persona, targetPersona); } catch (err) {
+        console.warn('Durable monitoring hand-off failed:', err);
+      }
+    }
     setForwarded(true);
     patchMessage(msg.id, { forwarded: true, forwardedTo: targetPersonaName });
     if (targetPersona) {
@@ -1650,10 +1670,15 @@ function HITLDiagnosisMsg({ msg, onSq, doThink, appendA, addMessage, persona }) 
   const canResolve = canResolveHITL(h.access, persona);
   const resolverNames = (h.access?.allowed_persona_names || []).join(' / ');
 
-  function handleForward() {
+  async function handleForward() {
     const targetPersona = h.access?.allowed_personas?.[0];
     const targetPersonaName = h.access?.allowed_persona_names?.[0] || targetPersona || 'Responsible Approver';
     const senderName = PERSONA_DISPLAY_NAMES[persona] || persona;
+    if (targetPersona) {
+      try { await forwardHITL(rid, 'diagnosis', persona, targetPersona); } catch (err) {
+        console.warn('Durable diagnosis hand-off failed:', err);
+      }
+    }
     setForwarded(true);
     patchMessage(msg.id, { forwarded: true, forwardedTo: targetPersonaName });
     if (targetPersona) {
@@ -2031,7 +2056,7 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
     return () => window.clearInterval(interval);
   }, [escalationStep?.escalates_at_utc, resolved, msg.escalationTriggered]);
 
-  function handleForward() {
+  async function handleForward() {
     // Try hitl_access first, then escalation chain as fallback
     const targetPersona = rec.hitl_access?.allowed_personas?.[0]
       || escalation.steps?.[0]?.to_persona_id;
@@ -2040,6 +2065,17 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
       || rec.responsible_approver
       || 'Responsible Approver';
     const senderName = PERSONA_DISPLAY_NAMES[persona] || persona;
+    if (targetPersona) {
+      try {
+        await forwardHITL(
+          rec.hitl_run_id || rec.case_id || `EXEC-${rec.asset_id || 'unknown'}`,
+          'execution', persona, targetPersona, '', rec.asset_id || '',
+          rec.conversation_id || conversationIdRef.current,
+        );
+      } catch (err) {
+        console.warn('Durable execution hand-off failed:', err);
+      }
+    }
     setForwarded(true);
     patchMessage(msg.id, { forwarded: true, forwardedTo: targetPersonaName });
     if (targetPersona) {

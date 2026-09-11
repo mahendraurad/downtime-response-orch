@@ -27,13 +27,35 @@ def _ask(client,message=QUERY,**extra):
     return client.post("/api/chat",json=payload).json()
 
 
-def test_pm_query_without_fleet_evidence_requests_clarification(client):
+def test_pm_query_without_fleet_evidence_uses_registered_assets(client):
     data=client.post("/api/chat",json={"message":QUERY,"persona":"manager"}).json()
+    assert data["intent"]=="multi_asset_plan" and data["clarification_required"] is False
+    assert [row["display_asset_id"] for row in data["multi_asset_results"]]==["M-104","P-207","C-301"]
+    assert len(data["details"])==3 and len(data["actions"])==3
+
+
+def test_unknown_only_multi_asset_query_still_requests_evidence(client):
+    data=client.post("/api/chat",json={
+        "message":"Give me an action plan for X-999 and Z-998",
+        "persona":"manager",
+    }).json()
     assert data["intent"]=="multi_asset_plan" and data["clarification_required"]
-    assert data["pipeline_log"]==[]
     assert data["clarification"]["missing_fields"]==["fleet_snapshot"]
     assert "Asset names alone are not evidence" in data["response"]
     assert "multi_asset_results" not in data
+
+
+def test_known_asset_is_returned_when_unknown_is_mixed_without_snapshot(client):
+    data = client.post("/api/chat", json={
+        "message": "Give me an action plan for M-104 and X-999",
+        "persona": "manager",
+    }).json()
+    assert data["clarification_required"] is False
+    rows = data["multi_asset_results"]
+    assert [row["display_asset_id"] for row in rows] == ["M-104", "X-999"]
+    assert rows[0]["pipeline_log"] and rows[0]["status"] in {"action_required", "data_review", "no_action_required"}
+    assert rows[1]["status"] == "unavailable"
+    assert rows[1]["recommendation"] is None
 
 
 def test_pm_query_returns_every_evidenced_asset_in_order(client):

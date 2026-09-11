@@ -78,3 +78,10 @@ def test_router_recognises_complete_and_execution_phrasings():
     assert plan_query("Give an executive decision brief for M-104").pipeline_intent == "full"
     assert plan_query("Create a work order for Z-404").intent == "execution"
     assert plan_query("Can P-207 wait until next week?").intent == "risk"
+
+
+def test_router_sends_data_quality_questions_to_data_foundation():
+    plan = plan_query("Why is C-301 data quality suspect?")
+    assert plan.intent == "data_quality"
+    assert plan.pipeline_intent == "status"
+    assert plan.agents == ("agent_1",)

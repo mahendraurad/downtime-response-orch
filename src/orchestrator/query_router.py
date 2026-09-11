@@ -59,6 +59,14 @@ _RULES = [
                   "how to fix", "how to repair", "maintenance steps"),
      "guidance", (1,2,3,4,5), False),
 
+    # Data-integrity questions belong to Data Foundation. Keep this ahead of
+    # generic anomaly/status rules so asset-specific quality questions cannot
+    # fall through to Reflexion.
+    ("data_quality", ("data quality", "data-quality", "signal quality",
+                      "quality score", "dropout", "historian gap",
+                      "missing data", "impute", "imputation", "incomplete data"),
+     "status", (1,), False),
+
     # ── Risk / impact / timeline questions → agents 1-4 only ─────────────────
     # Covers: "production impact", "financial exposure", "can it run until",
     # "failure this week", "downtime cost", "safely operate", etc.
