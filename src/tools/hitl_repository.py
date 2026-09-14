@@ -17,12 +17,14 @@ from src.schemas.bearing_signal import TrustedBearingSignal
 from src.schemas.diagnosis import FaultDiagnosis
 from src.schemas.knowledge import KnowledgeGuidance
 from src.schemas.risk import RiskAssessment
+from src.schemas.recommendation import MaintenanceRecommendation
 
 
 _MODELS = {
     cls.__name__: cls for cls in (
         TrustedBearingSignal, AnomalyEvent, FaultDiagnosis,
         RiskAssessment, KnowledgeGuidance,
+        MaintenanceRecommendation,
     )
 }
 
@@ -221,12 +223,37 @@ class SQLiteHITLRepository:
     def list_pending(self, persona: str = "", gate: str = "") -> list[dict]:
         sql = "SELECT * FROM hitl_sessions WHERE status='pending' AND expires_at>?"
         args: list[Any] = [time.time()]
+        if persona:
+            sql += " AND persona=?"; args.append(persona)
         if gate:
             sql += " AND gate=?"; args.append(gate)
         sql += " ORDER BY created_at"
         with closing(self._connect()) as db:
             rows = db.execute(sql, args).fetchall()
-        return [self._session_row(row, include_payload=False) for row in rows]
+        # The UI must be able to rebuild an actionable card after a refresh or
+        # process restart.  The API sanitises this payload before returning it;
+        # keeping it here also lets the durable repository remain the source of
+        # truth rather than browser sessionStorage.
+        return [self._session_row(row, include_payload=True) for row in rows]
+
+    def forward(self, run_id: str, to_persona: str, metadata: Optional[dict] = None) -> bool:
+        """Transfer ownership of a pending card to the next persona."""
+        with closing(self._connect()) as db:
+            row = db.execute("SELECT payload_json FROM hitl_sessions WHERE run_id=? "
+                             "AND status='pending' AND expires_at>?",
+                             (run_id, time.time())).fetchone()
+            if not row:
+                return False
+            payload = deserialize_payload(row["payload_json"])
+            for key, value in (metadata or {}).items():
+                payload.setdefault(key, value)
+            changed = db.execute(
+                "UPDATE hitl_sessions SET persona=?, payload_json=?, updated_at=? "
+                "WHERE run_id=? AND status='pending' AND expires_at>?",
+                (to_persona, serialize_payload(payload), time.time(), run_id, time.time()),
+            ).rowcount
+            db.commit()
+        return changed == 1
 
     def decisions(self, run_id: str) -> list[dict]:
         with closing(self._connect()) as db:
@@ -400,17 +427,39 @@ class PostgreSQLHITLRepository:
         return changed==1
 
     def list_pending(self, persona="", gate=""):
-        query="SELECT run_id,gate,persona,status,created_at,expires_at,claimed_at,claimed_by,action,updated_at FROM hitl_sessions WHERE status='pending' AND expires_at>NOW()"
+        query="SELECT * FROM hitl_sessions WHERE status='pending' AND expires_at>NOW()"
         args=[]
+        if persona: query += " AND persona=%s"; args.append(persona)
         if gate: query+=" AND gate=%s"; args.append(gate)
         query+=" ORDER BY created_at"
         with self._connect() as db:
             with db.cursor(row_factory=self._psycopg.rows.dict_row) as cursor:
                 cursor.execute(query,args); rows=cursor.fetchall()
         for row in rows:
+            if row.get("payload_json") is not None:
+                row["payload"] = deserialize_payload(row.pop("payload_json"))
             for key in ("created_at","expires_at","claimed_at","updated_at"):
                 if row.get(key) is not None: row[key]=row[key].timestamp()
         return rows
+
+    def forward(self, run_id, to_persona, metadata=None):
+        with self._connect() as db:
+            with db.cursor() as cursor:
+                cursor.execute("""SELECT payload_json FROM hitl_sessions
+                    WHERE run_id=%s AND status='pending' AND expires_at>NOW()
+                    FOR UPDATE""", (run_id,))
+                row = cursor.fetchone()
+                if not row:
+                    return False
+                payload = deserialize_payload(row[0])
+                for key, value in (metadata or {}).items():
+                    payload.setdefault(key, value)
+                cursor.execute("""UPDATE hitl_sessions SET persona=%s,payload_json=%s,updated_at=NOW()
+                    WHERE run_id=%s AND status='pending' AND expires_at>NOW()""",
+                    (to_persona, serialize_payload(payload), run_id))
+                changed = cursor.rowcount
+            db.commit()
+        return changed == 1
 
     def decisions(self, run_id):
         with self._connect() as db:

@@ -1256,11 +1256,65 @@ def _stamp_hitl_sessions() -> None:
 
 
 def _hitl_public_session(session: dict) -> dict:
-    """Expose operational metadata without leaking the stored pipeline payload."""
-    return {key: session.get(key) for key in (
+    """Expose durable card data needed to rebuild a HITL task after refresh.
+
+    The old endpoint intentionally omitted the payload, which meant the
+    frontend could display only a generic notification after a persona handoff
+    and lost the actual approval/remediation controls on reload.  We expose a
+    small, JSON-safe card projection instead of raw model objects or telemetry.
+    """
+    result = {key: session.get(key) for key in (
         "run_id", "gate", "persona", "status", "created_at", "expires_at",
         "claimed_at", "claimed_by", "action", "updated_at",
     )}
+    payload = session.get("payload") or {}
+    card = {
+        "run_id": result.get("run_id"),
+        "gate": result.get("gate"),
+        "conversation_id": payload.get("conversation_id", ""),
+        "owner_id": payload.get("owner_id", ""),
+        "intent": payload.get("intent", "full"),
+        "requesting_persona": payload.get("requesting_persona", ""),
+        "access": _hitl_access(str(result.get("gate") or ""),
+                                str(result.get("persona") or "")),
+    }
+    if result.get("gate") == "execution" and payload.get("recommendation") is not None:
+        recommendation = _recommendation_payload(
+            payload.get("recommendation"), str(result.get("persona") or "")
+        )
+        if recommendation is not None:
+            recommendation["hitl_run_id"] = result.get("run_id")
+            card["recommendation"] = recommendation
+            card["escalation_stage_index"] = int(payload.get("escalation_stage_index", 0) or 0)
+    else:
+        # Gate-specific facts are already deliberately small and contain no
+        # raw signal payload.  Keep the projection stable for all non-execution
+        # cards so their existing UI components can be hydrated as well.
+        trusted = payload.get("trusted")
+        raw = getattr(trusted, "raw", None)
+        if raw is not None:
+            card["asset_id"] = str(getattr(raw, "asset_id", "") or "")
+        if result.get("gate") == "remediation" and trusted is not None:
+            try:
+                from src.tools.remediation import missing_critical_fields, imputable_fields
+                from src.tools.config_loader import load_config
+                card["quality_score"] = getattr(trusted, "data_quality_score", None)
+                card["missing_fields"] = missing_critical_fields(trusted, load_config())
+                card["imputable_fields"] = imputable_fields(trusted, load_config())
+            except Exception:
+                pass
+        if result.get("gate") == "diagnosis":
+            diagnosis = payload.get("fault_diagnosis")
+            if diagnosis is not None:
+                card.update({
+                    "fault_mode": getattr(diagnosis, "fault_mode", ""),
+                    "fault_code": getattr(diagnosis, "fault_code", ""),
+                    "confidence": getattr(diagnosis, "confidence", None),
+                    "iso_stage": getattr(diagnosis, "iso_stage", None),
+                    "narrative": getattr(diagnosis, "narrative", ""),
+                })
+    result["hitl_payload"] = card
+    return result
 
 
 def _record_hitl_decision(stored: Dict[str, Any], run_id: str, gate: str,
@@ -1374,6 +1428,11 @@ def _create_advisory_gate(run_id: str, risk, persona: str, blocked: bool = False
             or getattr(risk,"assessment_source","")!="rules+llm_fallback"
             or not getattr(risk,"advisory_note","")):
         return None
+    # A run_id represents one durable blocking task.  Never overwrite a
+    # remediation/diagnosis/execution session with the optional advisory card;
+    # doing so made the real approval disappear from the pending inbox.
+    if run_id in _HITL_STORE:
+        return None
     _HITL_STORE[run_id]={"type":"advisory","risk_assessment":risk,
         "persona":persona,"created_at":time.time()}
     return _with_hitl_access(
@@ -1386,7 +1445,8 @@ _DIAGNOSIS_CONFIDENCE_THRESHOLD = 0.60
 
 
 def _build_hitl_gates(state: Dict, run_id: str, persona: str, intent: str,
-                      conversation_id: str = "", owner_id: str = "") -> Dict:
+                      conversation_id: str = "", owner_id: str = "",
+                      allow_execution: bool = True) -> Dict:
     """Compute HITL gate payloads from raw pipeline state and register with _HITL_STORE.
     Used by both /api/pipeline/run and inline pipeline execution in /api/chat."""
     trusted  = state.get("trusted_signal")
@@ -1465,6 +1525,23 @@ def _build_hitl_gates(state: Dict, run_id: str, persona: str, intent: str,
     )
     if recommendation is not None:
         recommendation["hitl_run_id"] = run_id
+        recommendation["approval_required"] = bool(allow_execution)
+        recommendation["approval_status"] = "pending" if allow_execution else "historical"
+        # Execution approval is a durable HITL task, not a browser-only card.
+        # Do not create a new approval task when the asset already has a
+        # completed intervention; its recommendation remains historical
+        # evidence and the current lifecycle is healthy.
+        if allow_execution:
+            _HITL_STORE[run_id] = {
+                "type": "execution",
+                "recommendation": state.get("recommendation"),
+                "trusted": trusted,
+                "persona": persona,
+                "intent": intent,
+                "conversation_id": conversation_id,
+                "owner_id": owner_id,
+                "created_at": time.time(),
+            }
 
     return {
         "hitl_required":  _with_hitl_access(hitl_required,"remediation",persona),
@@ -1558,6 +1635,7 @@ class RecommendationRejectionRequest(BaseModel):
     free_text: str = ""
     persona: Persona = "supervisor"
     conversation_id: Optional[str] = None
+    hitl_run_id: Optional[str] = None
 
 
 class HITLForwardRequest(BaseModel):
@@ -1590,11 +1668,29 @@ def hitl_pending(persona: Persona = "supervisor", gate: str = ""):
         raise HTTPException(422, f"Unknown HITL gate: {gate}")
     allowed = {name for name, personas in _HITL_PERMISSIONS.items()
                if persona in set(personas)}
-    rows = _HITL_REPOSITORY.list_pending(persona=persona, gate=gate)
+    # Query all pending rows, then apply the permission filter here.  The
+    # terminal escalation authority (VP Operations) is intentionally
+    # read-only in the execution matrix, but must still receive the card.
+    rows = _HITL_REPOSITORY.list_pending(persona="", gate=gate)
+    def visible(row: dict) -> bool:
+        if row.get("gate") in allowed and row.get("persona") == persona:
+            return True
+        if row.get("gate") != "execution" or persona != "executive":
+            return False
+        payload = row.get("payload") or {}
+        rec = payload.get("recommendation")
+        escalation = getattr(rec, "decision_support", None) if rec is not None else None
+        if isinstance(escalation, dict):
+            steps = escalation.get("approval_escalation", {}).get("steps", [])
+            terminal = steps[-1].get("to_persona_id") if steps else None
+        else:
+            escalation = getattr(escalation, "approval_escalation", None) if escalation else None
+            steps = getattr(escalation, "steps", None) if escalation else None
+            terminal = getattr(steps[-1], "to_persona_id", None) if steps else None
+        return terminal == persona
     return {
         "persona": persona,
-        "items": [_hitl_public_session(row) for row in rows
-                  if row.get("gate") in allowed],
+        "items": [_hitl_public_session(row) for row in rows if visible(row)],
     }
 
 
@@ -2504,6 +2600,20 @@ def executor_run(req: ExecutorRunRequest, user: Dict = Depends(get_current_user)
                     ],
                 }
                 _save_workorder(_new_wo)
+        # Consume the durable execution card exactly once.  Older cards may
+        # predate durable execution sessions, so retain a backwards-compatible
+        # no-session path for those payloads.
+        hitl_run_id = str(recommendation_payload.get("hitl_run_id") or "")
+        if hitl_run_id:
+            try:
+                _claim_hitl(
+                    hitl_run_id, "execution",
+                    "APPROVE" if req.approved else "REJECT",
+                    {"APPROVE", "REJECT"}, req.persona,
+                )
+            except HTTPException as exc:
+                if exc.status_code not in {404}:
+                    raise
         conversation_id = str(recommendation_payload.get("conversation_id") or "")
         if conversation_id:
             action_name = "APPROVE" if req.approved else "REJECT"
@@ -2546,6 +2656,13 @@ def reject_recommendation(
         free_text=req.free_text, persona_id=build_persona_context(req.persona).id,
         rejected_at=datetime.now(timezone.utc).isoformat(),
     )
+    if req.hitl_run_id:
+        try:
+            _claim_hitl(req.hitl_run_id, "execution", "REJECT",
+                        {"APPROVE", "REJECT"}, req.persona, req.free_text)
+        except HTTPException as exc:
+            if exc.status_code not in {404}:
+                raise
     result = _learning_agent().record_rejection(feedback).model_dump()
     if req.conversation_id:
         event = {
@@ -2579,8 +2696,24 @@ def hitl_forward(req: HITLForwardRequest, user: Dict = Depends(get_current_user)
     if not session and req.gate != "execution":
         raise HTTPException(404, f"HITL session '{req.run_id}' was not found.")
     target = req.to_persona or next(iter(_HITL_PERMISSIONS.get(req.gate, [])), None)
-    if not target or target not in set(_HITL_PERMISSIONS.get(req.gate, [])):
+    if target == req.from_persona:
+        target = next((p for p in _HITL_PERMISSIONS.get(req.gate, []) if p != req.from_persona), None)
+    terminal_target = False
+    if session and req.gate == "execution":
+        rec = (session.get("payload") or {}).get("recommendation")
+        ds = getattr(rec, "decision_support", None) if rec is not None else None
+        if isinstance(ds, dict):
+            steps = (ds.get("approval_escalation") or {}).get("steps") or []
+            terminal_target = bool(steps and target == steps[-1].get("to_persona_id"))
+    if not target or (target not in set(_HITL_PERMISSIONS.get(req.gate, [])) and not terminal_target):
         raise HTTPException(422, f"Persona is not authorized to resolve the {req.gate} gate.")
+    if session and not _HITL_REPOSITORY.forward(
+            req.run_id, target, {"requesting_persona": req.from_persona}):
+        raise HTTPException(409, f"HITL session '{req.run_id}' is no longer pending.")
+    if req.run_id in _HITL_STORE:
+        _HITL_STORE[req.run_id]["persona"] = target
+        _HITL_STORE[req.run_id]["forwarded_from"] = req.from_persona
+        _HITL_STORE[req.run_id]["forwarded_to"] = target
     payload = (session.get("payload") if session else {}) or {}
     trusted = payload.get("trusted")
     raw = getattr(trusted, "raw", None)
@@ -3097,7 +3230,7 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
             )
             _pipeline_headline=formatted.get("headline","Analysis complete.")
             _persona_context = build_persona_context(req.persona)
-            draft={"persona":_persona_context.id,"persona_context":_persona_context.model_dump(),"response":_pipeline_headline,"details":formatted.get("details",[]),"actions":formatted.get("actions",[]),"call_plan":list(plan.agents),"needs_context":False,"clarification_required":False,
+            draft={"persona":_persona_context.id,"persona_context":_persona_context.model_dump(),"response":_pipeline_headline,"details":formatted.get("details",[]),"actions":formatted.get("actions",[]),"lifecycle":formatted.get("lifecycle"),"call_plan":list(plan.agents),"needs_context":False,"clarification_required":False,
                    "agent_outputs":{"recommendation":state["recommendation"].to_dict() if state.get("recommendation") else None,
                                     "execution_result":state["execution_result"].to_dict() if state.get("execution_result") else None}}
             context["last_pipeline_result"] = {
@@ -3187,7 +3320,9 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
                 _hitl_fields = _build_hitl_gates(
                     state, run_id, req.persona, plan.pipeline_intent,
                     conversation_id=conversation_id, owner_id=owner_id,
+                    allow_execution=str((lifecycle or {}).get("status", "")).lower() != "healthy",
                 )
+                _stamp_hitl_sessions()
         plan_intent=plan.intent
     else:
         draft=_clarification_draft(req.persona,"general",["objective","timeframe"],

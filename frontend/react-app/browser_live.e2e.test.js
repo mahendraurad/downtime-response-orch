@@ -123,3 +123,69 @@ test('live browser routes a complete M-104 analysis through the backend', { skip
     assert.match(text, /Current status|CRITICAL|healthy/);
   } finally { await context.close(); }
 });
+
+test('live browser restores a durable executor card after refresh', { skip: !enabled }, async () => {
+  const { context, page } = await pageForLiveApp();
+  try {
+    const input = page.locator('textarea.cinptx');
+    await input.fill('Analyse P-207 completely');
+    await page.locator('button.sbtn').click();
+    await page.getByText('APPROVAL REQUIRED', { exact: false }).first()
+      .waitFor({ state: 'visible', timeout: 30000 });
+    assert.match(await page.locator('.msgs').innerText(), /P-207|AST_PMP_001/);
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.getByText('APPROVAL REQUIRED', { exact: false }).first()
+      .waitFor({ state: 'visible', timeout: 30000 });
+    assert.match(await page.locator('.msgs').innerText(), /P-207|AST_PMP_001/);
+  } finally { await context.close(); }
+});
+
+test('live browser does not create a new approval card for healthy M-104', { skip: !enabled }, async () => {
+  const { context, page } = await pageForLiveApp();
+  try {
+    const input = page.locator('textarea.cinptx');
+    await input.fill('Analyse M-104 completely');
+    await page.locator('button.sbtn').click();
+    await page.locator('.msgs .bbl.a').filter({ hasText: 'M-104' }).last()
+      .waitFor({ state: 'visible', timeout: 30000 });
+    const m104Cards = page.locator('.bbl.a').filter({ hasText: 'Asset: AST_MTR_001' });
+    assert.equal(await m104Cards.count(), 0, 'healthy completed asset must not show a new executor card');
+  } finally { await context.close(); }
+});
+
+test('live browser escalates an unanswered approval to the next persona', { skip: !enabled, timeout: 75000 }, async () => {
+  const { context, page } = await pageForLiveApp();
+  try {
+    const input = page.locator('textarea.cinptx');
+    await input.fill('Analyse P-207 completely');
+    await page.locator('button.sbtn').click();
+    await page.getByText('APPROVAL REQUIRED', { exact: false }).first()
+      .waitFor({ state: 'visible', timeout: 30000 });
+    // Demo configuration uses a 30-second approval timeout.  Wait past the
+    // deadline, then verify the manager inbox contains the actual card.
+    await page.waitForTimeout(34000);
+    await page.locator('#pp-manager').click();
+    await page.getByText('APPROVAL REQUIRED', { exact: false }).first()
+      .waitFor({ state: 'visible', timeout: 10000 });
+    const body = await page.locator('.msgs').innerText();
+    assert.match(body, /P-207|AST_PMP_001/);
+    assert.match(body, /Plant Manager|Final approval authority|Approve & Execute/);
+  } finally { await context.close(); }
+});
+
+test('live browser forwards a read-only diagnosis card to Reliability Engineer', { skip: !enabled }, async () => {
+  const { context, page } = await pageForLiveApp();
+  try {
+    const input = page.locator('textarea.cinptx');
+    await input.fill('Analyse P-208 completely');
+    await page.locator('button.sbtn').click();
+    const forward = page.getByRole('button', { name: /Send to Reliability Engineer/i }).last();
+    await forward.waitFor({ state: 'visible', timeout: 30000 });
+    await forward.click();
+    await page.locator('#pp-engineer').click();
+    await page.getByText('FAULT CLASSIFICATION REVIEW', { exact: false }).last()
+      .waitFor({ state: 'visible', timeout: 15000 });
+    const body = await page.locator('.msgs').innerText();
+    assert.match(body, /Confirm:|Override|P-208|AST_PMP_002/);
+  } finally { await context.close(); }
+});

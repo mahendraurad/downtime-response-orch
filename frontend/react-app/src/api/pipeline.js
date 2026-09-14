@@ -126,6 +126,7 @@ export async function rejectRecommendation(recommendation, reasonCode, freeText 
       free_text: freeText,
       persona,
       conversation_id: recommendation.conversation_id || null,
+      hitl_run_id: recommendation.hitl_run_id || null,
     }),
   });
   if (!response.ok) await throwApiError(response);

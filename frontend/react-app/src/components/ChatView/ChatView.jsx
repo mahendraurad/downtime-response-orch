@@ -536,7 +536,10 @@ export default function ChatView() {
     // SessionStorage is presentation-only. Clear it before restoring so an
     // old browser transcript cannot appear when the backend has no durable
     // conversation for this user/persona.
-    setMessages([]);
+    // Keep durable pending HITL cards while replacing the presentation
+    // transcript. They are owned by the backend repository and must not be
+    // erased by a persona switch or a history refresh.
+    setMessages(prev => (prev || []).filter(message => message.durable));
     setUsedChips(new Set());
     setContextChips(buildDefaultChips(persona, assets || []));
     if (storedConversation) {
@@ -563,7 +566,12 @@ export default function ChatView() {
               pipelineLog: result.pipeline_log || [], time: row.created_at || ts(),
             });
           });
-          if (restored.length) setMessages(restored); else renderChatHome();
+          if (restored.length) {
+            setMessages(prev => [
+              ...restored,
+              ...(prev || []).filter(message => message.durable),
+            ]);
+          } else renderChatHome();
         }).catch(() => { if (active) renderChatHome(); });
     } else {
       renderChatHome();
@@ -1033,7 +1041,9 @@ export default function ChatView() {
         if (d.hitl_knowledge) {
           addMessage({ id: mkId(), type: 'hitl_knowledge', data: d, persona, time: ts() });
         }
-        if (d.recommendation?.recommendation_status === 'ok') {
+        if (d.recommendation?.recommendation_status === 'ok'
+            && d.recommendation?.approval_required !== false
+            && d.lifecycle?.status !== 'healthy') {
           renderExecutorHITLCard(d.recommendation);
         }
       } catch (error) {
@@ -1049,6 +1059,12 @@ export default function ChatView() {
   }
 
   function renderExecutorHITLCard(rec) {
+    // A completed work order is a current healthy lifecycle, not a new
+    // approval request.  Historical risk evidence may still be displayed in
+    // the answer, but it must never create another HITL card.
+    if (rec.approval_required === false || rec.approval_status === 'historical') {
+      return;
+    }
     const stored = assetPipelineState[rec.asset_id];
     if (stored?.status === 'approved') {
       appendA(
@@ -1330,8 +1346,9 @@ function HITLRemediationMsg({ msg, onSq, doThink, appendA, addMessage, persona }
   const rid = h.run_id;
 
   async function handleForward() {
-    const targetPersona = h.access?.allowed_personas?.[0];
-    const targetPersonaName = h.access?.allowed_persona_names?.[0] || targetPersona || 'Responsible Approver';
+    const targetIndex = (h.access?.allowed_personas || []).findIndex(p => p !== persona);
+    const targetPersona = targetIndex >= 0 ? h.access.allowed_personas[targetIndex] : null;
+    const targetPersonaName = targetIndex >= 0 ? h.access.allowed_persona_names?.[targetIndex] : 'Responsible Approver';
     const senderName = PERSONA_DISPLAY_NAMES[persona] || persona;
     if (targetPersona) {
       try { await forwardHITL(rid, 'remediation', persona, targetPersona); } catch (err) {
@@ -1529,8 +1546,9 @@ function HITLMonitoringMsg({ msg, onSq, doThink, appendA, addMessage, persona })
   const ewmaSignals = (h.ewma_triggered && h.ewma_triggered.length > 0) ? h.ewma_triggered.join(', ') : 'multiple signals';
 
   async function handleForward() {
-    const targetPersona = h.access?.allowed_personas?.[0];
-    const targetPersonaName = h.access?.allowed_persona_names?.[0] || targetPersona || 'Responsible Approver';
+    const targetIndex = (h.access?.allowed_personas || []).findIndex(p => p !== persona);
+    const targetPersona = targetIndex >= 0 ? h.access.allowed_personas[targetIndex] : null;
+    const targetPersonaName = targetIndex >= 0 ? h.access.allowed_persona_names?.[targetIndex] : 'Responsible Approver';
     const senderName = PERSONA_DISPLAY_NAMES[persona] || persona;
     if (targetPersona) {
       try { await forwardHITL(rid, 'monitoring', persona, targetPersona); } catch (err) {
@@ -1671,8 +1689,9 @@ function HITLDiagnosisMsg({ msg, onSq, doThink, appendA, addMessage, persona }) 
   const resolverNames = (h.access?.allowed_persona_names || []).join(' / ');
 
   async function handleForward() {
-    const targetPersona = h.access?.allowed_personas?.[0];
-    const targetPersonaName = h.access?.allowed_persona_names?.[0] || targetPersona || 'Responsible Approver';
+    const targetIndex = (h.access?.allowed_personas || []).findIndex(p => p !== persona);
+    const targetPersona = targetIndex >= 0 ? h.access.allowed_personas[targetIndex] : null;
+    const targetPersonaName = targetIndex >= 0 ? h.access.allowed_persona_names?.[targetIndex] : 'Responsible Approver';
     const senderName = PERSONA_DISPLAY_NAMES[persona] || persona;
     if (targetPersona) {
       try { await forwardHITL(rid, 'diagnosis', persona, targetPersona); } catch (err) {
@@ -2058,14 +2077,15 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
 
   async function handleForward() {
     // Try hitl_access first, then escalation chain as fallback
-    const targetPersona = rec.hitl_access?.allowed_personas?.[0]
-      || escalation.steps?.[0]?.to_persona_id;
-    const targetPersonaName = rec.hitl_access?.allowed_persona_names?.[0]
-      || escalation.steps?.[0]?.to_persona_name
+    const nextStep = escalation.steps?.[escalationStageIndex];
+    const targetPersona = nextStep?.to_persona_id
+      || (rec.hitl_access?.allowed_personas || []).find(p => p !== persona);
+    const targetPersonaName = nextStep?.to_persona_name
+      || rec.hitl_access?.allowed_persona_names?.[Math.max(0, (rec.hitl_access?.allowed_personas || []).findIndex(p => p !== persona))]
       || rec.responsible_approver
       || 'Responsible Approver';
     const senderName = PERSONA_DISPLAY_NAMES[persona] || persona;
-    if (targetPersona) {
+    if (targetPersona && !isFinalAuthority) {
       try {
         await forwardHITL(
           rec.hitl_run_id || rec.case_id || `EXEC-${rec.asset_id || 'unknown'}`,
@@ -2078,7 +2098,7 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
     }
     setForwarded(true);
     patchMessage(msg.id, { forwarded: true, forwardedTo: targetPersonaName });
-    if (targetPersona) {
+    if (targetPersona && !isFinalAuthority) {
       pushNotification(targetPersona, {
         id: mkId(), type: 'agent',
         html: `<div style="border:1.5px solid #3b82f6;border-radius:8px;padding:10px 12px;background:rgba(59,130,246,0.05)"><div style="font-size:9px;font-weight:700;color:#3b82f6;font-family:var(--m);margin-bottom:5px">FORWARDED HITL — EXECUTOR</div><strong style="color:var(--t)">${senderName} has forwarded an execution approval request to you.</strong><br><span style="font-size:11px;color:var(--t2)">Asset <strong>${rec.asset_id}</strong> — maintenance action requires your approval before execution. See the card below.</span></div>`,
@@ -2380,7 +2400,7 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
                   </button>
                 </div>
                 <div style={{ marginTop: '8px', fontSize: '10px', color: 'var(--t3)', fontFamily: 'var(--m)', letterSpacing: '.3px' }}>
-                  Execution authority: Plant Supervisor · Plant Manager · Maintenance Planner
+                  Execution authority: Plant Supervisor · Plant Manager · Maintenance Planner · VP Operations
                 </div>
 
                 {showRejectInput && (
@@ -2426,13 +2446,15 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
               ) : (
                 <div>
                   <HITLReadOnlyNotice access={rec.hitl_access} />
-                  <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
-                    <button
-                      onClick={handleForward}
-                      style={{ padding: '7px 16px', borderRadius: '6px', border: 'none', background: '#3b82f6', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: '12px' }}>
-                      Send to {rec.hitl_access?.allowed_persona_names?.[0] || escalation.steps?.[0]?.to_persona_name || rec.responsible_approver || 'Responsible Approver'}
-                    </button>
-                  </div>
+                  {!isFinalAuthority && (nextStep || (rec.hitl_access?.allowed_personas || []).some(p => p !== persona)) && (
+                    <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+                      <button
+                        onClick={handleForward}
+                        style={{ padding: '7px 16px', borderRadius: '6px', border: 'none', background: '#3b82f6', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: '12px' }}>
+                        Send to {nextStep?.to_persona_name || rec.hitl_access?.allowed_persona_names?.find((_, i) => rec.hitl_access?.allowed_personas?.[i] !== persona) || rec.responsible_approver || 'Responsible Approver'}
+                      </button>
+                    </div>
+                  )}
                 </div>
               )
             ) : msg.escalationTriggered ? (

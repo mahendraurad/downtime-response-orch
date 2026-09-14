@@ -166,7 +166,7 @@ def test_frontend_uses_backend_contracts_for_group_a():
     assert "fetchChatHistory" in chat
     assert "dro-conversation-v1-" in chat
     assert "SessionStorage is presentation-only" in chat
-    assert "setMessages([])" in chat
+    assert "setMessages(prev => (prev || []).filter(message => message.durable))" in chat
     assert "REJECTION REASON" in work_orders
     assert "Confirm Reject" in work_orders
     assert "reasonCode" in app_context

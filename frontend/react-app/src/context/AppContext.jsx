@@ -1,7 +1,7 @@
 import React, { createContext, useState, useCallback, useEffect } from 'react';
 import { ASSETS } from '../data/assets';
 import { WOS } from '../data/workOrders';
-import { getNotifCounts, getNotifs, postPersonaNotification } from '../api/pipeline';
+import { getNotifCounts, getNotifs, getPendingHITL, postPersonaNotification, forwardHITL } from '../api/pipeline';
 import { fetchDashboardAssets } from '../api/dashboard';
 import { fetchWorkOrders, patchWorkOrder } from '../api/workOrders';
 import { useAuth } from './AuthContext';
@@ -257,6 +257,47 @@ export function AppProvider({ children }) {
     return () => { active = false; };
   }, [persona]);
 
+  // Rebuild actionable HITL cards from the durable repository.  Notifications
+  // are intentionally only a badge/summary; the pending endpoint carries the
+  // card projection so a refresh or a different browser cannot lose the task.
+  useEffect(() => {
+    let active = true;
+    getPendingHITL(persona).then(payload => {
+      if (!active) return;
+      const additions = (payload.items || []).flatMap(item => {
+        const card = item.hitl_payload || {};
+        const base = {
+          id: `durable-hitl-${item.run_id}`,
+          time: item.created_at ? new Date(item.created_at * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ts(),
+          durable: true,
+          requestingPersona: card.requesting_persona || undefined,
+          escalationStageIndex: Number(card.escalation_stage_index || 0),
+        };
+        if (item.gate === 'execution' && card.recommendation) {
+          return [{ ...base, type: 'hitl_executor', rec: card.recommendation }];
+        }
+        if (item.gate === 'remediation') {
+          return [{ ...base, type: 'hitl_remediation', data: { hitl_required: card }, persona }];
+        }
+        if (item.gate === 'diagnosis') {
+          return [{ ...base, type: 'hitl_diagnosis', data: { hitl_diagnosis: card }, persona }];
+        }
+        return [];
+      });
+      if (!additions.length) return;
+      setMessagesMap(previous => {
+        const current = previous[persona] || [];
+        const known = new Set(current.map(message => message.id));
+        const fresh = additions.filter(message => !known.has(message.id));
+        if (!fresh.length) return previous;
+        const next = { ...previous, [persona]: [...current, ...fresh].slice(-MAX_MSGS_PER_PERSONA) };
+        saveSession(next);
+        return next;
+      });
+    }).catch(() => {});
+    return () => { active = false; };
+  }, [persona]);
+
   // A4 escalation worker scans every persona inbox, not only the card currently
   // visible on screen. Expired approvals therefore transfer after persona
   // switches and immediately after a session is restored.
@@ -287,11 +328,29 @@ export function AppProvider({ children }) {
                 id: transferId,
                 type: 'hitl_executor',
                 rec: message.rec,
+                durable: true,
                 escalationStageIndex: stageIndex + 1,
                 escalatedFrom: step.from_persona_name,
                 time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
               },
             });
+            forwardHITL(
+              message.rec?.hitl_run_id || message.rec?.case_id || '',
+              'execution', personaId, step.to_persona_id,
+              'Automatic escalation after approval deadline.',
+              message.rec?.asset_id || '',
+              message.rec?.conversation_id || null,
+            ).catch(() => {});
+            // Keep the notification durable as well; the target persona will
+            // hydrate the actual card from /api/pipeline/hitl/pending.
+            postPersonaNotification(step.to_persona_id, {
+              type: 'hitl_executor',
+              title: 'HITL approval escalated',
+              message: `Approval for ${message.rec?.asset_id || 'asset'} escalated from ${step.from_persona_name}.`,
+              run_id: message.rec?.hitl_run_id || message.rec?.case_id || '',
+              asset_id: message.rec?.asset_id || '',
+              metadata: { hitl_card: true, gate: 'execution', escalation_stage_index: stageIndex + 1 },
+            }).catch(() => {});
             return {
               ...message,
               resolved: true,

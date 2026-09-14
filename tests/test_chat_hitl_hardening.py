@@ -161,6 +161,54 @@ def test_api_can_resolve_session_after_memory_restart(client):
     assert api._HITL_REPOSITORY.get_session(run_id)["status"]=="resolved"
 
 
+def test_execution_card_is_durable_and_completed_asset_has_no_new_card(client):
+    pending = client.post("/api/chat", json={
+        "message": "Analyse P-207 completely", "persona": "supervisor",
+        "conversation_id": "DURABLE-EXEC-1",
+    }).json()
+    run_id = pending["recommendation"]["hitl_run_id"]
+    assert pending["recommendation"]["approval_required"] is True
+    rows = client.get("/api/pipeline/hitl/pending", params={
+        "persona": "supervisor", "gate": "execution",
+    }).json()["items"]
+    card = next(row for row in rows if row["run_id"] == run_id)
+    assert card["hitl_payload"]["recommendation"]["asset_id"] == "AST_PMP_001"
+
+    healthy = client.post("/api/chat", json={
+        "message": "Analyse M-104 completely", "persona": "supervisor",
+        "conversation_id": "DURABLE-EXEC-2",
+    }).json()
+    assert healthy["lifecycle"]["status"] == "healthy"
+    assert healthy["recommendation"]["approval_required"] is False
+    assert not any(row["run_id"] == healthy["recommendation"]["hitl_run_id"]
+                   for row in client.get("/api/pipeline/hitl/pending",
+                                         params={"persona": "supervisor", "gate": "execution"}).json()["items"])
+
+
+def test_forward_moves_durable_card_to_target_persona(client):
+    data = client.post("/api/chat", json={
+        "message": "Analyse P-207 completely", "persona": "supervisor",
+        "conversation_id": "DURABLE-FWD-1",
+    }).json()
+    run_id = data["recommendation"]["hitl_run_id"]
+    response = client.post("/api/pipeline/hitl/forward", json={
+        "run_id": run_id, "gate": "execution",
+        "from_persona": "supervisor", "to_persona": "manager",
+    })
+    assert response.status_code == 200
+    supervisor = client.get("/api/pipeline/hitl/pending", params={
+        "persona": "supervisor", "gate": "execution",
+    }).json()["items"]
+    manager = client.get("/api/pipeline/hitl/pending", params={
+        "persona": "manager", "gate": "execution",
+    }).json()["items"]
+    assert not any(row["run_id"] == run_id for row in supervisor)
+    target = next(row for row in manager if row["run_id"] == run_id)
+    assert target["persona"] == "manager"
+    assert target["hitl_payload"]["requesting_persona"] == "supervisor"
+    assert target["hitl_payload"]["recommendation"]["asset_id"] == "AST_PMP_001"
+
+
 def test_execution_approval_checks_selected_persona_before_payload(client):
     response=client.post("/api/executor/run",json={"recommendation":{},"approved":True,"persona":"executive"})
     assert response.status_code==403
