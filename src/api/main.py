@@ -998,6 +998,19 @@ def _apply_lifecycle_overlay(formatted: Dict[str, Any], lifecycle: Optional[Dict
     if lifecycle_detail not in details:
         details.insert(0, lifecycle_detail)
     result["details"] = details
+    if status == "healthy":
+        # Do not present pre-repair recommendations as current instructions.
+        # The analytical evidence remains in the details, while the action
+        # list describes what is true after the durable intervention.
+        result["actions"] = [
+            f"Maintenance action for {asset_label} was completed under work order {wo_id}.",
+            "Obtain fresh post-repair telemetry before making a new run/defer decision.",
+        ]
+    elif lifecycle.get("decision") == "rejected" or status == "critical":
+        result["actions"] = [
+            f"Recommendation for {asset_label} was rejected; no repair was executed.",
+            "Obtain an authorized review or submit a new decision against current evidence.",
+        ]
     result["lifecycle"] = {
         "status": status,
         "work_order_id": lifecycle.get("work_order_id", ""),
@@ -1087,6 +1100,89 @@ def _lifecycle_response_prefix(lifecycle: Optional[Dict[str, Any]], asset_label:
                 f"recommendation was rejected ({wo_id}); the risk is unresolved. ")
     return (f"Current status for {asset_label} is warning while work order {wo_id} is "
             f"{wo_status}; figures below describe the pre-intervention condition. ")
+
+
+def _is_counterfactual_decision_question(message: str) -> bool:
+    """Identify questions about an alternative HITL/work-order decision.
+
+    These questions must not be answered as a fresh present-state diagnosis.
+    In particular, after a completed repair, asking what would have happened
+    if the recommendation had been rejected is a historical counterfactual,
+    not evidence that the asset is currently critical again.
+    """
+    text = str(message or "").lower()
+    return bool(re.search(
+        r"\bwhat\s+(?:would|might)\s+have\s+happened\b.*\b(?:reject|approve|defer|accept)",
+        text,
+    ) or re.search(
+        r"\bif\s+(?:i|we)\s+(?:had\s+)?(?:rejected|approved|deferred|accepted)\b",
+        text,
+    ) or re.search(
+        r"\b(?:counterfactual|alternative)\b.*\b(?:decision|work\s*order|recommendation)\b",
+        text,
+    ))
+
+
+def _counterfactual_decision_draft(
+    asset_label: str,
+    lifecycle: Optional[Dict[str, Any]],
+    historical_headline: str,
+    persona: str,
+) -> Dict[str, Any]:
+    """Build a deterministic, lifecycle-aware alternative-decision answer."""
+    context = build_persona_context(persona)
+    status = str((lifecycle or {}).get("status") or "").lower()
+    wo_id = str((lifecycle or {}).get("work_order_id") or "the work order")
+    if status == "healthy":
+        response = (
+            f"{asset_label}: the work order was completed and the asset is currently healthy. "
+            f"If it had been rejected instead, no repair would have been executed and the "
+            f"pre-repair risk would have remained unresolved. Historical evidence: "
+            f"{historical_headline}"
+        )
+        details = [
+            f"Current lifecycle: healthy after completed maintenance ({wo_id}).",
+            "Counterfactual outcome: rejection would have left the asset in its pre-repair condition.",
+            "This is a historical what-if; it does not change the current asset status.",
+        ]
+    elif (lifecycle or {}).get("decision") == "rejected" or status == "critical":
+        response = (
+            f"{asset_label}: the recommendation was rejected, so no repair was executed and "
+            f"the underlying risk remains unresolved. If it had been approved, the configured "
+            f"maintenance action would have been scheduled instead. Historical evidence: "
+            f"{historical_headline}"
+        )
+        details = [
+            "Current lifecycle: critical after rejection; this is not evidence of a completed repair.",
+            "Approval would have created the maintenance work order and execution path.",
+        ]
+    elif status == "warning":
+        response = (
+            f"{asset_label}: the work order is currently {str((lifecycle or {}).get('work_order_status') or 'active').lower()}. "
+            "If it were rejected before execution, the pre-intervention risk would remain unresolved. "
+            f"Historical evidence: {historical_headline}"
+        )
+        details = [
+            "Current lifecycle: controlled warning while maintenance is pending.",
+            "A rejection would cancel the repair path; it would not make the asset healthy.",
+        ]
+    else:
+        response = (
+            f"{asset_label}: the alternative decision would determine whether the recommended "
+            f"maintenance action was executed. Historical evidence: {historical_headline}"
+        )
+        details = ["No durable work-order outcome is recorded for this asset yet."]
+    return {
+        "persona": context.id,
+        "persona_context": context.model_dump(),
+        "response": response,
+        "details": details,
+        "actions": [],
+        "call_plan": ["data_foundation", "monitoring", "failure_intelligence", "predictive_risk"],
+        "needs_context": False,
+        "clarification_required": False,
+        "agent_outputs": {},
+    }
 
 
 def _remember_chat_context(conversation_id: str, context: dict) -> None:
@@ -1212,6 +1308,13 @@ def _claim_hitl(run_id: str, gate: str, action: str, allowed_actions: set[str],
     _authorize_hitl(persona,gate)
     memory=_HITL_STORE.get(run_id)
     persisted=_HITL_REPOSITORY.get_session(run_id)
+    owner = str((persisted or {}).get("persona") or (memory or {}).get("persona") or "")
+    if owner and owner != persona:
+        raise HTTPException(
+            403,
+            f"This HITL card is assigned to {_PERSONA_LABELS.get(owner, owner)}. "
+            "Forward it to your persona before taking the action.",
+        )
     if memory and (not persisted or float(memory.get("created_at",0))>=float(persisted.get("updated_at",0))):
         created=float(memory.get("created_at",time.time()))
         _HITL_REPOSITORY.save_session(run_id,memory.get("type",""),memory.get("persona",persona),
@@ -1349,6 +1452,11 @@ def _record_hitl_decision(stored: Dict[str, Any], run_id: str, gate: str,
     conversation_id = str(stored.get("conversation_id") or "").strip()
     if not conversation_id:
         return event
+    # Execution has its own action-event writer, which includes the resulting
+    # work-order identity.  Avoid adding a second visible transcript row such
+    # as ``HITL execution decision: APPROVE`` for the same click.
+    if gate == "execution":
+        return event
     try:
         context = _load_chat_context(conversation_id)
         decisions = context.setdefault("hitl_decisions", [])
@@ -1385,6 +1493,54 @@ def _record_hitl_decision(stored: Dict[str, Any], run_id: str, gate: str,
         # is unavailable.  The repository decision remains authoritative.
         pass
     return event
+
+
+def _asset_aliases(asset_id: str) -> set[str]:
+    key = str(asset_id or "").strip().upper()
+    aliases = {key} if key else set()
+    for display_id, (canonical_id, _) in _MULTI_ASSET_SCENARIOS.items():
+        if key in {str(display_id).strip().upper(), str(canonical_id).strip().upper()}:
+            aliases.update({str(display_id).strip().upper(), str(canonical_id).strip().upper()})
+    return aliases
+
+
+def _recommendation_asset_id(recommendation: Any) -> str:
+    if isinstance(recommendation, dict):
+        return str(recommendation.get("asset_id") or "").strip().upper()
+    return str(getattr(recommendation, "asset_id", "") or "").strip().upper()
+
+
+def _pending_execution_for_asset(asset_id: str) -> Optional[dict]:
+    aliases = _asset_aliases(asset_id)
+    if not aliases:
+        return None
+    try:
+        rows = _HITL_REPOSITORY.list_pending(gate="execution")
+    except Exception:
+        return None
+    for row in rows:
+        payload = row.get("payload") or {}
+        if _recommendation_asset_id(payload.get("recommendation")) in aliases:
+            return row
+    return None
+
+
+def _cancel_pending_execution_for_asset(asset_id: str) -> None:
+    """Remove obsolete approval cards once a durable repair is complete."""
+    aliases = _asset_aliases(asset_id)
+    if not aliases:
+        return
+    try:
+        rows = _HITL_REPOSITORY.list_pending(gate="execution")
+        for row in rows:
+            payload = row.get("payload") or {}
+            if _recommendation_asset_id(payload.get("recommendation")) in aliases:
+                _HITL_REPOSITORY.cancel(row.get("run_id", ""), "superseded by durable asset lifecycle")
+                _HITL_STORE.pop(row.get("run_id", ""), None)
+    except Exception:
+        # A stale card must never prevent a current healthy answer.  The
+        # repository remains authoritative and will reconcile on the next poll.
+        return
 
 
 def _record_chat_action_event(conversation_id: str, owner_id: str, event: Dict[str, Any],
@@ -1524,6 +1680,34 @@ def _build_hitl_gates(state: Dict, run_id: str, persona: str, intent: str,
         state.get("recommendation"), persona, conversation_id=conversation_id
     )
     if recommendation is not None:
+        # Execution authority is the current owner in the configured
+        # Supervisor -> Manager -> Executive chain.  A requester such as a
+        # Reliability Engineer or Maintenance Planner may see the evidence,
+        # but must forward the card to that owner instead of receiving action
+        # buttons that the backend will reject.
+        if allow_execution:
+            decision_support = recommendation.get("decision_support") or {}
+            escalation = decision_support.get("approval_escalation") or {}
+            current_authority = escalation.get("current_persona_id")
+            if current_authority and current_authority != persona:
+                recommendation["hitl_access"] = {
+                    **recommendation.get("hitl_access", {}),
+                    "can_resolve": False,
+                    "mode": "read_only",
+                    "selected_persona": persona,
+                    "owner_persona": current_authority,
+                    "owner_persona_name": _PERSONA_LABELS.get(current_authority, current_authority),
+                    "message": (
+                        f"This approval is assigned to "
+                        f"{_PERSONA_LABELS.get(current_authority, current_authority)}."
+                    ),
+                }
+        asset_id = _recommendation_asset_id(recommendation)
+        if not allow_execution:
+            # A completed intervention supersedes any stale browser/session
+            # card for the same asset.  The durable work-order lifecycle is
+            # the authority for whether a new approval is allowed.
+            _cancel_pending_execution_for_asset(asset_id)
         recommendation["hitl_run_id"] = run_id
         recommendation["approval_required"] = bool(allow_execution)
         recommendation["approval_status"] = "pending" if allow_execution else "historical"
@@ -1532,16 +1716,37 @@ def _build_hitl_gates(state: Dict, run_id: str, persona: str, intent: str,
         # completed intervention; its recommendation remains historical
         # evidence and the current lifecycle is healthy.
         if allow_execution:
-            _HITL_STORE[run_id] = {
-                "type": "execution",
-                "recommendation": state.get("recommendation"),
-                "trusted": trusted,
-                "persona": persona,
-                "intent": intent,
-                "conversation_id": conversation_id,
-                "owner_id": owner_id,
-                "created_at": time.time(),
-            }
+            existing = _pending_execution_for_asset(asset_id)
+            if existing and existing.get("run_id") != run_id:
+                # Idempotency: one active approval card per asset.  Return the
+                # existing durable task rather than creating another card for
+                # every follow-up query.
+                existing_owner = str(existing.get("persona") or "")
+                recommendation["hitl_run_id"] = existing.get("run_id")
+                recommendation["hitl_owner_persona"] = existing_owner
+                if existing_owner and existing_owner != persona:
+                    recommendation["hitl_access"] = {
+                        **recommendation.get("hitl_access", {}),
+                        "can_resolve": False,
+                        "mode": "read_only",
+                        "selected_persona": persona,
+                        "owner_persona": existing_owner,
+                        "message": (
+                            f"This approval is assigned to "
+                            f"{_PERSONA_LABELS.get(existing_owner, existing_owner)}."
+                        ),
+                    }
+            else:
+                _HITL_STORE[run_id] = {
+                    "type": "execution",
+                    "recommendation": state.get("recommendation"),
+                    "trusted": trusted,
+                    "persona": persona,
+                    "intent": intent,
+                    "conversation_id": conversation_id,
+                    "owner_id": owner_id,
+                    "created_at": time.time(),
+                }
 
     return {
         "hitl_required":  _with_hitl_access(hitl_required,"remediation",persona),
@@ -1648,6 +1853,10 @@ class HITLForwardRequest(BaseModel):
     # session; carry their durable conversation/asset identity explicitly.
     asset_id: Optional[str] = None
     conversation_id: Optional[str] = None
+    # Index of the receiving stage in the configured escalation chain.  The
+    # backend uses it to reset the durable expiry instead of reusing the
+    # deadline that just fired.
+    escalation_stage_index: Optional[int] = None
 
 
 class PersonaNotificationRequest(BaseModel):
@@ -2522,6 +2731,20 @@ def executor_run(req: ExecutorRunRequest, user: Dict = Depends(get_current_user)
     try:
         recommendation_payload = dict(req.recommendation or {})
         rec = MaintenanceRecommendation(**req.recommendation)
+        # Claim the durable approval before executing.  The previous order
+        # executed first and claimed afterwards, allowing a repeated/stale UI
+        # click to create a second work order before the conflict was raised.
+        hitl_run_id = str(recommendation_payload.get("hitl_run_id") or "")
+        if hitl_run_id:
+            try:
+                _claim_hitl(
+                    hitl_run_id, "execution",
+                    "APPROVE" if req.approved else "REJECT",
+                    {"APPROVE", "REJECT"}, req.persona,
+                )
+            except HTTPException as exc:
+                if exc.status_code not in {404}:
+                    raise
         if (
             req.approved and rec.checkpoint_thread_id
             and rec.checkpoint_namespace and graph_checkpointing_enabled()
@@ -2600,20 +2823,6 @@ def executor_run(req: ExecutorRunRequest, user: Dict = Depends(get_current_user)
                     ],
                 }
                 _save_workorder(_new_wo)
-        # Consume the durable execution card exactly once.  Older cards may
-        # predate durable execution sessions, so retain a backwards-compatible
-        # no-session path for those payloads.
-        hitl_run_id = str(recommendation_payload.get("hitl_run_id") or "")
-        if hitl_run_id:
-            try:
-                _claim_hitl(
-                    hitl_run_id, "execution",
-                    "APPROVE" if req.approved else "REJECT",
-                    {"APPROVE", "REJECT"}, req.persona,
-                )
-            except HTTPException as exc:
-                if exc.status_code not in {404}:
-                    raise
         conversation_id = str(recommendation_payload.get("conversation_id") or "")
         if conversation_id:
             action_name = "APPROVE" if req.approved else "REJECT"
@@ -2693,6 +2902,13 @@ def hitl_forward(req: HITLForwardRequest, user: Dict = Depends(get_current_user)
     session = _HITL_REPOSITORY.get_session(req.run_id)
     if session and session.get("gate") != req.gate:
         raise HTTPException(409, f"HITL session '{req.run_id}' is for {session.get('gate')}, not {req.gate}.")
+    if session and str(session.get("persona") or "") != req.from_persona:
+        raise HTTPException(
+            409,
+            f"HITL card is currently assigned to "
+            f"{_PERSONA_LABELS.get(session.get('persona'), session.get('persona'))}; "
+            "stale forwarding is not allowed.",
+        )
     if not session and req.gate != "execution":
         raise HTTPException(404, f"HITL session '{req.run_id}' was not found.")
     target = req.to_persona or next(iter(_HITL_PERMISSIONS.get(req.gate, [])), None)
@@ -2705,16 +2921,78 @@ def hitl_forward(req: HITLForwardRequest, user: Dict = Depends(get_current_user)
         if isinstance(ds, dict):
             steps = (ds.get("approval_escalation") or {}).get("steps") or []
             terminal_target = bool(steps and target == steps[-1].get("to_persona_id"))
+        else:
+            escalation = getattr(ds, "approval_escalation", None) if ds is not None else None
+            steps = list(getattr(escalation, "steps", None) or []) if escalation is not None else []
+            terminal_target = bool(
+                steps and target == getattr(steps[-1], "to_persona_id", "")
+            )
     if not target or (target not in set(_HITL_PERMISSIONS.get(req.gate, [])) and not terminal_target):
         raise HTTPException(422, f"Persona is not authorized to resolve the {req.gate} gate.")
+    payload = (session.get("payload") if session else {}) or {}
+    expires_at = None
+    stage_index = req.escalation_stage_index
+    if session and req.gate == "execution":
+        rec = payload.get("recommendation")
+        ds = getattr(rec, "decision_support", None) if rec is not None else None
+        if isinstance(ds, dict):
+            escalation = ds.get("approval_escalation") or {}
+            steps = list(escalation.get("steps") or [])
+        else:
+            escalation = getattr(ds, "approval_escalation", None) if ds is not None else None
+            steps = list(getattr(escalation, "steps", None) or []) if escalation is not None else []
+        current_stage = int(payload.get("escalation_stage_index", 0) or 0)
+        if stage_index is None:
+            stage_index = current_stage + 1
+        stage_index = max(0, int(stage_index))
+        initial_authority = None
+        if steps:
+            initial_authority = (
+                escalation.get("current_persona_id") if isinstance(escalation, dict)
+                else getattr(escalation, "current_persona_id", None)
+            )
+        initial_handoff = bool(
+            steps and current_stage == 0 and session
+            and str(session.get("persona") or "") != str(initial_authority or "")
+            and target == initial_authority
+        )
+        if initial_handoff and req.escalation_stage_index is None:
+            # A requester-to-owner hand-off enters the chain at stage zero;
+            # it is not an escalation from stage zero to stage one.
+            stage_index = 0
+        if steps and current_stage < len(steps) and not initial_handoff:
+            expected_target = getattr(steps[current_stage], "to_persona_id", "")
+            if isinstance(steps[current_stage], dict):
+                expected_target = steps[current_stage].get("to_persona_id", "")
+            # A card may only advance along the configured chain.  This is
+            # what prevents a terminal VP card from being sent back to the
+            # supervisor and entering an escalation loop.
+            if target != expected_target:
+                raise HTTPException(422, "HITL card can only advance to the configured next authority.")
+        if steps and stage_index > len(steps):
+            raise HTTPException(422, "The HITL card is already at its final authority.")
+        if steps and stage_index < len(steps):
+            deadline = str(getattr(steps[stage_index], "escalates_at_utc", "") or "")
+            try:
+                expires_at = datetime.fromisoformat(deadline.replace("Z", "+00:00")).timestamp()
+            except (TypeError, ValueError):
+                expires_at = None
+        # The terminal authority has no countdown. Keep the durable task alive
+        # for the normal HITL TTL so it remains actionable after refresh.
+        if not expires_at or expires_at <= time.time():
+            expires_at = time.time() + _HITL_TTL
+        if steps:
+            payload["escalation_stage_index"] = stage_index
+    metadata = {"requesting_persona": req.from_persona}
+    if stage_index is not None:
+        metadata["escalation_stage_index"] = stage_index
     if session and not _HITL_REPOSITORY.forward(
-            req.run_id, target, {"requesting_persona": req.from_persona}):
+            req.run_id, target, metadata, expires_at=expires_at):
         raise HTTPException(409, f"HITL session '{req.run_id}' is no longer pending.")
     if req.run_id in _HITL_STORE:
         _HITL_STORE[req.run_id]["persona"] = target
         _HITL_STORE[req.run_id]["forwarded_from"] = req.from_persona
         _HITL_STORE[req.run_id]["forwarded_to"] = target
-    payload = (session.get("payload") if session else {}) or {}
     trusted = payload.get("trusted")
     raw = getattr(trusted, "raw", None)
     asset_id = str(getattr(raw, "asset_id", "") or req.asset_id or "")
@@ -3228,11 +3506,28 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
             formatted = _apply_lifecycle_overlay(
                 formatted, lifecycle, asset_label, plan.intent
             )
+            counterfactual = _is_counterfactual_decision_question(effective_message)
+            if counterfactual:
+                # Preserve the analytical headline as historical evidence in
+                # a dedicated what-if answer; do not let the normal pipeline
+                # formatter or LLM turn the question into a repeated current
+                # risk/status response.
+                historical_headline = str(formatted.get("headline") or "Analysis complete.")
+                draft = _counterfactual_decision_draft(
+                    asset_label, lifecycle, historical_headline, req.persona
+                )
             _pipeline_headline=formatted.get("headline","Analysis complete.")
             _persona_context = build_persona_context(req.persona)
-            draft={"persona":_persona_context.id,"persona_context":_persona_context.model_dump(),"response":_pipeline_headline,"details":formatted.get("details",[]),"actions":formatted.get("actions",[]),"lifecycle":formatted.get("lifecycle"),"call_plan":list(plan.agents),"needs_context":False,"clarification_required":False,
-                   "agent_outputs":{"recommendation":state["recommendation"].to_dict() if state.get("recommendation") else None,
-                                    "execution_result":state["execution_result"].to_dict() if state.get("execution_result") else None}}
+            if not counterfactual:
+                draft={"persona":_persona_context.id,"persona_context":_persona_context.model_dump(),"response":_pipeline_headline,"details":formatted.get("details",[]),"actions":formatted.get("actions",[]),"lifecycle":formatted.get("lifecycle"),"call_plan":list(plan.agents),"needs_context":False,"clarification_required":False,
+                       "agent_outputs":{"recommendation":state["recommendation"].to_dict() if state.get("recommendation") else None,
+                                        "execution_result":state["execution_result"].to_dict() if state.get("execution_result") else None}}
+            else:
+                draft["lifecycle"] = formatted.get("lifecycle")
+                draft["agent_outputs"] = {
+                    "recommendation": state["recommendation"].to_dict() if state.get("recommendation") else None,
+                    "execution_result": state["execution_result"].to_dict() if state.get("execution_result") else None,
+                }
             context["last_pipeline_result"] = {
                 "asset_id": signal.get("asset_id", "") if isinstance(signal, dict) else "",
                 "pipeline_intent": plan.pipeline_intent,
@@ -3254,7 +3549,7 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
                 state.get("risk_assessment")
                 and getattr(state.get("risk_assessment"), "risk_eligible", False)
             )
-            if _CHAT_LLM.is_configured() and _risk_ready:
+            if not counterfactual and _CHAT_LLM.is_configured() and _risk_ready:
                 try:
                     _pipe_summary=(
                         f"Headline: {_pipeline_headline}\n"

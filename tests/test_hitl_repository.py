@@ -102,3 +102,22 @@ def test_stale_processing_lease_can_be_reclaimed(tmp_path,monkeypatch):
     second=repo.claim("RUN-1","advisory","supervisor","REJECT",lease_seconds=1)
     assert second["outcome"]=="claimed"
     assert second["claim_token"]!=first["claim_token"]
+
+
+def test_forward_at_expiry_transfers_and_resets_deadline(tmp_path):
+    repo=SQLiteHITLRepository(tmp_path / "hitl.db")
+    _save(repo, expires_in=-1)
+    assert repo.forward("RUN-1", "manager", {"escalation_stage_index": 1},
+                        expires_at=time.time()+60)
+    pending=repo.list_pending(persona="manager")
+    assert len(pending)==1
+    assert pending[0]["payload"]["escalation_stage_index"]==1
+    assert pending[0]["expires_at"] > time.time()
+
+
+def test_cancel_obsolete_pending_card_is_not_listed(tmp_path):
+    repo=SQLiteHITLRepository(tmp_path / "hitl.db")
+    _save(repo)
+    assert repo.cancel("RUN-1", "superseded by completed maintenance")
+    assert repo.list_pending()==[]
+    assert repo.get_session("RUN-1")["status"]=="cancelled"

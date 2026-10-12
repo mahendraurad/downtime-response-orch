@@ -1,4 +1,4 @@
-import React, { createContext, useState, useCallback, useEffect } from 'react';
+import React, { createContext, useState, useCallback, useEffect, useRef } from 'react';
 import { ASSETS } from '../data/assets';
 import { WOS } from '../data/workOrders';
 import { getNotifCounts, getNotifs, getPendingHITL, postPersonaNotification, forwardHITL } from '../api/pipeline';
@@ -264,7 +264,9 @@ export function AppProvider({ children }) {
     let active = true;
     getPendingHITL(persona).then(payload => {
       if (!active) return;
-      const additions = (payload.items || []).flatMap(item => {
+      const items = payload.items || [];
+      const pendingRunIds = new Set(items.map(item => String(item.run_id || '')));
+      const additions = items.flatMap(item => {
         const card = item.hitl_payload || {};
         const base = {
           id: `durable-hitl-${item.run_id}`,
@@ -284,13 +286,22 @@ export function AppProvider({ children }) {
         }
         return [];
       });
-      if (!additions.length) return;
       setMessagesMap(previous => {
         const current = previous[persona] || [];
         const known = new Set(current.map(message => message.id));
         const fresh = additions.filter(message => !known.has(message.id));
-        if (!fresh.length) return previous;
-        const next = { ...previous, [persona]: [...current, ...fresh].slice(-MAX_MSGS_PER_PERSONA) };
+        // Reconcile unresolved durable cards with the repository.  A browser
+        // session can outlive an approval/closure; keeping its stale card is
+        // what made a healthy asset show HITL again after refresh.
+        const reconciled = current.filter(message => {
+          if (message.type !== 'hitl_executor' || !message.durable || message.resolved) {
+            return true;
+          }
+          const runId = String(message.rec?.hitl_run_id || '').trim();
+          return runId ? pendingRunIds.has(runId) : true;
+        });
+        if (!fresh.length && reconciled.length === current.length) return previous;
+        const next = { ...previous, [persona]: [...reconciled, ...fresh].slice(-MAX_MSGS_PER_PERSONA) };
         saveSession(next);
         return next;
       });
@@ -301,6 +312,7 @@ export function AppProvider({ children }) {
   // A4 escalation worker scans every persona inbox, not only the card currently
   // visible on screen. Expired approvals therefore transfer after persona
   // switches and immediately after a session is restored.
+  const escalationInFlightRef = useRef(new Set());
   useEffect(() => {
     const interval = window.setInterval(() => {
       setMessagesMap(previous => {
@@ -315,20 +327,36 @@ export function AppProvider({ children }) {
               return message;
             }
             const stageIndex = Number(message.escalationStageIndex || 0);
+            const runKey = String(message.rec?.hitl_run_id || message.rec?.case_id || message.id);
+            if (escalationInFlightRef.current.has(runKey)) {
+              return message;
+            }
             const escalation = message.rec?.decision_support?.approval_escalation;
             const step = activeEscalationStep(escalation, stageIndex, personaId);
             if (!step || remainingSeconds(step.escalates_at_utc, nowMs) !== 0) {
               return message;
             }
+            escalationInFlightRef.current.add(runKey);
             changed = true;
             const transferId = `${message.id}-escalation-${stageIndex + 1}`;
+            const target = step.to_persona_id;
+            const allowed = message.rec?.hitl_access?.allowed_personas || [];
+            const targetAccess = message.rec?.hitl_access
+              ? {
+                  ...message.rec.hitl_access,
+                  selected_persona: target,
+                  can_resolve: allowed.includes(target),
+                  mode: allowed.includes(target) ? 'actionable' : 'read_only',
+                }
+              : undefined;
             transfers.push({
-              target: step.to_persona_id,
+              target,
               message: {
                 id: transferId,
                 type: 'hitl_executor',
-                rec: message.rec,
+                rec: targetAccess ? { ...message.rec, hitl_access: targetAccess } : message.rec,
                 durable: true,
+                requestingPersona: message.requestingPersona || personaId,
                 escalationStageIndex: stageIndex + 1,
                 escalatedFrom: step.from_persona_name,
                 time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -340,7 +368,12 @@ export function AppProvider({ children }) {
               'Automatic escalation after approval deadline.',
               message.rec?.asset_id || '',
               message.rec?.conversation_id || null,
-            ).catch(() => {});
+              stageIndex + 1,
+            ).catch(() => {
+              // Keep the card actionable if the durable transfer failed; the
+              // next interval may retry after the transient error clears.
+              escalationInFlightRef.current.delete(runKey);
+            });
             // Keep the notification durable as well; the target persona will
             // hydrate the actual card from /api/pipeline/hitl/pending.
             postPersonaNotification(step.to_persona_id, {

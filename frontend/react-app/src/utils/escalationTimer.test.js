@@ -28,6 +28,15 @@ test('activeEscalationStep selects only active configured steps', () => {
   assert.equal(activeEscalationStep({ status: 'active', steps }, 4), null);
 });
 
+test('non-owner requester does not receive an escalation countdown', () => {
+  const steps = [
+    { from_persona_id: 'supervisor', to_persona_id: 'manager' },
+  ];
+  const escalation = { status: 'active', steps };
+  assert.equal(activeEscalationStep(escalation, 0, 'engineer'), null);
+  assert.deepEqual(activeEscalationStep(escalation, 0, 'supervisor'), steps[0]);
+});
+
 test('final authority never receives a countdown even with a stale stage index', () => {
   const steps = [
     { from_persona_id: 'supervisor', to_persona_id: 'manager' },

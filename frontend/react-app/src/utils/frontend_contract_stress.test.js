@@ -87,7 +87,11 @@ for (let i = 0; i < 140; i += 1) {
     ];
     const escalation = { status: mode === 0 ? 'active' : 'final_authority', steps };
     const actual = timer.activeEscalationStep(escalation, stage, persona);
-    if (mode !== 0 || stage > 1 || persona === 'executive') assert.equal(actual, null);
+    const owner = stage <= 1 ? steps[stage].from_persona_id : null;
+    // Only the persona currently owning the actionable card may run its
+    // countdown.  Requesters/read-only recipients must not auto-escalate a
+    // card they do not own.
+    if (mode !== 0 || stage > 1 || persona !== owner) assert.equal(actual, null);
     else assert.deepEqual(actual, steps[stage]);
   });
 }

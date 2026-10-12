@@ -29,6 +29,34 @@ def test_known_single_asset_chat_loads_registered_demo_evidence(client):
     assert data["persona"]=="engineer"
 
 
+def test_completed_asset_counterfactual_does_not_repeat_current_risk(client, monkeypatch):
+    monkeypatch.setattr(api, "_asset_lifecycle", lambda _asset: {
+        "status": "healthy", "work_order_id": "WO-CLOSED", "work_order_status": "Closed",
+    })
+    data = client.post("/api/chat", json={
+        "message": "What would have happened if I had rejected the work order for M-104?",
+        "persona": "supervisor", "conversation_id": "COUNTERFACTUAL-CLOSED-1",
+    }).json()
+    assert data["intent"] == "risk"
+    assert "If it had been rejected instead" in data["response"]
+    assert "pre-repair risk" in data["response"]
+    assert "Current status is healthy" in data["response"]
+    assert data["lifecycle"]["status"] == "healthy"
+    assert not data.get("hitl_required")
+
+
+def test_completed_asset_actions_are_not_presented_as_new_approval(client, monkeypatch):
+    monkeypatch.setattr(api, "_asset_lifecycle", lambda _asset: {
+        "status": "healthy", "work_order_id": "WO-CLOSED", "work_order_status": "Closed",
+    })
+    data = client.post("/api/chat", json={
+        "message": "What is the current status of M-104?",
+        "persona": "supervisor", "conversation_id": "HEALTHY-ACTIONS-1",
+    }).json()
+    assert any("was completed" in action for action in data["actions"])
+    assert all("Approve work order" not in action for action in data["actions"])
+
+
 @pytest.mark.parametrize("message,expected",[
     ("What is BPFO?","concept"),
     ("Define anomaly","concept"),
@@ -209,6 +237,139 @@ def test_forward_moves_durable_card_to_target_persona(client):
     assert target["hitl_payload"]["recommendation"]["asset_id"] == "AST_PMP_001"
 
 
+def test_non_authority_requester_gets_read_only_card_and_forwards_to_owner(client):
+    data = client.post("/api/chat", json={
+        "message": "Analyse P-207 completely", "persona": "engineer",
+        "conversation_id": "DURABLE-REQUESTER-HANDOFF-1",
+    }).json()
+    rec = data["recommendation"]
+    run_id = rec["hitl_run_id"]
+    assert rec["hitl_access"]["can_resolve"] is False
+    assert rec["hitl_access"]["owner_persona"] == "supervisor"
+    forwarded = client.post("/api/pipeline/hitl/forward", json={
+        "run_id": run_id, "gate": "execution",
+        "from_persona": "engineer", "to_persona": "supervisor",
+        "escalation_stage_index": 0,
+    })
+    assert forwarded.status_code == 200
+    owner_cards = client.get("/api/pipeline/hitl/pending", params={
+        "persona": "supervisor", "gate": "execution",
+    }).json()["items"]
+    owner_card = next(item for item in owner_cards if item["run_id"] == run_id)
+    assert owner_card["persona"] == "supervisor"
+    assert owner_card["hitl_payload"]["requesting_persona"] == "engineer"
+    assert owner_card["hitl_payload"]["escalation_stage_index"] == 0
+
+
+def test_escalation_forward_at_deadline_reopens_next_stage_and_blocks_loop(client):
+    data = client.post("/api/chat", json={
+        "message": "Analyse P-207 completely", "persona": "supervisor",
+        "conversation_id": "DURABLE-ESCALATION-1",
+    }).json()
+    run_id = data["recommendation"]["hitl_run_id"]
+    first = client.post("/api/pipeline/hitl/forward", json={
+        "run_id": run_id, "gate": "execution",
+        "from_persona": "supervisor", "to_persona": "manager",
+        "escalation_stage_index": 1,
+    })
+    assert first.status_code == 200
+    manager = client.get("/api/pipeline/hitl/pending", params={
+        "persona": "manager", "gate": "execution",
+    }).json()["items"]
+    card = next(item for item in manager if item["run_id"] == run_id)
+    assert card["hitl_payload"]["escalation_stage_index"] == 1
+    assert card["expires_at"] > __import__("time").time()
+
+    second = client.post("/api/pipeline/hitl/forward", json={
+        "run_id": run_id, "gate": "execution",
+        "from_persona": "manager", "to_persona": "executive",
+        "escalation_stage_index": 2,
+    })
+    assert second.status_code == 200
+    executive = client.get("/api/pipeline/hitl/pending", params={
+        "persona": "executive", "gate": "execution",
+    }).json()["items"]
+    assert any(item["run_id"] == run_id for item in executive)
+    loop = client.post("/api/pipeline/hitl/forward", json={
+        "run_id": run_id, "gate": "execution",
+        "from_persona": "executive", "to_persona": "supervisor",
+        "escalation_stage_index": 3,
+    })
+    assert loop.status_code == 422
+
+
+def test_stale_forward_from_previous_owner_is_rejected(client):
+    data = client.post("/api/chat", json={
+        "message": "Analyse P-207 completely", "persona": "supervisor",
+        "conversation_id": "DURABLE-STALE-FWD-1",
+    }).json()
+    run_id = data["recommendation"]["hitl_run_id"]
+    assert client.post("/api/pipeline/hitl/forward", json={
+        "run_id": run_id, "gate": "execution",
+        "from_persona": "supervisor", "to_persona": "manager",
+        "escalation_stage_index": 1,
+    }).status_code == 200
+    stale = client.post("/api/pipeline/hitl/forward", json={
+        "run_id": run_id, "gate": "execution",
+        "from_persona": "supervisor", "to_persona": "manager",
+        "escalation_stage_index": 1,
+    })
+    assert stale.status_code == 409
+
+
+def test_only_current_hitl_owner_can_resolve_forwarded_card(client):
+    data = client.post("/api/chat", json={
+        "message": "Analyse P-207 completely", "persona": "supervisor",
+        "conversation_id": "DURABLE-OWNER-1",
+    }).json()
+    run_id = data["recommendation"]["hitl_run_id"]
+    client.post("/api/pipeline/hitl/forward", json={
+        "run_id": run_id, "gate": "execution",
+        "from_persona": "supervisor", "to_persona": "manager",
+    })
+    denied = client.post("/api/executor/run", json={
+        "recommendation": data["recommendation"], "approved": True,
+        "persona": "supervisor",
+    })
+    assert denied.status_code == 403
+
+
+def test_existing_pending_card_is_idempotent_for_repeated_analysis(client):
+    first = client.post("/api/chat", json={
+        "message": "Analyse P-207 completely", "persona": "supervisor",
+        "conversation_id": "DURABLE-IDEMPOTENT-1",
+    }).json()
+    second = client.post("/api/chat", json={
+        "message": "Analyse P-207 completely", "persona": "supervisor",
+        "conversation_id": "DURABLE-IDEMPOTENT-1",
+    }).json()
+    assert second["recommendation"]["hitl_run_id"] == first["recommendation"]["hitl_run_id"]
+    pending = client.get("/api/pipeline/hitl/pending", params={
+        "persona": "supervisor", "gate": "execution",
+    }).json()["items"]
+    assert [item["run_id"] for item in pending].count(first["recommendation"]["hitl_run_id"]) == 1
+
+
+def test_healthy_lifecycle_cancels_obsolete_approval_card(client, monkeypatch):
+    first = client.post("/api/chat", json={
+        "message": "Analyse P-207 completely", "persona": "supervisor",
+        "conversation_id": "DURABLE-HEALTHY-SUPERSEDES-1",
+    }).json()
+    run_id = first["recommendation"]["hitl_run_id"]
+    monkeypatch.setattr(api, "_asset_lifecycle", lambda _asset: {
+        "status": "healthy", "work_order_id": "WO-COMPLETE",
+        "work_order_status": "Closed",
+    })
+    second = client.post("/api/chat", json={
+        "message": "Analyse P-207 completely", "persona": "supervisor",
+        "conversation_id": "DURABLE-HEALTHY-SUPERSEDES-1",
+    }).json()
+    assert second["recommendation"]["approval_required"] is False
+    assert not any(item["run_id"] == run_id for item in client.get(
+        "/api/pipeline/hitl/pending", params={"persona": "supervisor", "gate": "execution"}
+    ).json()["items"])
+
+
 def test_execution_approval_checks_selected_persona_before_payload(client):
     response=client.post("/api/executor/run",json={"recommendation":{},"approved":True,"persona":"executive"})
     assert response.status_code==403
@@ -282,3 +443,6 @@ def test_frontend_has_durable_forwarding_and_notification_hydration():
     assert "getNotifs" in context and "postPersonaNotification" in context
     assert "/api/pipeline/hitl/forward" in pipeline
     assert "/api/notifications" in pipeline
+    assert "escalationStageIndex + 1" in chat
+    assert "setResolved(false)" in chat
+    assert "pendingRunIds" in context

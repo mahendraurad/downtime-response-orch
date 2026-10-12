@@ -84,7 +84,7 @@ export async function getHITLStatus(runId, persona) {
   return resp.json();
 }
 
-export async function forwardHITL(runId, gate, fromPersona, toPersona, rationale = '', assetId = '', conversationId = null) {
+export async function forwardHITL(runId, gate, fromPersona, toPersona, rationale = '', assetId = '', conversationId = null, escalationStageIndex = null) {
   const resp = await authedFetch(`${API}/api/pipeline/hitl/forward`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -92,6 +92,7 @@ export async function forwardHITL(runId, gate, fromPersona, toPersona, rationale
       run_id: runId, gate, from_persona: fromPersona,
       to_persona: toPersona || null, rationale,
       asset_id: assetId || null, conversation_id: conversationId || null,
+      escalation_stage_index: escalationStageIndex == null ? null : Number(escalationStageIndex),
     }),
   });
   if (!resp.ok) await throwApiError(resp);

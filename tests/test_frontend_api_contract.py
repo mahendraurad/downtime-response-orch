@@ -156,7 +156,7 @@ def test_frontend_uses_backend_contracts_for_group_a():
     assert "approval_escalation" in chat
     assert "approval escalation countdown" in chat
     assert "escalationStageIndex" in chat
-    assert "target: step.to_persona_id" in app_context
+    assert "const target = step.to_persona_id" in app_context
     assert "activeEscalationStep(escalation, stageIndex, personaId)" in app_context
     assert "terminalPersonaId" in escalation_timer
     assert "normalizedPersonaId(personaId)" in escalation_timer

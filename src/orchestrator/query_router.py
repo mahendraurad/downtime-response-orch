@@ -77,7 +77,9 @@ _RULES = [
               "when will", "safely run", "safely operate",
               "can it run", "can.*run", "this week", "this month",
               "how many days", "how much time", "time left",
-              "critical", "run until", "wait until"),
+              "critical", "run until", "wait until",
+              "what would have happened", "what if", "if i had", "if we had",
+              "rejected", "approved", "deferred"),
      "risk", (1,2,3,4), False),
 
     # ── Fault identification → agents 1-3 ────────────────────────────────────

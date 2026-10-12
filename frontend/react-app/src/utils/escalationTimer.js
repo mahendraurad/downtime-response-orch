@@ -41,5 +41,15 @@ export function activeEscalationStep(escalation, stageIndex = 0, personaId = '')
       && normalizedPersonaId(personaId) === normalizedPersonaId(terminalPersonaId)) {
     return null;
   }
-  return escalation.steps[stageIndex] || null;
+  const step = escalation.steps[stageIndex] || null;
+  // A read-only requester may carry the same recommendation and escalation
+  // schedule, but the countdown belongs only to the currently assigned
+  // authority.  Without this guard a Reliability Engineer's inbox could
+  // auto-escalate directly to Manager while the Supervisor card was never
+  // activated.
+  if (step && personaId
+      && normalizedPersonaId(personaId) !== normalizedPersonaId(step.from_persona_id)) {
+    return null;
+  }
+  return step;
 }

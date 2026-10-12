@@ -128,15 +128,17 @@ test('live browser restores a durable executor card after refresh', { skip: !ena
   const { context, page } = await pageForLiveApp();
   try {
     const input = page.locator('textarea.cinptx');
-    await input.fill('Analyse P-207 completely');
+    // Keep this independent from the escalation test and from a previous
+    // local run that may already have transferred P-207 to Plant Manager.
+    await input.fill('Analyse C-315 completely');
     await page.locator('button.sbtn').click();
     await page.getByText('APPROVAL REQUIRED', { exact: false }).first()
       .waitFor({ state: 'visible', timeout: 30000 });
-    assert.match(await page.locator('.msgs').innerText(), /P-207|AST_PMP_001/);
+    assert.match(await page.locator('.msgs').innerText(), /C-315|AST_SYN_CON_315/);
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.getByText('APPROVAL REQUIRED', { exact: false }).first()
       .waitFor({ state: 'visible', timeout: 30000 });
-    assert.match(await page.locator('.msgs').innerText(), /P-207|AST_PMP_001/);
+    assert.match(await page.locator('.msgs').innerText(), /C-315|AST_SYN_CON_315/);
   } finally { await context.close(); }
 });
 

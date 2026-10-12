@@ -236,21 +236,45 @@ class SQLiteHITLRepository:
         # truth rather than browser sessionStorage.
         return [self._session_row(row, include_payload=True) for row in rows]
 
-    def forward(self, run_id: str, to_persona: str, metadata: Optional[dict] = None) -> bool:
-        """Transfer ownership of a pending card to the next persona."""
+    def forward(self, run_id: str, to_persona: str, metadata: Optional[dict] = None,
+                expires_at: Optional[float] = None) -> bool:
+        """Transfer ownership of a pending card to the next persona.
+
+        An escalation is normally triggered at the current card's deadline.
+        Therefore the old expiry must not be used as a prerequisite for the
+        hand-off, and the receiving stage needs its own deadline.  The API
+        computes that deadline from the configured escalation schedule and
+        passes it here atomically with the ownership transfer.
+        """
+        now = time.time()
         with closing(self._connect()) as db:
             row = db.execute("SELECT payload_json FROM hitl_sessions WHERE run_id=? "
-                             "AND status='pending' AND expires_at>?",
-                             (run_id, time.time())).fetchone()
+                             "AND status='pending'", (run_id,)).fetchone()
             if not row:
                 return False
             payload = deserialize_payload(row["payload_json"])
             for key, value in (metadata or {}).items():
-                payload.setdefault(key, value)
+                if value is not None:
+                    payload[key] = value
+            expiry = float(expires_at) if expires_at is not None else max(
+                float(payload.get("expires_at", 0) or 0), now + 1
+            )
             changed = db.execute(
-                "UPDATE hitl_sessions SET persona=?, payload_json=?, updated_at=? "
-                "WHERE run_id=? AND status='pending' AND expires_at>?",
-                (to_persona, serialize_payload(payload), time.time(), run_id, time.time()),
+                "UPDATE hitl_sessions SET persona=?, payload_json=?, expires_at=?, updated_at=? "
+                "WHERE run_id=? AND status='pending'",
+                (to_persona, serialize_payload(payload), expiry, now, run_id),
+            ).rowcount
+            db.commit()
+        return changed == 1
+
+    def cancel(self, run_id: str, reason: str = "") -> bool:
+        """Close an obsolete pending card without recording an operator decision."""
+        now = time.time()
+        with closing(self._connect()) as db:
+            changed = db.execute(
+                "UPDATE hitl_sessions SET status='cancelled', action=?, updated_at=? "
+                "WHERE run_id=? AND status='pending'",
+                (reason[:1000] or "cancelled", now, run_id),
             ).rowcount
             db.commit()
         return changed == 1
@@ -442,21 +466,38 @@ class PostgreSQLHITLRepository:
                 if row.get(key) is not None: row[key]=row[key].timestamp()
         return rows
 
-    def forward(self, run_id, to_persona, metadata=None):
+    def forward(self, run_id, to_persona, metadata=None, expires_at=None):
+        """Transfer a pending card and reset its receiving-stage deadline."""
+        now = time.time()
         with self._connect() as db:
             with db.cursor() as cursor:
                 cursor.execute("""SELECT payload_json FROM hitl_sessions
-                    WHERE run_id=%s AND status='pending' AND expires_at>NOW()
+                    WHERE run_id=%s AND status='pending'
                     FOR UPDATE""", (run_id,))
                 row = cursor.fetchone()
                 if not row:
                     return False
                 payload = deserialize_payload(row[0])
                 for key, value in (metadata or {}).items():
-                    payload.setdefault(key, value)
-                cursor.execute("""UPDATE hitl_sessions SET persona=%s,payload_json=%s,updated_at=NOW()
-                    WHERE run_id=%s AND status='pending' AND expires_at>NOW()""",
-                    (to_persona, serialize_payload(payload), run_id))
+                    if value is not None:
+                        payload[key] = value
+                expiry = float(expires_at) if expires_at is not None else now + 1
+                cursor.execute("""UPDATE hitl_sessions
+                    SET persona=%s,payload_json=%s,expires_at=to_timestamp(%s),updated_at=NOW()
+                    WHERE run_id=%s AND status='pending'""",
+                    (to_persona, serialize_payload(payload), expiry, run_id))
+                changed = cursor.rowcount
+            db.commit()
+        return changed == 1
+
+    def cancel(self, run_id, reason=""):
+        """Close an obsolete pending card without recording an operator decision."""
+        with self._connect() as db:
+            with db.cursor() as cursor:
+                cursor.execute("""UPDATE hitl_sessions
+                    SET status='cancelled',action=%s,updated_at=NOW()
+                    WHERE run_id=%s AND status='pending'""",
+                    (reason[:1000] or "cancelled", run_id))
                 changed = cursor.rowcount
             db.commit()
         return changed == 1
