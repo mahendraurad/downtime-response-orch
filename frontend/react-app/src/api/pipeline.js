@@ -140,6 +140,25 @@ export async function getNotifs(personaId) {
   return resp.json();
 }
 
+export function notificationText(msg = {}) {
+  const supplied = String(msg.message || msg.text || '').trim();
+  if (supplied) return supplied;
+  const html = String(msg.html || '');
+  if (!html) return 'A new DRO action requires your attention.';
+  return html
+    .replace(/<br\s*\/?\s*>/gi, ' ')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 2000) || 'A new DRO action requires your attention.';
+}
+
 export async function postPersonaNotification(personaId, msg = {}) {
   const resp = await authedFetch(`${API}/api/notifications`, {
     method: 'POST',
@@ -147,7 +166,10 @@ export async function postPersonaNotification(personaId, msg = {}) {
     body: JSON.stringify({
       persona_id: personaId,
       title: msg.title || 'DRO notification',
-      message: msg.message || msg.text || 'A new DRO action requires your attention.',
+      // Cross-persona cards historically supplied rich `html` only. Persist a
+      // readable summary as well so a refresh/different browser does not turn
+      // the hand-off or result into a generic, context-free notification.
+      message: notificationText(msg),
       notification_type: msg.type || 'agent',
       asset_id: msg.asset_id || msg.data?.asset_id || msg.rec?.asset_id || '',
       work_order_id: msg.work_order_id || msg.rec?.work_order_id || '',

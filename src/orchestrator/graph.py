@@ -732,6 +732,7 @@ def run_pipeline(raw_signal: Dict[str, Any], run_id: str = "",
       anomaly   → stop after Monitoring (anomaly yes/no)
       diagnosis → stop after Failure Intelligence (fault identified)
       risk      → stop after Predictive Risk (RUL / risk level)
+      decision_support → run through Prescriptive Optimisation without execution
       full      → run all agents through Knowledge (default)
     """
     import uuid

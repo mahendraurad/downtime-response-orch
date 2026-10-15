@@ -34,9 +34,20 @@ def build_asset_dashboard(asset_rows, scenario_mapping, telemetry_loader,
         validation_status = str(
             getattr(trusted, "validation_status", "UNKNOWN")
         ).split(".")[-1]
+        diagnosis_is_ambiguous = bool(
+            diagnosis is not None and (
+                getattr(diagnosis, "fault_mode", "") == "undetermined"
+                or float(getattr(diagnosis, "confidence", 1.0) or 0.0) < 0.60
+            )
+        )
         if risk is not None:
             status = (
-                "critical" if risk.risk_level in {"critical", "high"}
+                # A high analytical risk with an unconfirmed/low-confidence
+                # diagnosis is a warning requiring engineer review, not a
+                # confirmed critical fault. This keeps P-208 consistent across
+                # Registry, Chat and its diagnosis HITL workflow.
+                "warning" if diagnosis_is_ambiguous
+                else "critical" if risk.risk_level in {"critical", "high"}
                 else "warning" if risk.risk_level == "medium" else "healthy"
             )
             rul = f"{risk.rul_min_days}-{risk.rul_max_days} days"

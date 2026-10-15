@@ -25,6 +25,7 @@ globalThis.window = {
 const auth = await import('../api/auth.js');
 const sensors = await import('../api/sensors.js');
 const http = await import('../api/http.js');
+const pipeline = await import('../api/pipeline.js');
 
 function ok(body = {}) {
   return { ok: true, status: 200, async json() { return body; } };
@@ -51,6 +52,28 @@ async function withFetch(handler, fn) {
   };
   try { return await fn(calls); } finally { globalThis.fetch = previous; }
 }
+
+test('durable notification derives readable text from rich cross-persona HTML', async () => {
+  const html = '<div><strong>FORWARDED REQUEST — DIAGNOSIS RESOLVED</strong><br>'
+    + 'Reliability Engineer confirmed P-208 &amp; resumed risk assessment.</div>';
+  assert.equal(
+    pipeline.notificationText({ html }),
+    'FORWARDED REQUEST — DIAGNOSIS RESOLVED Reliability Engineer confirmed P-208 & resumed risk assessment.',
+  );
+  await withFetch(call => {
+    const body = JSON.parse(call.options.body);
+    assert.equal(body.persona_id, 'supervisor');
+    assert.match(body.message, /DIAGNOSIS RESOLVED.*P-208/);
+    return ok({ status: 'created' });
+  }, async () => pipeline.postPersonaNotification('supervisor', { type: 'agent', html }));
+});
+
+test('durable notification respects explicit plain-text message', () => {
+  assert.equal(
+    pipeline.notificationText({ message: 'Approval for M-104 escalated.' }),
+    'Approval for M-104 escalated.',
+  );
+});
 
 // 24 login cases: successful authentication preserves all server fields.
 const loginUsers = ['supervisor', 'engineer', 'maintenance', 'manager', 'executive', 'ot', 'safety', 'md'];
@@ -169,6 +192,8 @@ const wiringChecks = [
   ['context loads work orders from API', /fetchWorkOrders/],
   ['chat applies persisted asset lifecycle state', /dro-asset-status/],
   ['context polls backend work orders', /pollInterval/],
+  ['context retains backend notification results', /notificationText:\s*notificationText\(msg\)/],
+  ['context tracks each escalation stage independently', /escalationFlightKey/],
   ['persona definitions are data-driven', /Supervisor|Engineer|Maintenance|Manager|Executive|OT|Safety/],
 ];
 for (const [label, pattern] of wiringChecks) {

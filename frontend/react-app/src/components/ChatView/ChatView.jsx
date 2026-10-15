@@ -466,39 +466,6 @@ function generateChipsFromResponse(d, fallbackQp) {
   return fallbackQp;
 }
 
-function buildComparisonHtml(a1, a2, persona) {
-  const SP = { critical: 3, warning: 2, healthy: 1 };
-  const p1 = SP[a1.st] || 0, p2 = SP[a2.st] || 0;
-  const uColor = { critical: 'var(--rd)', warning: 'var(--am)', healthy: 'var(--gn)' };
-
-  const row = (label, v1, v2) => `<div style="display:grid;grid-template-columns:120px 1fr 1fr;gap:6px;padding:5px 0;border-bottom:1px solid var(--b);font-size:11.5px">` +
-    `<span style="color:var(--t3);font-weight:600">${label}</span>` +
-    `<span style="color:var(--t)">${v1 || '—'}</span>` +
-    `<span style="color:var(--t)">${v2 || '—'}</span></div>`;
-
-  let html = `<strong style="color:var(--t)">${a1.id} vs ${a2.id} — Fleet Comparison</strong><br><br>`;
-  html += `<div style="display:grid;grid-template-columns:120px 1fr 1fr;gap:6px;padding:4px 0;font-size:10px;font-weight:700;color:var(--t3);font-family:var(--m);border-bottom:2px solid var(--b)"><span></span><span>${a1.id}</span><span>${a2.id}</span></div>`;
-  html += row('Status', `<strong style="color:${uColor[a1.st]}">${(a1.st||'').toUpperCase()}</strong>`, `<strong style="color:${uColor[a2.st]}">${(a2.st||'').toUpperCase()}</strong>`);
-  html += row('RUL', a1.rul, a2.rul);
-  html += row('Vibration', a1.vib != null ? `${a1.vib} mm/s` : null, a2.vib != null ? `${a2.vib} mm/s` : null);
-  html += row('Temperature', a1.tmp != null ? `${a1.tmp}°C` : null, a2.tmp != null ? `${a2.tmp}°C` : null);
-  html += row('BPFO', a1.bpfo != null ? `${a1.bpfo}×` : null, a2.bpfo != null ? `${a2.bpfo}×` : null);
-
-  const f1 = a1.faults?.[0], f2 = a2.faults?.[0];
-  if (f1 || f2) html += row('Active fault', f1 ? `${f1.ty} (${f1.st})` : 'None', f2 ? `${f2.ty} (${f2.st})` : 'None');
-
-  html += `<br>`;
-  if (p1 !== p2) {
-    const primary = p1 > p2 ? a1 : a2;
-    html += `<strong>Verdict:</strong> <strong style="color:${uColor[primary.st]}">${primary.id}</strong> requires priority attention — ${primary.st} status`;
-    if (primary.rul) html += `, RUL ${primary.rul}`;
-    html += `. Run a full analysis to get an action plan.`;
-  } else {
-    html += `Both assets are at the same severity level. Run individual analyses for detailed recommendations.`;
-  }
-  return html;
-}
-
 export default function ChatView() {
   const { persona, messages, setMessages, addMessage, assets, workOrders, assetPipelineState, updateAssetPipelineState, updateAssetStatus } = useContext(AppContext);
   const { user } = useAuth();
@@ -732,18 +699,11 @@ export default function ChatView() {
 
     doThink(async () => {
       try {
-        // Intercept multi-asset comparison queries — answer from fleet state without backend
         const queryAssetIds = queryAssetIdsEarly;
-        if (queryAssetIds.length >= 2 && /\bcompare\b|\bvs\.?\b|\bversus\b|\bagainst\b|\bbetween\b/i.test(t)) {
-          const ca1 = (assets || []).find(a => a.id === queryAssetIds[0]);
-          const ca2 = (assets || []).find(a => a.id === queryAssetIds[1]);
-          if (ca1 && ca2) {
-            const cmpChips = buildDefaultChips(persona, assets || []);
-            setContextChips(cmpChips);
-            appendA(buildComparisonHtml(ca1, ca2, persona), ['fleet intelligence · comparison'], cmpChips, []);
-            return;
-          }
-        }
+        // Comparisons also go through /api/chat. Fleet state, unknown-asset
+        // qualification, evidence provenance and partial-result behavior are
+        // backend responsibilities; a browser-side answer can silently omit
+        // the third or an unregistered asset.
 
         // Session cache — resolve BEFORE calling backend so we never re-fire HITL gates
         // for assets that have already been actioned in this session.
@@ -2075,6 +2035,13 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
     const interval = window.setInterval(updateCountdown, 1000);
     return () => window.clearInterval(interval);
   }, [escalationStep?.escalates_at_utc, resolved, msg.escalationTriggered]);
+
+  // The cross-persona escalation worker updates the durable message object.
+  // Keep this component's local interaction state in sync so an expired
+  // owner's already-mounted card cannot retain live Approve/Reject buttons.
+  useEffect(() => {
+    if (msg.resolved || msg.escalationTriggered) setResolved(true);
+  }, [msg.resolved, msg.escalationTriggered]);
 
   async function handleForward() {
     // Try hitl_access first, then escalation chain as fallback

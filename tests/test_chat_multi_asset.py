@@ -137,6 +137,7 @@ def test_each_pipeline_log_entry_identifies_its_asset(client):
 def test_frontend_forwards_multi_asset_query_to_chat_api():
     source=Path("frontend/react-app/src/components/ChatView/ChatView.jsx").read_text(encoding="utf-8")
     assert "if (CHAT_KB[t])" not in source
+    assert "buildComparisonHtml" not in source
     assert "conversationId: conversationIdRef.current" in source
     assert '<div className="act-cards" style={{ display: \'none\' }}>' in source
 

@@ -2941,7 +2941,32 @@ def hitl_forward(req: HITLForwardRequest, user: Dict = Depends(get_current_user)
         else:
             escalation = getattr(ds, "approval_escalation", None) if ds is not None else None
             steps = list(getattr(escalation, "steps", None) or []) if escalation is not None else []
-        current_stage = int(payload.get("escalation_stage_index", 0) or 0)
+        stored_stage = payload.get("escalation_stage_index")
+        if stored_stage is None and steps:
+            # Backward compatibility for pending cards written before stage
+            # metadata was persisted. Infer ownership from the configured
+            # chain so a manager-owned card advances to the executive instead
+            # of being mistaken for the supervisor's stage and getting stuck.
+            assigned_persona = str(session.get("persona") or "")
+            initial_authority = (
+                escalation.get("current_persona_id") if isinstance(escalation, dict)
+                else getattr(escalation, "current_persona_id", None)
+            )
+            if assigned_persona == str(initial_authority or ""):
+                current_stage = 0
+            else:
+                current_stage = 0
+                for index, step in enumerate(steps):
+                    step_target = (
+                        step.get("to_persona_id", "") if isinstance(step, dict)
+                        else getattr(step, "to_persona_id", "")
+                    )
+                    if assigned_persona == str(step_target or ""):
+                        current_stage = index + 1
+                        break
+            payload["escalation_stage_index"] = current_stage
+        else:
+            current_stage = int(stored_stage or 0)
         if stage_index is None:
             stage_index = current_stage + 1
         stage_index = max(0, int(stage_index))
@@ -3506,6 +3531,33 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
             formatted = _apply_lifecycle_overlay(
                 formatted, lifecycle, asset_label, plan.intent
             )
+            # Persona formatters provide a broad role-oriented summary. For a
+            # narrowly worded RUL question, retain that evidence but lead with
+            # the requested RUL value so it cannot look identical to a cost or
+            # general risk answer (especially for executive personas).
+            if plan.intent == "risk" and re.search(
+                    r"\brul\b|remaining useful life", effective_message, re.IGNORECASE):
+                risk_result = state.get("risk_assessment")
+                if risk_result is not None and getattr(risk_result, "risk_eligible", False):
+                    rul_min = int(getattr(risk_result, "rul_min_days", 0) or 0)
+                    rul_max = int(getattr(risk_result, "rul_max_days", 0) or 0)
+                    probability = float(getattr(risk_result, "failure_probability", 0.0) or 0.0)
+                    lifecycle_status = str((lifecycle or {}).get("status", "")).lower()
+                    if lifecycle_status == "healthy":
+                        formatted["headline"] = (
+                            f"{asset_label} — Historical pre-repair RUL was "
+                            f"{rul_min}–{rul_max} days. Current status is healthy "
+                            "after completed maintenance."
+                        )
+                    else:
+                        formatted["headline"] = (
+                            f"{asset_label} — Validated RUL is {rul_min}–{rul_max} days."
+                        )
+                    formatted["details"] = [
+                        f"RUL window: {rul_min}–{rul_max} days",
+                        f"Failure probability: {probability:.0%}",
+                        *([f"Lifecycle status: {lifecycle_status}"] if lifecycle_status else []),
+                    ]
             counterfactual = _is_counterfactual_decision_question(effective_message)
             if counterfactual:
                 # Preserve the analytical headline as historical evidence in

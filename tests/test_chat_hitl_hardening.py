@@ -1,5 +1,6 @@
 """Backend wiring, follow-up, persona, HITL, and bounded Reflexion certification."""
 from pathlib import Path
+import time
 import pytest
 from fastapi.testclient import TestClient
 
@@ -27,6 +28,30 @@ def test_known_single_asset_chat_loads_registered_demo_evidence(client):
         "data_foundation","monitoring","failure_intelligence","predictive_risk",
     ]
     assert data["persona"]=="engineer"
+
+
+def test_cost_tradeoff_runs_decision_support_without_opening_execution_hitl(client):
+    cost = client.post("/api/chat", json={
+        "message": "What is the cost trade-off for M-104 - planned replacement now versus waiting?",
+        "persona": "executive", "conversation_id": "COST-FOCUS-1",
+    }).json()
+    rul = client.post("/api/chat", json={
+        "message": "What is the RUL of M-104?", "persona": "executive",
+        "conversation_id": "RUL-FOCUS-1",
+    }).json()
+
+    assert cost["intent"] == "decision_support"
+    assert [row["node"] for row in cost["pipeline_log"]] == [
+        "data_foundation", "monitoring", "failure_intelligence",
+        "predictive_risk", "knowledge", "prescriptive",
+    ]
+    support = cost["agent_outputs"]["recommendation"]["decision_support"]
+    assert support["cost_if_approved"] == 48000
+    assert support["cost_if_deferred"] == 2016000
+    assert not cost.get("hitl_required")
+    assert rul["intent"] == "risk"
+    assert "RUL" in rul["response"] and "0–7 days" in rul["response"]
+    assert (cost["response"], cost["details"]) != (rul["response"], rul["details"])
 
 
 def test_completed_asset_counterfactual_does_not_repeat_current_risk(client, monkeypatch):
@@ -298,6 +323,37 @@ def test_escalation_forward_at_deadline_reopens_next_stage_and_blocks_loop(clien
     assert loop.status_code == 422
 
 
+def test_escalation_recovers_stage_from_durable_owner_when_legacy_stage_is_missing(client):
+    data = client.post("/api/chat", json={
+        "message": "Analyse P-207 completely", "persona": "supervisor",
+        "conversation_id": "DURABLE-LEGACY-STAGE-1",
+    }).json()
+    run_id = data["recommendation"]["hitl_run_id"]
+    assert client.post("/api/pipeline/hitl/forward", json={
+        "run_id": run_id, "gate": "execution",
+        "from_persona": "supervisor", "to_persona": "manager",
+        "escalation_stage_index": 1,
+    }).status_code == 200
+
+    # Simulate a card persisted by the earlier schema, which transferred the
+    # owner but did not retain the numeric escalation stage.
+    session = api._HITL_REPOSITORY.get_session(run_id)
+    payload = session["payload"]
+    payload.pop("escalation_stage_index", None)
+    api._HITL_REPOSITORY.save_session(
+        run_id, "execution", "manager", payload, time.time(), time.time() + 300,
+    )
+
+    advanced = client.post("/api/pipeline/hitl/forward", json={
+        "run_id": run_id, "gate": "execution",
+        "from_persona": "manager", "to_persona": "executive",
+    })
+    assert advanced.status_code == 200
+    restored = api._HITL_REPOSITORY.get_session(run_id)
+    assert restored["persona"] == "executive"
+    assert restored["payload"]["escalation_stage_index"] == 2
+
+
 def test_stale_forward_from_previous_owner_is_rejected(client):
     data = client.post("/api/chat", json={
         "message": "Analyse P-207 completely", "persona": "supervisor",
@@ -371,8 +427,18 @@ def test_healthy_lifecycle_cancels_obsolete_approval_card(client, monkeypatch):
 
 
 def test_execution_approval_checks_selected_persona_before_payload(client):
-    response=client.post("/api/executor/run",json={"recommendation":{},"approved":True,"persona":"executive"})
+    response=client.post("/api/executor/run",json={"recommendation":{},"approved":True,"persona":"ot"})
     assert response.status_code==403
+
+
+def test_final_executive_authority_can_act_without_another_escalation(client):
+    response=client.post("/api/executor/run",json={
+        "recommendation":{},"approved":True,"persona":"executive",
+    })
+    # Executive is the configured terminal authority.  It must pass persona
+    # authorization and fail only because this deliberately empty payload is
+    # not a valid recommendation.
+    assert response.status_code != 403
 
 
 def test_reflexion_has_configured_iteration_bound():

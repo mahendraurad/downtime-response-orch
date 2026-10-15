@@ -121,6 +121,9 @@ def test_dashboard_asset_contract_is_backed_by_agent_pipeline(client):
     }
     assert all(required <= row.keys() for row in payload["assets"])
     assert all(row["pipeline_log"] for row in payload["assets"])
+    p208 = next(row for row in payload["assets"] if row["id"] == "P-208")
+    assert p208["status"] == "warning"
+    assert p208["faults"][0]["type"] == "undetermined"
 
 
 def test_dashboard_status_comes_from_durable_work_order_lifecycle(client, monkeypatch):

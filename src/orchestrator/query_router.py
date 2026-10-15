@@ -67,6 +67,13 @@ _RULES = [
                       "missing data", "impute", "imputation", "incomplete data"),
      "status", (1,), False),
 
+    # A planned-versus-deferred comparison needs Agent 6's configured
+    # decision-support costs, but it is not permission to execute work.
+    ("decision_support", ("cost trade-off", "cost tradeoff",
+                          "planned replacement", "planned intervention cost",
+                          "cost if approved", "cost if deferred"),
+     "decision_support", (1,2,3,4,5,6), False),
+
     # ── Risk / impact / timeline questions → agents 1-4 only ─────────────────
     # Covers: "production impact", "financial exposure", "can it run until",
     # "failure this week", "downtime cost", "safely operate", etc.

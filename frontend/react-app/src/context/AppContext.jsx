@@ -1,7 +1,7 @@
 import React, { createContext, useState, useCallback, useEffect, useRef } from 'react';
 import { ASSETS } from '../data/assets';
 import { WOS } from '../data/workOrders';
-import { getNotifCounts, getNotifs, getPendingHITL, postPersonaNotification, forwardHITL } from '../api/pipeline';
+import { getNotifCounts, getNotifs, getPendingHITL, postPersonaNotification, forwardHITL, notificationText } from '../api/pipeline';
 import { fetchDashboardAssets } from '../api/dashboard';
 import { fetchWorkOrders, patchWorkOrder } from '../api/workOrders';
 import { useAuth } from './AuthContext';
@@ -235,6 +235,10 @@ export function AppProvider({ children }) {
       const remote = (payload.notifications || []).map(item => ({
         id: `remote-${item.id}`,
         type: 'agent',
+        // Backend notifications must survive the concurrent chat-history
+        // restore that runs on a persona switch.
+        durable: true,
+        notificationText: String(item.message || '').trim(),
         html: `<strong>${escapeNotificationText(item.title || 'DRO notification')}</strong><br>${escapeNotificationText(item.message || '')}`,
         routes: ['notifications', item.type || 'agent'],
         chips: [],
@@ -244,7 +248,10 @@ export function AppProvider({ children }) {
       setMessagesMap(previous => {
         const current = previous[persona] || [];
         const known = new Set(current.map(message => message.id));
-        const additions = remote.filter(message => !known.has(message.id));
+        const knownNotificationText = new Set(current.map(message => message.notificationText).filter(Boolean));
+        const additions = remote.filter(message => (
+          !known.has(message.id) && !knownNotificationText.has(message.notificationText)
+        ));
         if (!additions.length) return previous;
         const next = {
           ...previous,
@@ -328,7 +335,11 @@ export function AppProvider({ children }) {
             }
             const stageIndex = Number(message.escalationStageIndex || 0);
             const runKey = String(message.rec?.hitl_run_id || message.rec?.case_id || message.id);
-            if (escalationInFlightRef.current.has(runKey)) {
+            // Track each escalation stage independently. Keeping only the
+            // run id here permanently blocked manager -> executive after the
+            // successful supervisor -> manager transfer.
+            const escalationFlightKey = `${runKey}:${stageIndex}`;
+            if (escalationInFlightRef.current.has(escalationFlightKey)) {
               return message;
             }
             const escalation = message.rec?.decision_support?.approval_escalation;
@@ -336,7 +347,7 @@ export function AppProvider({ children }) {
             if (!step || remainingSeconds(step.escalates_at_utc, nowMs) !== 0) {
               return message;
             }
-            escalationInFlightRef.current.add(runKey);
+            escalationInFlightRef.current.add(escalationFlightKey);
             changed = true;
             const transferId = `${message.id}-escalation-${stageIndex + 1}`;
             const target = step.to_persona_id;
@@ -372,7 +383,7 @@ export function AppProvider({ children }) {
             ).catch(() => {
               // Keep the card actionable if the durable transfer failed; the
               // next interval may retry after the transient error clears.
-              escalationInFlightRef.current.delete(runKey);
+              escalationInFlightRef.current.delete(escalationFlightKey);
             });
             // Keep the notification durable as well; the target persona will
             // hydrate the actual card from /api/pipeline/hitl/pending.
@@ -448,7 +459,15 @@ export function AppProvider({ children }) {
 
   // Push a message into a DIFFERENT persona's history (for cross-persona notifications)
   const pushNotification = useCallback((targetPersona, msg) => {
-    _update(targetPersona, prev => [...prev, msg]);
+    // Optimistically retain the message as backend-backed. This closes the
+    // race where the user switches persona before POST /api/notifications
+    // completes; ChatView's history restore must not erase the result card.
+    const durableMessage = {
+      ...msg,
+      durable: true,
+      notificationText: notificationText(msg),
+    };
+    _update(targetPersona, prev => [...prev, durableMessage]);
     // Only bump the badge if target is not already the active persona
     setLocalNotifCounts(prev => ({
       ...prev,

@@ -100,7 +100,8 @@ def route_after_knowledge(state: dict) -> str:
         # recommendation request, valid Agent 1-4 risk evidence must still
         # reach Agent 6 so the configured approval/HITL gate is not silently
         # skipped merely because the knowledge backend is unavailable.
-        if (_intent(state) in {"analysis", "execution", "recommendation"}
+        if (_intent(state) in {"analysis", "execution", "recommendation", "full",
+                               "decision_support"}
                 and getattr(state.get("risk_assessment"), "risk_eligible", False)):
             return "prescriptive"
         return END

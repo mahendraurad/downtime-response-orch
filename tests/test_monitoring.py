@@ -331,6 +331,19 @@ class TestMonitoringAgentCompletion(unittest.TestCase):
         self.assertEqual(result.status, "duplicate")
         self.assertFalse(os.path.exists(self.state_file))
 
+    def test_replayed_telemetry_id_is_idempotent_for_ewma_state(self):
+        trusted = self.trusted("borderline_fault", -1)
+        first = self.mon.assess(trusted)
+        first_state = Path(self.state_file).read_text(encoding="utf-8")
+        second = self.mon.assess(trusted)
+        second_state = Path(self.state_file).read_text(encoding="utf-8")
+        self.assertEqual(second.status, first.status)
+        if first.anomaly_event is not None:
+            self.assertEqual(second.anomaly_event.anomaly_score, first.anomaly_event.anomaly_score)
+            self.assertEqual(second.anomaly_event.triggered_features, first.anomaly_event.triggered_features)
+            self.assertEqual(second.anomaly_event.evidence["ewma"], first.anomaly_event.evidence["ewma"])
+        self.assertEqual(second_state, first_state)
+
     def test_out_of_order_does_not_update_state(self):
         trusted = self.trusted("outer_race_fault", -1)
         trusted.out_of_order = True
@@ -393,7 +406,9 @@ class TestMonitoringAgentCompletion(unittest.TestCase):
         self.cfg.min_consecutive_anomalies = 2
         mon = MonitoringAgent(self.cfg)
         first = mon.assess(self.trusted("outer_race_fault", -1))
-        second = mon.assess(self.trusted("outer_race_fault", -1))
+        second_input = self.trusted("outer_race_fault", -1)
+        second_input.raw.telemetry_id += "-NEXT"
+        second = mon.assess(second_input)
         self.assertEqual(first.status, "pending_alert")
         self.assertIsNone(first.anomaly_event)
         self.assertEqual(second.status, "anomaly")
@@ -405,7 +420,9 @@ class TestMonitoringAgentCompletion(unittest.TestCase):
         now = datetime(2026, 7, 17, 10, 0, tzinfo=timezone.utc)
         mon = MonitoringAgent(self.cfg, now_fn=lambda: now)
         first = mon.assess(self.trusted("outer_race_fault", -1))
-        second = mon.assess(self.trusted("outer_race_fault", -1))
+        second_input = self.trusted("outer_race_fault", -1)
+        second_input.raw.telemetry_id += "-NEXT"
+        second = mon.assess(second_input)
         self.assertEqual(first.status, "anomaly")
         self.assertEqual(second.status, "cooldown")
         self.assertIsNone(second.anomaly_event)

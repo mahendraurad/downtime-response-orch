@@ -307,6 +307,15 @@ class MonitoringAgent:
             def update_state(state):
                 namespace = state.setdefault("namespaces", {}).setdefault(state_version, {})
                 bearing_state = namespace.setdefault(raw.bearing_id, {}).setdefault(regime["label"], {})
+                # Replaying the same historian event (dashboard polling,
+                # retries, or duplicate delivery) must not advance the EWMA a
+                # second time. Agent 1's durable path marks duplicates, but
+                # read-only projections use process(), so keep a per-bearing
+                # idempotency marker with the computed EWMA evidence as well.
+                if (raw.telemetry_id
+                        and bearing_state.get("__last_telemetry_id") == raw.telemetry_id):
+                    cached = bearing_state.get("__last_result") or {}
+                    return dict(cached.get("details") or {}), list(cached.get("triggered") or [])
                 details, triggered_fields = {}, []
                 for field in cfg.ewma_signals:
                     value = getattr(raw, field, None)
@@ -325,6 +334,12 @@ class MonitoringAgent:
                     }
                     if abs(z) >= cfg.ewma_control_limit:
                         triggered_fields.append(field)
+                if raw.telemetry_id:
+                    bearing_state["__last_telemetry_id"] = raw.telemetry_id
+                    bearing_state["__last_result"] = {
+                        "details": details,
+                        "triggered": triggered_fields,
+                    }
                 return details, triggered_fields
 
             (ewma_per_signal, ewma_triggered), state_recovered = mutate_state(
@@ -453,18 +468,31 @@ class MonitoringAgent:
             slot = alerts.setdefault(trusted.raw.bearing_id, {}).setdefault(
                 regime_label, {"consecutive": 0, "last_emitted_epoch": None}
             )
+            telemetry_id = str(trusted.raw.telemetry_id or "")
+            if telemetry_id and slot.get("last_telemetry_id") == telemetry_id:
+                return bool(slot.get("last_allowed", True)), str(
+                    slot.get("last_status", "healthy")
+                )
             if not raw_anomaly:
                 slot["consecutive"] = 0
-                return True, "healthy"
-            slot["consecutive"] = int(slot.get("consecutive", 0)) + 1
-            if slot["consecutive"] < cfg.min_consecutive_anomalies:
-                return False, "pending_alert"
-            last = slot.get("last_emitted_epoch")
-            if last is not None and now_epoch - float(last) < cfg.alert_cooldown_seconds:
-                return False, "cooldown"
-            slot["last_emitted_epoch"] = now_epoch
-            slot["consecutive"] = 0
-            return True, "anomaly"
+                allowed, status = True, "healthy"
+            else:
+                slot["consecutive"] = int(slot.get("consecutive", 0)) + 1
+                if slot["consecutive"] < cfg.min_consecutive_anomalies:
+                    allowed, status = False, "pending_alert"
+                else:
+                    last = slot.get("last_emitted_epoch")
+                    if last is not None and now_epoch - float(last) < cfg.alert_cooldown_seconds:
+                        allowed, status = False, "cooldown"
+                    else:
+                        slot["last_emitted_epoch"] = now_epoch
+                        slot["consecutive"] = 0
+                        allowed, status = True, "anomaly"
+            if telemetry_id:
+                slot["last_telemetry_id"] = telemetry_id
+                slot["last_allowed"] = allowed
+                slot["last_status"] = status
+            return allowed, status
 
         (allowed, status), recovered = mutate_state(cfg.ewma_state_file, update)
         return allowed, status, recovered

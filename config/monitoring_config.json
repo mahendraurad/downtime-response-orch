@@ -61,7 +61,7 @@
   "_comment_prateek_added_start": "************** Added by Prateek Mittal on 17th July 2026 ****************** - Agent 2 state versioning, alert policy, and decision persistence.",
 
   "state": {
-    "namespace_version": "monitoring-state-v2"
+    "namespace_version": "monitoring-state-v3"
   },
 
   "alert_policy": {
