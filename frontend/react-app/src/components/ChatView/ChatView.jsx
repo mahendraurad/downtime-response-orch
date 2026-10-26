@@ -1954,6 +1954,7 @@ const REJECT_CODES = [
 
 function buildLearningHtml(lr) {
   const status = lr.learning_status || lr.status || 'unknown';
+  if (status === 'no_new_learning' || status === 'disabled') return '';
   const statusColors = { learned: '#10b981', duplicate: '#3b82f6', no_new_learning: '#6b7280', disabled: '#6b7280', failed: '#f59e0b', invalid_input: '#ef4444', persistence_failed: '#f59e0b' };
   const learningStatusLabels = { learned: 'NEW LEARNING STORED', duplicate: 'DUPLICATE - ALREADY KNOWN', no_new_learning: 'NO NEW LEARNING', disabled: 'LEARNING DISABLED', failed: 'STORAGE ERROR', invalid_input: 'INVALID INPUT - NOT STORED', persistence_failed: 'STORAGE ERROR' };
   const color = statusColors[status] || '#6b7280';
@@ -1982,7 +1983,7 @@ function buildLearningHtml(lr) {
   );
 
   return `<div style="border:1.5px solid ${color};border-radius:10px;padding:14px;background:rgba(59,130,246,0.03);margin-top:2px">`
-    + `<div style="font-size:9px;font-weight:700;color:${color};font-family:var(--m);margin-bottom:10px">PHASE 10 · LEARNING & MEMORY AGENT · ${label}</div>`
+    + `<div style="font-size:9px;font-weight:700;color:${color};font-family:var(--m);margin-bottom:10px">${label}</div>`
     + metaHtml
     + tagsHtml
     + (bodyText ? `<div style="font-size:11px;color:var(--t2);background:rgba(59,130,246,0.06);padding:9px 11px;border-radius:6px;border-left:2px solid ${color};line-height:1.6">${bodyText}</div>` : '')
@@ -2299,7 +2300,7 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
             )}
 
             {/* A4 — backend-scheduled approval escalation */}
-            {escalationStep && (
+            {escalationStep && !msg.escalationTriggered && (
               <div style={{ marginBottom: '10px', padding: '9px 11px', borderRadius: '7px', border: '1px solid rgba(249,115,22,.32)', background: 'rgba(249,115,22,.06)', display: 'flex', gap: '12px', alignItems: 'center', justifyContent: 'space-between' }}>
                 <div>
                   <div style={{ fontSize: '9px', color: '#f97316', fontFamily: 'var(--m)', fontWeight: 700, letterSpacing: '.7px', marginBottom: '3px' }}>AUTO-ESCALATION</div>
@@ -2311,7 +2312,7 @@ function HITLExecutorMsg({ msg, doThink, appendA, persona }) {
                   </div>
                 </div>
                 <div aria-label="approval escalation countdown" style={{ color: '#f97316', fontFamily: 'var(--m)', fontSize: '16px', fontWeight: 700, flexShrink: 0 }}>
-                  {escalationRemaining === 0 ? 'ESCALATING...' : formatCountdown(escalationRemaining)}
+                  {escalationRemaining === 0 ? 'ESCALATED' : formatCountdown(escalationRemaining)}
                 </div>
               </div>
             )}

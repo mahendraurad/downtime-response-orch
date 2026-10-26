@@ -35,11 +35,17 @@ class JSONLearnedCaseRepository:
         rows.sort(key=lambda row: str(row.get("created_at", "")), reverse=True)
         return [dict(row) for row in rows[:limit]]
     def search(self, query, top_k=5, minimum_score=0.15, **_):
-        terms = set(re.findall(r"[a-z0-9]+", str(query).lower()))
+        def _tokens(text):
+            words = re.findall(r"[a-z0-9]+", str(text).lower())
+            bigrams = {f"{words[i]}_{words[i+1]}" for i in range(len(words) - 1)}
+            return set(words) | bigrams
+        q_tokens = _tokens(query)
         hits = []
         for row in self._rows():
-            words = set(re.findall(r"[a-z0-9]+", (row.get("content", "") + " " + row.get("fault_mode", "")).lower()))
-            score = len(terms & words) / max(1, len(terms))
+            doc_tokens = _tokens(
+                row.get("content", "") + " " + row.get("fault_mode", "") + " " + " ".join(row.get("tags", []))
+            )
+            score = len(q_tokens & doc_tokens) / max(1, len(q_tokens))
             if score >= minimum_score:
                 hits.append({"source": f"Learned case {row['case_id']}", "text": row["content"],
                     "score": score, "fault_mode": row.get("fault_mode", ""),
@@ -60,6 +66,10 @@ class JSONLearnedCaseRepository:
             if fault_mode and not fault_match:
                 continue
             score = (0.7 if fault_match else 0.0) + (0.3 if asset_match else 0.0)
+            q_words = set(re.findall(r"[a-z0-9]+", (str(asset_id) + " " + str(fault_mode)).lower()))
+            tag_words = set(re.findall(r"[a-z0-9]+", " ".join(row.get("tags", [])).lower()))
+            if q_words and tag_words:
+                score += 0.1 * len(q_words & tag_words) / max(1, len(q_words))
             hits.append({
                 "case_id": str(row.get("case_id", "")),
                 "source": f"Learned case {row.get('case_id', '')}",
@@ -131,14 +141,17 @@ class PostgreSQLLearnedCaseRepository:
             where, args = "asset_id=%s", (asset_id,)
         return self._payload_rows(where, args)[:limit]
     def search(self, query, top_k=5, minimum_score=0.15, **_):
-        terms = set(re.findall(r"[a-z0-9]+", str(query).lower()))
+        def _tokens(text):
+            words = re.findall(r"[a-z0-9]+", str(text).lower())
+            bigrams = {f"{words[i]}_{words[i+1]}" for i in range(len(words) - 1)}
+            return set(words) | bigrams
+        q_tokens = _tokens(query)
         hits = []
         for row in self._payload_rows():
-            words = set(re.findall(
-                r"[a-z0-9]+",
-                (row.get("content", "") + " " + row.get("fault_mode", "")).lower(),
-            ))
-            score = len(terms & words) / max(1, len(terms))
+            doc_tokens = _tokens(
+                row.get("content", "") + " " + row.get("fault_mode", "") + " " + " ".join(row.get("tags", []))
+            )
+            score = len(q_tokens & doc_tokens) / max(1, len(q_tokens))
             if score >= minimum_score:
                 hits.append({"source": f"Learned case {row['case_id']}",
                     "text": row["content"], "score": score,
@@ -158,6 +171,10 @@ class PostgreSQLLearnedCaseRepository:
             if fault_mode and not fault_match:
                 continue
             score = (0.7 if fault_match else 0.0) + (0.3 if asset_match else 0.0)
+            q_words = set(re.findall(r"[a-z0-9]+", (str(asset_id) + " " + str(fault_mode)).lower()))
+            tag_words = set(re.findall(r"[a-z0-9]+", " ".join(row.get("tags", [])).lower()))
+            if q_words and tag_words:
+                score += 0.1 * len(q_words & tag_words) / max(1, len(q_words))
             hits.append({
                 "case_id": str(row.get("case_id", "")),
                 "source": f"Learned case {row.get('case_id', '')}",

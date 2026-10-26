@@ -813,6 +813,7 @@ def auth_me(user: Dict = Depends(get_current_user)):
 _WORKORDER_REPOSITORY = build_work_order_repository()
 _WORKORDERS: List[Dict] = []
 _WO_INDEX: Dict[str, Dict] = {}
+_EXECUTION_STORE: Dict[str, dict] = {}
 
 # In-memory HITL session store — keyed by run_id, holds partial pipeline state
 _HITL_STORE: Dict[str, Dict[str, Any]] = {}
@@ -1942,6 +1943,8 @@ class WOUpdateRequest(BaseModel):
     ]] = None
     free_text: str = ""
     persona: Optional[Persona] = None
+    post_repair_vib_mm_s: float = 0.0
+    post_repair_temp_c: float = 0.0
 
 
 class ExecutorRunRequest(BaseModel):
@@ -2280,11 +2283,13 @@ def hitl_remediation(req: HITLRemediationRequest, user: Dict = Depends(get_curre
         from src.tools.remediation import remediate
         from src.tools.config_loader import load_config as _load_dfa
         from src.orchestrator.graph import _get_agents
+        from src.tools.curated_store import curated_row, upsert_curated
         dfa, *_ = _get_agents()
         dfa_cfg = _load_dfa()
         trusted = remediate(trusted, "IMPUTE", dfa, dfa_cfg)
         if trusted is None:
             raise HTTPException(400, "No imputable fields available — cannot impute.")
+        upsert_curated([curated_row(trusted)])
 
     # KEEP or successfully IMPUTEd: resume pipeline from monitoring
     from src.orchestrator.graph import run_from_trusted_signal
@@ -2777,6 +2782,7 @@ def executor_run(req: ExecutorRunRequest, user: Dict = Depends(get_current_user)
             _learning_agent().record_approval(
                 rec.case_id, rec.asset_id, rec.condition.fault_type
             )
+            _EXECUTION_STORE[rec.case_id] = result.model_dump()
             # Bridge HITL-approved WOs into the work-order store so the frontend
             # picks them up via the /api/workorders poll.
             wo_id = result.work_order_id
@@ -3313,6 +3319,22 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
                 "row_index": -1,
                 "evidence_source": "registered_demo_scenario",
             })
+    # Overlay any previously-imputed fields so follow-up chat queries reflect
+    # the HITL IMPUTE decision rather than the original null/missing raw value.
+    if signal is not None and signal.get("asset_id"):
+        try:
+            from src.tools.data_loader import load_curated_signals
+            _curated = load_curated_signals(
+                remediation_action="IMPUTE", asset_id=signal["asset_id"]
+            )
+            if _curated:
+                _latest_curated = _curated[-1]
+                for _imputed_field in (_latest_curated.get("imputed_fields") or []):
+                    if _latest_curated.get(_imputed_field) is not None:
+                        signal[_imputed_field] = _latest_curated[_imputed_field]
+        except Exception:
+            pass
+
     effective_message=req.message
     if pending and (incoming or explicit_asset or scenario or context.get("timeframe")):
         effective_message=context["_pending_message"]
@@ -3593,15 +3615,19 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
                     f"Recommended actions: {'; '.join(formatted.get('actions', []))}"
                 ),
             }
-            # LLM synthesis: convert structured pipeline results into a direct answer
-            # Never let conversational synthesis fill gaps when the pipeline
-            # stopped before a valid risk result. An incomplete run must remain
-            # explicit rather than being rewritten as an asset conclusion.
+            # LLM synthesis: convert structured pipeline results into a direct answer.
+            # Run synthesis when the pipeline returned a valid trusted signal OR a full
+            # risk result — but not when both are absent (empty/incomplete pipeline).
+            # Full-analysis broad queries ("Analyse X") are excluded so they keep their
+            # structured card format; synthesis only runs for targeted questions.
             _risk_ready = bool(
                 state.get("risk_assessment")
                 and getattr(state.get("risk_assessment"), "risk_eligible", False)
             )
-            if not counterfactual and _CHAT_LLM.is_configured() and _risk_ready:
+            _signal_ready = bool(state.get("trusted_signal"))
+            _is_targeted_query = plan.pipeline_intent != "full"
+            _synthesis_eligible = _risk_ready or (_signal_ready and _is_targeted_query)
+            if not counterfactual and _CHAT_LLM.is_configured() and _synthesis_eligible:
                 try:
                     _pipe_summary=(
                         f"Headline: {_pipeline_headline}\n"
@@ -3619,12 +3645,36 @@ def chat(req: ChatRequest, user: Dict = Depends(get_current_user)):
                             + ". Never describe a completed work order as an active "
                             "critical condition; label pipeline measurements as pre-repair."
                         )
+                    _lma_context = ""
+                    try:
+                        _asset_id_for_lma = signal.get("asset_id", "") if isinstance(signal, dict) else ""
+                        _fault_mode_for_lma = str(getattr(state.get("fault_diagnosis"), "fault_mode", "") or "")
+                        if _asset_id_for_lma:
+                            _lma_agent = _learning_agent()
+                            _rejections = _lma_agent.recent_rejections(2, asset_id=_asset_id_for_lma)
+                            _cases = _lma_agent.matching_cases(_asset_id_for_lma, _fault_mode_for_lma, 2) if _fault_mode_for_lma else []
+                            _lma_lines = []
+                            for r in _rejections:
+                                lesson = str(r.get("lesson") or r.get("free_text") or "")
+                                if lesson:
+                                    _lma_lines.append(f"Prior rejection ({r.get('fault_mode','')}): {lesson}")
+                            for c in _cases:
+                                outcome = str(c.get("outcome") or c.get("content") or "")
+                                if outcome:
+                                    _lma_lines.append(f"Past case ({c.get('fault_mode','')}): {outcome}")
+                            if _lma_lines:
+                                _lma_context = "\n\nAgent 8 memory:\n" + "\n".join(_lma_lines[:3])
+                    except Exception:
+                        pass
+                    _pipe_summary = _pipe_summary + _lma_context
                     _synth=_CHAT_LLM.complete_json(
                         system_prompt=(
                             "You are the DRO plant-maintenance assistant. "
                             "Use ONLY the pipeline data provided to answer the user's question directly. "
-                            "If the question is yes/no, start with YES or NO. "
-                            "Write 3-4 connected prose sentences — not a list of measurements. "
+                            "If the question is yes/no, answer directly in the first sentence (e.g. 'This motor can wait...' or 'This motor should not be deferred...') without a standalone YES or NO prefix. "
+                            "Match answer length to the question: 1 sentence for simple factual questions (a single reading or value), "
+                            "2-3 sentences for operational judgment questions. Never pad a simple factual answer with extra context. "
+                            "If Agent 8 memory is provided, cite relevant past learnings or rejections briefly when answering. "
                             "IMPORTANT: do not mention any value that is exactly 0, '0–0', '0%', or '$0' — "
                             "these mean the agent did not run and the figure is unavailable. "
                             "Imputed or baseline values ARE valid — report them and note '(imputed from baseline)' if relevant. "
@@ -3786,6 +3836,31 @@ def update_workorder(wo_id: str, req: WOUpdateRequest):
             wo["rejection_reason"] = free_text
             wo["rejected_at"] = decision_at
             wo["agent8_learning"] = learning
+        if str(req.status).strip().lower() == "completed" and previous_status not in {"completed", "completion"}:
+            from src.schemas.feedback import FeedbackEvent
+            from src.schemas.execution import ExecutionResult as _ExecResult
+            _case_id = str(wo.get("case_id") or wo_id).strip()
+            _stored_exec = _EXECUTION_STORE.get(_case_id)
+            if _stored_exec:
+                try:
+                    exec_result = _ExecResult(**_stored_exec)
+                    feedback = FeedbackEvent(
+                        case_id=_case_id,
+                        asset_id=str(wo.get("asset_id") or wo.get("asset_display") or "").strip(),
+                        bearing_id=str(wo.get("bearing_id") or "").strip(),
+                        confirmed_fault_mode=str(wo.get("fault_mode") or "unknown").strip(),
+                        root_cause=str(req.free_text or "maintenance completed").strip(),
+                        action_taken=str(wo.get("title") or exec_result.action_taken or "").strip(),
+                        recommendation_followed=True,
+                        technician_notes=str(req.free_text or "").strip(),
+                        post_repair_vib_mm_s=float(req.post_repair_vib_mm_s or 0.0),
+                        post_repair_temp_c=float(req.post_repair_temp_c or 0.0),
+                        closed_at=decision_at,
+                    )
+                    lma_result = _learning_agent().process(exec_result, feedback)
+                    wo["agent8_learning"] = lma_result.model_dump()
+                except Exception as exc:
+                    wo["agent8_learning"] = {"status": "persistence_failed", "reason": str(exc)}
     if req.assigned_to:
         wo["assigned_to"] = req.assigned_to
     if req.checklist_index is not None and req.checklist_done is not None:
@@ -3793,6 +3868,56 @@ def update_workorder(wo_id: str, req: WOUpdateRequest):
         if 0 <= req.checklist_index < len(checklist):
             checklist[req.checklist_index]["done"] = req.checklist_done
     return _save_workorder(wo)
+
+
+class LearningFeedbackRequest(BaseModel):
+    wo_id: str = ""
+    case_id: str = ""
+    asset_id: str = ""
+    bearing_id: str = ""
+    confirmed_fault_mode: str = ""
+    root_cause: str = ""
+    action_taken: str = ""
+    recommendation_followed: bool = True
+    post_repair_vib_mm_s: float = 0.0
+    post_repair_temp_c: float = 0.0
+    technician_notes: str = ""
+    persona: str = "maintenance"
+
+
+@app.post("/api/pipeline/learning/feedback")
+def submit_learning_feedback(req: LearningFeedbackRequest, user: Dict = Depends(get_current_user)):
+    from src.schemas.feedback import FeedbackEvent
+    from src.schemas.execution import ExecutionResult as _ExecResult
+    case_id = (req.case_id or req.wo_id).strip()
+    if not case_id:
+        raise HTTPException(422, "case_id or wo_id is required.")
+    stored_exec = _EXECUTION_STORE.get(case_id)
+    if stored_exec is None:
+        wo = _get_workorder(req.wo_id) if req.wo_id else None
+        stored_case_id = str((wo or {}).get("case_id") or case_id)
+        stored_exec = _EXECUTION_STORE.get(stored_case_id)
+    if stored_exec is None:
+        stored_exec = {"case_id": case_id, "status": "success", "action_taken": req.action_taken}
+    try:
+        exec_result = _ExecResult(**stored_exec)
+        feedback = FeedbackEvent(
+            case_id=case_id,
+            asset_id=req.asset_id.strip(),
+            bearing_id=req.bearing_id.strip(),
+            confirmed_fault_mode=req.confirmed_fault_mode.strip(),
+            root_cause=req.root_cause.strip(),
+            action_taken=req.action_taken.strip(),
+            recommendation_followed=req.recommendation_followed,
+            technician_notes=req.technician_notes.strip(),
+            post_repair_vib_mm_s=req.post_repair_vib_mm_s,
+            post_repair_temp_c=req.post_repair_temp_c,
+            closed_at=datetime.now(timezone.utc).isoformat(),
+        )
+        result = _learning_agent().process(exec_result, feedback)
+        return result.model_dump()
+    except Exception as exc:
+        raise HTTPException(500, f"Learning feedback failed: {exc}") from exc
 
 
 # ── WebSocket: live sensor stream ─────────────────────────────────────────────
